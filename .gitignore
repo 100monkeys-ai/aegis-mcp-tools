@@ -1,0 +1,72 @@
+# Ignore Python artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Ignore Node.js artifacts
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Ignore build outputs
+*.o
+*.a
+*.lib
+*.dll
+*.exe
+*.out
+*.app
+
+# Ignore IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Ignore test artifacts
+.coverage
+htmlcov/
+.pytest_cache/
+.tox/
+.hypothesis/
+
+# Ignore environment files
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+*.crt
+
+# Ignore logs
+*.log
+logs/
+
+# Ignore temporary files
+tmp/
+temp/
+*.tmp
+
+# Ignore OS files
+Thumbs.db
+Desktop.ini
