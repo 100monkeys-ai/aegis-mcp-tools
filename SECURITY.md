@@ -248,7 +248,7 @@ Subscribe to security advisories:
 
 - **GitHub**: Watch this repo for security alerts
 - **Email**: Subscribe at security@aegis.dev
-- **RSS**: https://github.com/aent-ai/aegis-mcp-tools/security/advisories
+- **RSS**: https://github.com/100monkeys-ai/aegis-mcp-tools/security/advisories
 
 ## Compliance
 

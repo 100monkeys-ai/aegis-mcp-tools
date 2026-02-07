@@ -225,7 +225,7 @@ aegis tools install filesystem web-search gmail
 ### From Source
 
 ```bash
-git clone https://github.com/aent-ai/aegis-mcp-tools.git
+git clone https://github.com/100monkeys-ai/aegis-mcp-tools.git
 cd aegis-mcp-tools
 aegis tools install --local ./tools
 ```
@@ -274,7 +274,7 @@ Business Source License 1.1 - See [LICENSE](LICENSE) for details.
 
 ## 🔗 Links
 
-- **Main Repository**: [github.com/aent-ai/aegis-orchestrator](https://github.com/aent-ai/aegis-orchestrator)
+- **Main Repository**: [github.com/100monkeys-ai/aegis-orchestrator](https://github.com/100monkeys-ai/aegis-orchestrator)
 - **Documentation**: [docs.aegis.dev](https://docs.aegis.dev)
 - **MCP Specification**: [modelcontextprotocol.io](https://modelcontextprotocol.io)
 - **Security Policy**: [SECURITY.md](SECURITY.md)
