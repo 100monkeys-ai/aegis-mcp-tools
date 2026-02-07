@@ -27,7 +27,7 @@ This Code of Conduct applies within all community spaces.
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
 reported to the community leaders responsible for enforcement at
-security@aegis.dev.
+<security@100monkeys.ai>.
 
 ## Attribution
 

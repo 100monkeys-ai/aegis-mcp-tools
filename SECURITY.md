@@ -23,7 +23,7 @@ AEGIS MCP Tools is designed to address the "Supply Chain Risk" identified in Ope
 
 ### Trust Boundaries
 
-```
+```markdown
 ┌─────────────────────────────────────────┐
 │         AEGIS Orchestrator              │
 │         (Trusted Runtime)               │
@@ -137,7 +137,7 @@ logger.info(f"Using key: {api_key}")
 
 ### Reporting Process
 
-1. **Email**: security@aegis.dev (PGP key below)
+1. **Email**: <security@100monkeys.ai> (PGP key below)
 2. **Subject**: `[SECURITY] Brief description`
 3. **Include**:
    - Tool name and version
@@ -170,9 +170,9 @@ Current security reviewers:
 
 ## PGP Key
 
-```
+```bash
 -----BEGIN PGP PUBLIC KEY BLOCK-----
-[PGP key for security@aegis.dev]
+[PGP key for security@100monkeys.ai]
 -----END PGP PUBLIC KEY BLOCK-----
 ```
 
@@ -205,6 +205,7 @@ We recognize and reward security researchers:
 For contributors adding new tools:
 
 ### Input Handling
+
 - [ ] All inputs validated with strict schemas
 - [ ] Path traversal prevented
 - [ ] SQL injection prevented (if applicable)
@@ -212,6 +213,7 @@ For contributors adding new tools:
 - [ ] XXE attacks prevented (XML parsing)
 
 ### Network Security
+
 - [ ] TLS/SSL required for all connections
 - [ ] Certificate validation enforced
 - [ ] Allowlist configured (no wildcards)
@@ -219,24 +221,28 @@ For contributors adding new tools:
 - [ ] Rate limiting implemented
 
 ### Filesystem Security
+
 - [ ] Chroot jail or equivalent
 - [ ] Symlink attacks prevented
 - [ ] File size limits enforced
 - [ ] Sensitive paths blacklisted
 
 ### Resource Management
+
 - [ ] Memory limits enforced
 - [ ] CPU limits enforced
 - [ ] Execution timeout configured
 - [ ] Connection pooling with limits
 
 ### Error Handling
+
 - [ ] Errors don't leak paths
 - [ ] Errors don't leak credentials
 - [ ] Stack traces sanitized
 - [ ] Generic error messages to users
 
 ### Logging
+
 - [ ] All operations logged
 - [ ] Secrets redacted
 - [ ] Structured logging used
@@ -247,8 +253,7 @@ For contributors adding new tools:
 Subscribe to security advisories:
 
 - **GitHub**: Watch this repo for security alerts
-- **Email**: Subscribe at security@aegis.dev
-- **RSS**: https://github.com/100monkeys-ai/aegis-mcp-tools/security/advisories
+- **Email**: Subscribe at <security@100monkeys.ai>
 
 ## Compliance
 

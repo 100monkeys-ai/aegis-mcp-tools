@@ -25,7 +25,7 @@ git checkout -b tool/my-new-tool
 
 ### 3. Implement Your Tool
 
-```
+```markdown
 tools/my-tool/
 ├── schema.json          # MCP schema definition
 ├── server.py            # Implementation (Python or TypeScript)
@@ -124,17 +124,20 @@ Before submitting, ensure:
 ## Code Style
 
 ### Python
+
 - Follow PEP 8
 - Use type hints
 - Maximum line length: 100 characters
 - Use `black` for formatting
 
 ### TypeScript
+
 - Follow Airbnb style guide
 - Strict TypeScript (`strict: true`)
 - Use Prettier for formatting
 
 ### Documentation
+
 - All public functions must have docstrings
 - Include usage examples
 - Document security considerations
@@ -142,17 +145,23 @@ Before submitting, ensure:
 ## Tool Categories
 
 ### Core Tools
+
 System-level tools (filesystem, shell, http)
+
 - Require 2+ maintainer approvals
 - Extensive security review
 
 ### Integration Tools
+
 Third-party API integrations (Gmail, Slack, GitHub)
+
 - Require OAuth2/API key handling review
 - Rate limiting mandatory
 
 ### Utility Tools
+
 Helper functions and wrappers
+
 - Standard review process
 
 ## Release Process
@@ -166,7 +175,7 @@ Helper functions and wrappers
 
 - **Discord**: [discord.gg/aegis](https://discord.gg/aegis)
 - **Discussions**: Use GitHub Discussions
-- **Email**: community@aegis.dev
+- **Email**: <community@100monkeys.ai>
 
 ## License
 

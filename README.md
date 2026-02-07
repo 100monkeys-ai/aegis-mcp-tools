@@ -252,7 +252,7 @@ We welcome contributions of new tools, but all submissions must pass security re
 
 Found a security vulnerability? Please **DO NOT** open a public issue.
 
-Email: <security@aegis.dev> (PGP key available)
+Email: <security@100monkeys.ai> (PGP key available)
 
 See [SECURITY.md](SECURITY.md) for our responsible disclosure policy.
 
@@ -275,7 +275,7 @@ Business Source License 1.1 - See [LICENSE](LICENSE) for details.
 ## 🔗 Links
 
 - **Main Repository**: [github.com/100monkeys-ai/aegis-orchestrator](https://github.com/100monkeys-ai/aegis-orchestrator)
-- **Documentation**: [docs.aegis.dev](https://docs.aegis.dev)
+- **Documentation**: [docs.100monkeys.ai](https://docs.100monkeys.ai)
 - **MCP Specification**: [modelcontextprotocol.io](https://modelcontextprotocol.io)
 - **Security Policy**: [SECURITY.md](SECURITY.md)
 
