@@ -1,6 +1,6 @@
 # AEGIS MCP Tools
 
-[![License](https://img.shields.io/badge/license-BSL%201.1-blue.svg)](LICENSE)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 > **Curated, security-hardened Model Context Protocol (MCP) tool implementations for AEGIS**
 
@@ -270,7 +270,7 @@ See [SECURITY.md](SECURITY.md) for our responsible disclosure policy.
 
 ## 📜 License
 
-Business Source License 1.1 - See [LICENSE](LICENSE) for details.
+MIT License - See [LICENSE](LICENSE) for details.
 
 ## 🔗 Links
 
