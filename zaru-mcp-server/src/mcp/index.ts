@@ -86,7 +86,7 @@ export async function handleMcpRequest(req: ZaruRequest, res: Response) {
             };
 
             // 3. Forward to AEGIS Orchestrator HTTP endpoint
-            const aegisUrl = process.env.AEGIS_ORCHESTRATOR_URL || 'http://localhost:8000';
+            const aegisUrl = process.env.AEGIS_ORCHESTRATOR_URL || 'http://localhost:8088';
             const aegisRes = await fetch(`${aegisUrl}/v1/smcp/invoke`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -158,7 +158,7 @@ async function attestSession(user: { userId: string, tier: string }) {
         security_context: user.tier === 'default' ? 'zaru-free' : user.tier,
     };
 
-    const aegisUrl = process.env.AEGIS_ORCHESTRATOR_URL || 'http://localhost:8000';
+    const aegisUrl = process.env.AEGIS_ORCHESTRATOR_URL || 'http://localhost:8088';
     const attestRes = await fetch(`${aegisUrl}/v1/smcp/attest`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

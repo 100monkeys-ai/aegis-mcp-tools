@@ -48,7 +48,7 @@ DEV_JWT_SECRET=your_local_secret
 
 # The URL of the AEGIS Orchestrator HTTP endpoint 
 # (Should point to where AEGIS exposes /v1/smcp/...)
-AEGIS_ORCHESTRATOR_URL=http://localhost:8000
+AEGIS_ORCHESTRATOR_URL=http://localhost:8088
 
 # Set to "true" to bypass LibreChat JWT authentication entirely (for local testing only)
 BYPASS_AUTH=false
