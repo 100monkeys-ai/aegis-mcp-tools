@@ -1,6 +1,8 @@
 import { ZaruRequest } from '../middleware/auth.js';
 import { Response } from 'express';
 import { generateKeyPairSync, sign } from 'crypto';
+import * as fs from 'fs/promises';
+import * as path from 'path';
 
 // Store active SMCP sessions mapped by LibreChat User ID
 const smcpSessions = new Map<string, {
@@ -53,6 +55,39 @@ export async function handleMcpRequest(req: ZaruRequest, res: Response) {
                             },
                             required: ["prompt"]
                         }
+                    },
+                    {
+                        name: "aegis.search_docs",
+                        description: "Search 100monkeys and AEGIS documentation filenames and contents (simple grep).",
+                        inputSchema: {
+                            type: "object",
+                            properties: {
+                                query: { type: "string" }
+                            },
+                            required: ["query"]
+                        }
+                    },
+                    {
+                        name: "aegis.read_doc",
+                        description: "Read a specific documentation page.",
+                        inputSchema: {
+                            type: "object",
+                            properties: {
+                                path: { type: "string", description: "Path to the documentation file relative to the docs root. e.g. components/agent.mdx" }
+                            },
+                            required: ["path"]
+                        }
+                    },
+                    {
+                        name: "aegis.read_schema",
+                        description: "Read ADRs, specifications, or schema files.",
+                        inputSchema: {
+                            type: "object",
+                            properties: {
+                                path: { type: "string", description: "Path to the schema/ADR file relative to architecture repo root. e.g. AGENTS.md or adrs/001-bsl.md" }
+                            },
+                            required: ["path"]
+                        }
                     }
                 ]
             };
@@ -61,54 +96,110 @@ export async function handleMcpRequest(req: ZaruRequest, res: Response) {
             const toolName = params.name;
             const args = params.arguments || {};
 
-            // 1. Ensure SMCP Session
-            let session = smcpSessions.get(user.userId);
-            if (!session) {
-                session = await attestSession(user);
-                smcpSessions.set(user.userId, session);
+            if (toolName === 'aegis.read_doc' || toolName === 'aegis.read_schema') {
+                const baseDir = toolName === 'aegis.read_doc' ? '/app/docs' : '/app/architecture';
+                const requestedPath = args.path || '';
+                const resolvedPath = path.resolve(baseDir, requestedPath);
+
+                if (!resolvedPath.startsWith(baseDir)) {
+                    throw new Error("Path traversal detected.");
+                }
+
+                try {
+                    const content = await fs.readFile(resolvedPath, 'utf-8');
+                    result = {
+                        content: [{ type: "text", text: content }],
+                        isError: false
+                    };
+                } catch (err: any) {
+                    result = {
+                        content: [{ type: "text", text: `Error reading file: ${err.message}` }],
+                        isError: true
+                    };
+                }
+            } else if (toolName === 'aegis.search_docs') {
+                const query = args.query || '';
+                const baseDir = '/app/docs';
+                // Very basic search simulation without child_process for security
+                // Look for files in top directories
+                try {
+                    const searchResults: string[] = [];
+                    const walkDir = async (dir: string) => {
+                        const files = await fs.readdir(dir);
+                        for (const file of files) {
+                            const fullPath = path.join(dir, file);
+                            const stat = await fs.stat(fullPath);
+                            if (stat.isDirectory()) {
+                                await walkDir(fullPath);
+                            } else if (fullPath.endsWith('.md') || fullPath.endsWith('.mdx')) {
+                                const content = await fs.readFile(fullPath, 'utf-8');
+                                if (content.toLowerCase().includes(query.toLowerCase()) || file.toLowerCase().includes(query.toLowerCase())) {
+                                    searchResults.push(fullPath.replace('/app/docs/', ''));
+                                }
+                            }
+                        }
+                    };
+                    await walkDir(baseDir);
+                    result = {
+                        content: [{ type: "text", text: `Matching files:\n${searchResults.join('\n') || 'None found'}` }],
+                        isError: false
+                    };
+                } catch (err: any) {
+                    result = {
+                        content: [{ type: "text", text: `Search error: ${err.message}` }],
+                        isError: true
+                    };
+                }
+            } else {
+                // 1. Ensure SMCP Session
+                let session = smcpSessions.get(user.userId);
+                if (!session) {
+                    session = await attestSession(user);
+                    smcpSessions.set(user.userId, session);
+                }
+
+                // 2. Wrap MCP payload in SMCP envelope
+                const mcpPayload = {
+                    jsonrpc: "2.0",
+                    method: toolName,
+                    params: args,
+                    id: id
+                };
+
+                const payloadStr = JSON.stringify(mcpPayload);
+                const signature = sign(null, Buffer.from(payloadStr), session.privateKey).toString('base64');
+
+                const envelope = {
+                    security_token: session.token,
+                    signature: signature,
+                    payload: mcpPayload
+                };
+
+                // 3. Forward to AEGIS Orchestrator HTTP endpoint
+                const aegisUrl = process.env.AEGIS_ORCHESTRATOR_URL || 'http://localhost:8088';
+                const aegisRes = await fetch(`${aegisUrl}/v1/smcp/invoke`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(envelope)
+                });
+
+                if (!aegisRes.ok) {
+                    throw new Error(`AEGIS Error: ${aegisRes.statusText} - ${await aegisRes.text()}`);
+                }
+
+                const aegisResultData = await aegisRes.json();
+
+                // Format back to MCP tool call response
+                result = {
+                    content: [
+                        {
+                            type: "text",
+                            text: JSON.stringify(aegisResultData)
+                        }
+                    ],
+                    isError: false
+                };
             }
-
-            // 2. Wrap MCP payload in SMCP envelope
-            const mcpPayload = {
-                jsonrpc: "2.0",
-                method: toolName,
-                params: args,
-                id: id
-            };
-
-            const payloadStr = JSON.stringify(mcpPayload);
-            const signature = sign(null, Buffer.from(payloadStr), session.privateKey).toString('base64');
-
-            const envelope = {
-                security_token: session.token,
-                signature: signature,
-                payload: mcpPayload
-            };
-
-            // 3. Forward to AEGIS Orchestrator HTTP endpoint
-            const aegisUrl = process.env.AEGIS_ORCHESTRATOR_URL || 'http://localhost:8088';
-            const aegisRes = await fetch(`${aegisUrl}/v1/smcp/invoke`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(envelope)
-            });
-
-            if (!aegisRes.ok) {
-                throw new Error(`AEGIS Error: ${aegisRes.statusText} - ${await aegisRes.text()}`);
-            }
-
-            const aegisResultData = await aegisRes.json();
-
-            // Format back to MCP tool call response
-            result = {
-                content: [
-                    {
-                        type: "text",
-                        text: JSON.stringify(aegisResultData)
-                    }
-                ],
-                isError: false
-            };
         } else {
             // Method not found handler
             return res.json({
