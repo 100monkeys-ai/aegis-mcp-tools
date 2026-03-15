@@ -100,6 +100,28 @@ export async function handleMcpRequest(req: ZaruRequest, res: Response) {
                         }
                     },
                     {
+                        name: "aegis.agent.delete",
+                        description: "Permanently remove an agent from the registry.",
+                        inputSchema: {
+                            type: "object",
+                            properties: {
+                                agent_id: { type: "string", description: "UUID of the agent to remove." }
+                            },
+                            required: ["agent_id"]
+                        }
+                    },
+                    {
+                        name: "aegis.agent.generate",
+                        description: "Generate a new agent manifest from natural language intent.",
+                        inputSchema: {
+                            type: "object",
+                            properties: {
+                                input: { type: "string", description: "Natural-language intent for the agent to create." }
+                            },
+                            required: ["input"]
+                        }
+                    },
+                    {
                         name: "aegis.workflow.list",
                         description: "List all currently registered workflows.",
                         inputSchema: {
@@ -144,6 +166,136 @@ export async function handleMcpRequest(req: ZaruRequest, res: Response) {
                                 name: { type: "string", description: "The name of the workflow or its UUID." }
                             },
                             required: ["name"]
+                        }
+                    },
+                    {
+                        name: "aegis.workflow.delete",
+                        description: "Permanently remove a workflow from the registry.",
+                        inputSchema: {
+                            type: "object",
+                            properties: {
+                                name: { type: "string", description: "The name of the workflow to remove." }
+                            },
+                            required: ["name"]
+                        }
+                    },
+                    {
+                        name: "aegis.workflow.run",
+                        description: "Execute a registered workflow by name.",
+                        inputSchema: {
+                            type: "object",
+                            properties: {
+                                name: { type: "string", description: "The name of the workflow to execute." },
+                                input: { type: "object", description: "Optional key-value input passed to the workflow's initial blackboard state." }
+                            },
+                            required: ["name"]
+                        }
+                    },
+                    {
+                        name: "aegis.workflow.generate",
+                        description: "Generate a new workflow manifest from natural language intent.",
+                        inputSchema: {
+                            type: "object",
+                            properties: {
+                                input: { type: "string", description: "Natural-language objective describing the workflow to create." }
+                            },
+                            required: ["input"]
+                        }
+                    },
+                    {
+                        name: "aegis.workflow.logs",
+                        description:
+                            "Retrieve the execution event log for a completed or in-progress workflow run. " +
+                            "Returns state transitions, iteration results, and lifecycle events in chronological order.",
+                        inputSchema: {
+                            type: "object",
+                            properties: {
+                                execution_id: {
+                                    type: "string",
+                                    description: "UUID of the workflow execution to retrieve logs for.",
+                                },
+                                limit: {
+                                    type: "number",
+                                    description: "Maximum number of log events to return (default: 50, max: 200).",
+                                },
+                                offset: {
+                                    type: "number",
+                                    description: "Number of events to skip for pagination (default: 0).",
+                                },
+                            },
+                            required: ["execution_id"],
+                        },
+                    },
+                    {
+                        name: "aegis.task.execute",
+                        description: "Execute an agent task by agent ID.",
+                        inputSchema: {
+                            type: "object",
+                            properties: {
+                                agent_id: { type: "string", description: "UUID of the agent to execute." },
+                                input: { type: "object", description: "Optional key-value input payload passed to the agent." }
+                            },
+                            required: ["agent_id"]
+                        }
+                    },
+                    {
+                        name: "aegis.task.status",
+                        description: "Check the current status and progress of a running or completed execution.",
+                        inputSchema: {
+                            type: "object",
+                            properties: {
+                                execution_id: { type: "string", description: "UUID of the execution to query." }
+                            },
+                            required: ["execution_id"]
+                        }
+                    },
+                    {
+                        name: "aegis.task.list",
+                        description: "List recent task executions, optionally filtered by agent.",
+                        inputSchema: {
+                            type: "object",
+                            properties: {
+                                agent_id: { type: "string", description: "Optional: filter results to a specific agent UUID." },
+                                limit: { type: "number", description: "Maximum number of results to return. Default is 20." }
+                            }
+                        }
+                    },
+                    {
+                        name: "aegis.task.cancel",
+                        description: "Stop a running execution gracefully.",
+                        inputSchema: {
+                            type: "object",
+                            properties: {
+                                execution_id: { type: "string", description: "UUID of the execution to cancel." }
+                            },
+                            required: ["execution_id"]
+                        }
+                    },
+                    {
+                        name: "aegis.task.remove",
+                        description: "Delete an execution record from the registry.",
+                        inputSchema: {
+                            type: "object",
+                            properties: {
+                                execution_id: { type: "string", description: "UUID of the execution record to remove." }
+                            },
+                            required: ["execution_id"]
+                        }
+                    },
+                    {
+                        name: "aegis.system.info",
+                        description: "Get AEGIS node metadata, status, version, and available capabilities.",
+                        inputSchema: {
+                            type: "object",
+                            properties: {}
+                        }
+                    },
+                    {
+                        name: "aegis.system.config",
+                        description: "View the active AEGIS node configuration (node-config.yaml).",
+                        inputSchema: {
+                            type: "object",
+                            properties: {}
                         }
                     },
                     {
