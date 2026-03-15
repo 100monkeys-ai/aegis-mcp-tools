@@ -57,6 +57,119 @@ export async function handleMcpRequest(req: ZaruRequest, res: Response) {
                         }
                     },
                     {
+                        name: "aegis.agent.list",
+                        description: "List all currently deployed agents in the registry.",
+                        inputSchema: {
+                            type: "object",
+                            properties: {}
+                        }
+                    },
+                    {
+                        name: "aegis.agent.create",
+                        description: "Deploy a new agent to the orchestrator registry.",
+                        inputSchema: {
+                            type: "object",
+                            properties: {
+                                manifest_yaml: { type: "string", description: "The full Agent manifest in YAML format." },
+                                force: { type: "boolean", description: "Overwrite an existing agent if the name and version already exist. Default is false." }
+                            },
+                            required: ["manifest_yaml"]
+                        }
+                    },
+                    {
+                        name: "aegis.agent.update",
+                        description: "Update an existing agent's definition.",
+                        inputSchema: {
+                            type: "object",
+                            properties: {
+                                manifest_yaml: { type: "string", description: "The updated Agent manifest YAML." },
+                                force: { type: "boolean", description: "Overwrite an existing version if the version in the manifest hasn't been incremented. Default is false." }
+                            },
+                            required: ["manifest_yaml"]
+                        }
+                    },
+                    {
+                        name: "aegis.agent.export",
+                        description: "Retrieve the raw YAML manifest of a deployed agent.",
+                        inputSchema: {
+                            type: "object",
+                            properties: {
+                                name: { type: "string", description: "The name of the agent or its UUID." }
+                            },
+                            required: ["name"]
+                        }
+                    },
+                    {
+                        name: "aegis.workflow.list",
+                        description: "List all currently registered workflows.",
+                        inputSchema: {
+                            type: "object",
+                            properties: {}
+                        }
+                    },
+                    {
+                        name: "aegis.workflow.create",
+                        description: "Performs strict deterministic and semantic validation on a workflow before registering it.",
+                        inputSchema: {
+                            type: "object",
+                            properties: {
+                                manifest_yaml: { type: "string", description: "The full Workflow manifest YAML." },
+                                force: { type: "boolean", description: "Overwrite an existing workflow version if it exists. Default is false." },
+                                task_context: { type: "string", description: "Context provided to semantic judges to aid validation." },
+                                judge_agents: { type: "array", items: { type: "string" }, description: "Judge agent names to use for semantic validation." },
+                                min_score: { type: "number", description: "Minimum required semantic score (0.0-1.0). Default is 0.8." },
+                                min_confidence: { type: "number", description: "Minimum required consensus confidence (0.0-1.0). Default is 0.7." }
+                            },
+                            required: ["manifest_yaml"]
+                        }
+                    },
+                    {
+                        name: "aegis.workflow.update",
+                        description: "Update an existing workflow definition.",
+                        inputSchema: {
+                            type: "object",
+                            properties: {
+                                manifest_yaml: { type: "string", description: "The updated Workflow manifest YAML." },
+                                force: { type: "boolean", description: "Overwrite an existing version if it already exists. Default is false." }
+                            },
+                            required: ["manifest_yaml"]
+                        }
+                    },
+                    {
+                        name: "aegis.workflow.export",
+                        description: "Retrieve the raw YAML manifest of a registered workflow.",
+                        inputSchema: {
+                            type: "object",
+                            properties: {
+                                name: { type: "string", description: "The name of the workflow or its UUID." }
+                            },
+                            required: ["name"]
+                        }
+                    },
+                    {
+                        name: "aegis.schema.get",
+                        description: "Retrieve the JSON Schema for a specific manifest type.",
+                        inputSchema: {
+                            type: "object",
+                            properties: {
+                                key: { type: "string", enum: ["agent/manifest/v1", "workflow/manifest/v1"], description: "The schema key to retrieve." }
+                            },
+                            required: ["key"]
+                        }
+                    },
+                    {
+                        name: "aegis.schema.validate",
+                        description: "Validate a manifest YAML string against its canonical schema without deploying it.",
+                        inputSchema: {
+                            type: "object",
+                            properties: {
+                                kind: { type: "string", enum: ["agent", "workflow"], description: "The manifest kind." },
+                                manifest_yaml: { type: "string", description: "The manifest YAML text to validate." }
+                            },
+                            required: ["kind", "manifest_yaml"]
+                        }
+                    },
+                    {
                         name: "aegis.search_docs",
                         description: "Search 100monkeys and AEGIS documentation filenames and contents (simple grep).",
                         inputSchema: {
