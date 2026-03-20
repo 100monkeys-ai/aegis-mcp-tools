@@ -1,6 +1,6 @@
 {
   "name": "@100monkeys-ai/zaru-mcp-server",
-  "version": "0.11.0-pre-alpha",
+  "version": "0.12.0-pre-alpha",
   "description": "Zaru MCP Server - Secure Model Context Protocol gateway for Zaru",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
