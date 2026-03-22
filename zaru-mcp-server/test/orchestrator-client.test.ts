@@ -29,6 +29,19 @@ test('listTools uses orchestrator discovery and caches by security context', asy
                         name: 'fs.read',
                         description: 'Read a file',
                         inputSchema: { type: 'object' }
+                    },
+                    {
+                        name: 'aegis.task.logs',
+                        description: 'Fetch task execution logs',
+                        inputSchema: {
+                            type: 'object',
+                            properties: {
+                                execution_id: { type: 'string' },
+                                limit: { type: 'integer' },
+                                offset: { type: 'integer' }
+                            },
+                            required: ['execution_id']
+                        }
                     }
                 ]
             });
@@ -46,7 +59,9 @@ test('listTools uses orchestrator discovery and caches by security context', asy
     const second = await client.listTools(user);
 
     assert.equal(first[0]?.name, 'fs.read');
+    assert.equal(first[1]?.name, 'aegis.task.logs');
     assert.equal(second[0]?.name, 'fs.read');
+    assert.equal(second[1]?.name, 'aegis.task.logs');
     assert.equal(calls.length, 1);
     assert.deepEqual(calls[0], {
         method: 'GET',
@@ -93,7 +108,12 @@ test('invokeTool attests and sends a spec-shaped SMCP envelope', async () => {
         token: 'jwt'
     };
 
-    const result = await client.invokeTool(user, 'fs.read', { path: '/workspace/demo.txt' }, 'req-2');
+    const result = await client.invokeTool(
+        user,
+        'aegis.task.logs',
+        { execution_id: 'exec-123', limit: 50, offset: 0 },
+        'req-2'
+    );
 
     assert.deepEqual(result, {
         content: [{ type: 'text', text: 'ok' }],
@@ -112,6 +132,14 @@ test('invokeTool attests and sends a spec-shaped SMCP envelope', async () => {
     assert.equal(calls[1]?.body?.protocol, 'smcp/v1');
     assert.equal(calls[1]?.body?.security_token, 'issued-token');
     assert.equal((calls[1]?.body?.payload as { method: string }).method, 'tools/call');
+    assert.deepEqual((calls[1]?.body?.payload as { params: unknown }).params, {
+        name: 'aegis.task.logs',
+        arguments: {
+            execution_id: 'exec-123',
+            limit: 50,
+            offset: 0
+        }
+    });
     assert.equal(typeof calls[1]?.body?.timestamp, 'string');
     assert.equal(typeof calls[1]?.body?.signature, 'string');
 });
