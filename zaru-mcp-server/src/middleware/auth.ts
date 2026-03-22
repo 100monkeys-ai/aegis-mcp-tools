@@ -1,15 +1,26 @@
-import { Request, Response, NextFunction } from 'express';
-import jwt from 'jsonwebtoken';
+import type { NextFunction, Request, Response } from 'express';
+import jwt, { type JwtPayload } from 'jsonwebtoken';
 import jwksClient from 'jwks-rsa';
 
-// Type definitions for our extended Request object
-export interface ZaruRequest extends Request {
-    zaruUser?: {
-        userId: string;
-        tier: string;
-        token: string;
-    };
+export interface ZaruUser {
+    userId: string;
+    tier: string;
+    securityContext: string;
+    token: string;
 }
+
+export interface ZaruRequest extends Request {
+    zaruUser?: ZaruUser;
+}
+
+export type VerifiedClaims = JwtPayload & {
+    sub: string;
+    zaru_tier?: string;
+};
+
+export type JwtVerifier = (token: string) => Promise<VerifiedClaims>;
+
+const TOKEN_HEADER = 'x-zaru-user-token';
 
 const client = jwksClient({
     jwksUri: process.env.JWKS_URI || 'http://localhost:3080/oauth/jwks'
@@ -17,65 +28,106 @@ const client = jwksClient({
 
 function getKey(header: jwt.JwtHeader, callback: jwt.SigningKeyCallback) {
     if (!header.kid) {
-        // Fallback for missing kid, or bypass in dev
-        if (process.env.NODE_ENV === 'development') {
-            return callback(null, process.env.DEV_JWT_SECRET || 'secret');
-        }
-        return callback(new Error('No Key ID found in JWT'), undefined);
+        callback(new Error('JWT missing kid header'), undefined);
+        return;
     }
+
     client.getSigningKey(header.kid, (err, key) => {
         if (err || !key) {
-            callback(err || new Error('Key not found'), undefined);
+            callback(err || new Error('Unable to resolve JWKS signing key'), undefined);
             return;
         }
-        const signingKey = key.getPublicKey();
-        callback(null, signingKey);
+
+        callback(null, key.getPublicKey());
     });
 }
 
-export const zaruAuthMiddleware = (req: ZaruRequest, res: Response, next: NextFunction) => {
-    // 1. Read Keycloak JWT from X-Zaru-User-Token
-    const rawToken = req.headers['x-zaru-user-token'] as string;
+export function normalizeTier(rawTier?: string): string {
+    const tier = (rawTier ?? 'free').trim().toLowerCase();
 
-    if (!rawToken) {
-        console.warn('Missing or invalid X-Zaru-User-Token header');
-        res.status(401).json({ error: 'Unauthorized: Missing X-Zaru-User-Token' });
-        return;
+    if (tier === 'zaru-free' || tier === 'free') {
+        return 'free';
     }
 
-    if (process.env.BYPASS_AUTH === 'true') {
-        const fallbackUserId = req.headers['x-librechat-user-id'] as string || 'bypass-user';
-        const fallbackTier = req.headers['x-zaru-tier'] as string || 'default';
-        console.warn('BYPASS_AUTH enabled: Using fallback headers or default values');
-        req.zaruUser = { userId: fallbackUserId, tier: fallbackTier, token: rawToken };
-        next();
-        return;
+    if (tier === 'zaru-pro' || tier === 'pro') {
+        return 'pro';
     }
 
-    // 2. Validate against Keycloak JWKS
-    jwt.verify(rawToken, getKey, {
-        algorithms: ['RS256']
-    }, (err, decoded) => {
-        if (err || !decoded || typeof decoded === 'string') {
-            console.error('JWT Verification failed:', err ? err.message : 'Invalid payload');
-            res.status(401).json({ error: 'Invalid Token' });
-            return;
-        }
+    if (tier === 'zaru-enterprise' || tier === 'enterprise') {
+        return 'enterprise';
+    }
 
-        // 3. Resolve identity and tier from Native Keycloak Claims
-        const userId = decoded.sub;
-        const tier = decoded.zaru_tier || 'free';
+    throw new Error(`Unsupported zaru_tier claim: ${rawTier}`);
+}
 
-        if (!userId) {
-            res.status(401).json({ error: 'Token missing sub claim' });
-            return;
-        }
+export function mapTierToSecurityContext(rawTier?: string): string {
+    return `zaru-${normalizeTier(rawTier)}`;
+}
 
-        req.zaruUser = {
-            userId: userId as string,
-            tier: tier as string,
-            token: rawToken
-        };
-        next();
+export async function verifyJwtWithJwks(token: string): Promise<VerifiedClaims> {
+    return new Promise((resolve, reject) => {
+        jwt.verify(
+            token,
+            getKey,
+            {
+                algorithms: ['RS256']
+            },
+            (err, decoded) => {
+                if (err || !decoded || typeof decoded === 'string') {
+                    reject(err || new Error('Invalid JWT payload'));
+                    return;
+                }
+
+                if (!decoded.sub || typeof decoded.sub !== 'string') {
+                    reject(new Error('Token missing sub claim'));
+                    return;
+                }
+
+                resolve(decoded as VerifiedClaims);
+            }
+        );
     });
-};
+}
+
+export function createZaruAuthMiddleware(verifier: JwtVerifier = verifyJwtWithJwks) {
+    return async (req: ZaruRequest, res: Response, next: NextFunction) => {
+        const rawToken = req.headers[TOKEN_HEADER] as string | undefined;
+
+        if (!rawToken) {
+            res.status(401).json({ error: `Unauthorized: Missing ${TOKEN_HEADER}` });
+            return;
+        }
+
+        if (process.env.BYPASS_AUTH === 'true') {
+            const tier = normalizeTier((req.headers['x-zaru-tier'] as string | undefined) ?? 'free');
+            req.zaruUser = {
+                userId: (req.headers['x-librechat-user-id'] as string | undefined) ?? 'bypass-user',
+                tier,
+                securityContext: mapTierToSecurityContext(tier),
+                token: rawToken
+            };
+            next();
+            return;
+        }
+
+        try {
+            const claims = await verifier(rawToken);
+            const tier = normalizeTier(claims.zaru_tier);
+
+            req.zaruUser = {
+                userId: claims.sub,
+                tier,
+                securityContext: mapTierToSecurityContext(tier),
+                token: rawToken
+            };
+
+            next();
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Invalid token';
+            const status = message.startsWith('Unsupported zaru_tier') ? 403 : 401;
+            res.status(status).json({ error: message });
+        }
+    };
+}
+
+export const zaruAuthMiddleware = createZaruAuthMiddleware();

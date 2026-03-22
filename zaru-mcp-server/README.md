@@ -1,97 +1,80 @@
 # Zaru MCP Server
 
-Zaru MCP Server is an intermediate Model Context Protocol (MCP) bridge that enables chat interfaces, like LibreChat, to securely connect to the [AEGIS Orchestrator](https://github.com/100monkeys-ai/aegis-orchestrator) using the Secure Model Context Protocol (SMCP).
+`zaru-mcp-server` is the Streamable HTTP MCP bridge that lets LibreChat talk to AEGIS through SMCP.
 
-## Architecture & Purpose
+## What It Does
 
-Many LLM platforms (like LibreChat) support connecting to standard MCP servers via HTTP/SSE. However, AEGIS operates on a highly secure, Zero-Trust protocol known as **SMCP** (Secure MCP), which requires Ed25519 cryptographic signatures and session attestation.
+- Accepts MCP JSON-RPC on `POST /mcp/v1/`
+- Validates the LibreChat user token from `X-Zaru-User-Token`
+- Resolves the user's `zaru_tier` claim to an AEGIS `SecurityContext`
+- Discovers the current AEGIS tool inventory from the orchestrator instead of hardcoding tools locally
+- Attests an ephemeral Ed25519 session and forwards `tools/call` requests as SMCP envelopes to AEGIS
 
-Zaru MCP Server acts as the translation layer:
+This server no longer publishes local `aegis.*` helper tools. The `aegis.*` namespace is reserved for the real AEGIS tool surface exposed through the orchestrator.
 
-1. **Frontend / Ingress:** Exposes standard JSON-RPC 2.0 endpoints that LibreChat expects.
-2. **Identity Bridging:** Validates LibreChat's JWTs (`Authorization` header) and extracts user information (e.g., `X-LibreChat-User-ID`, `X-Zaru-Tier`).
-3. **SMCP Attestation:** Initializes a secure session with AEGIS by generating an ephemeral Ed25519 keypair and sending an `AttestationRequest`.
-4. **Invocation Forwarding:** Packages MCP tool calls (like `aegis.execute`) into signed `SmcpEnvelope`s and forwards them to AEGIS.
+## Endpoints
 
-## Project Structure
+- `POST /mcp/v1/`
+  - `initialize`
+  - `tools/list`
+  - `tools/call`
+- `GET /health`
 
-- `src/index.ts`: The main Express server entry point.
-- `src/middleware/auth.ts`: Handles LibreChat JWT validation and user identity extraction.
-- `src/mcp/index.ts`: The core MCP request handler, including SMCP attestation and tool routing.
+## Environment
 
-## Prerequisites
+```env
+PORT=3000
+JWKS_URI=http://keycloak:8080/realms/zaru-consumer/protocol/openid-connect/certs
+AEGIS_ORCHESTRATOR_URL=http://aegis-node:8088
 
-- Node.js (v18 or higher recommended)
-- TypeScript
-- An instance of AEGIS Orchestrator running and reachable over HTTP/REST.
+# Optional override if tool discovery is exposed at a non-default path.
+AEGIS_TOOL_DISCOVERY_URL=http://aegis-node:8088/v1/smcp/tools
 
-## Installation
+# Optional cache for orchestrator tool discovery responses.
+AEGIS_TOOL_CACHE_TTL_MS=5000
+
+# Local testing only.
+BYPASS_AUTH=false
+```
+
+## Auth Contract
+
+- Zaru expects the incoming LibreChat JWT in `X-Zaru-User-Token`
+- JWT verification is performed against `JWKS_URI`
+- `sub` becomes the Zaru user identity
+- `zaru_tier` must resolve to one of `free`, `pro`, or `enterprise`
+- Tiers are mapped to `zaru-free`, `zaru-pro`, and `zaru-enterprise`
+
+## SMCP Contract
+
+- Attestation: `POST ${AEGIS_ORCHESTRATOR_URL}/v1/smcp/attest`
+- Invocation: `POST ${AEGIS_ORCHESTRATOR_URL}/v1/smcp/invoke`
+- Discovery: `GET ${AEGIS_TOOL_DISCOVERY_URL}` with fallback to orchestrator-backed `tools/list`
+
+Every tool invocation is wrapped in an SMCP envelope with:
+
+- `protocol: "smcp/v1"`
+- `security_token`
+- `signature`
+- `payload`
+- `timestamp`
+
+The envelope signature is computed from the canonical SMCP message:
+
+```json
+{
+  "payload": { "...": "..." },
+  "security_token": "<JWT>",
+  "timestamp": 1711024496
+}
+```
+
+Keys are sorted lexicographically before signing.
+
+## Development
 
 ```bash
 npm install
 npm run build
+npm test
 ```
-
-## Configuration
-
-Zaru MCP Server requires several environment variables to operate correctly. Create a `.env` file in the root directory:
-
-```env
-# The port the Express server will run on (default: 3000)
-PORT=3000
-
-# URI to fetch JSON Web Key Sets for validating LibreChat JWTs
-JWKS_URI=http://your-auth-provider/.well-known/jwks.json
-
-# Optional: Fallback secret for local development (if JWKS signature validation fails)
-DEV_JWT_SECRET=your_local_secret
-
-# The URL of the AEGIS Orchestrator HTTP endpoint 
-# (Should point to where AEGIS exposes /v1/smcp/...)
-AEGIS_ORCHESTRATOR_URL=http://localhost:8088
-
-# Set to "true" to bypass LibreChat JWT authentication entirely (for local testing only)
-BYPASS_AUTH=false
-```
-
-## Running the Server
-
-### Development Mode
-
-Run the server with hot-reloading using `nodemon` and `ts-node`:
-
-```bash
-npm run dev
-```
-
-### Production Mode
-
-Compile the TypeScript code and run the compiled JavaScript:
-
-```bash
-npm run build
-npm start
-```
-
-## Endpoints
-
-### `GET /health`
-
-A simple health check endpoint to verify the server is running.
-
-### `POST /mcp/v1/`
-
-The primary MCP endpoint. It accepts standard JSON-RPC 2.0 requests:
-
-- `initialize`: Returns server capabilities.
-- `tools/list`: Returns the list of tools available through AEGIS (e.g., `aegis.execute`).
-- `tools/call`: Executes a specified tool by wrapping it in an SMCP envelope and forwarding it to AEGIS.
-
-## Security Considerations
-
-- **Ephemeral Keys:** Zaru generates a new Ed25519 keypair for each active user session. These keys are never persisted to disk.
-- **JWKS Validation:** In production, Zaru strictly validates the incoming JWTs against the configured `JWKS_URI` to ensure requests originated from an authorized LibreChat instance.
-
-## License
-
-MIT
