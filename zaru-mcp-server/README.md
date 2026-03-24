@@ -10,7 +10,7 @@
 - Discovers the current AEGIS tool inventory from the orchestrator instead of hardcoding tools locally
 - Attests an ephemeral Ed25519 session and forwards `tools/call` requests as SMCP envelopes to AEGIS
 
-The orchestrator owns the `aegis.*` tool surface and filters it by the caller's tier-derived `SecurityContext`, so `zaru-pro` and `zaru-enterprise` can surface the full management set while `zaru-free` remains restricted.
+The orchestrator owns the `aegis.*` tool surface and filters it by the caller's tier-derived `SecurityContext`, so `zaru-pro` and `zaru-enterprise` can surface the full management set while `zaru-free` remains restricted. That includes workflow execution inspection, live logs, and the workflow control flows exposed by the orchestrator.
 
 This server does not publish local `aegis.*` helper tools. The `aegis.*` namespace is reserved for the real AEGIS tool surface exposed through the orchestrator.
 
