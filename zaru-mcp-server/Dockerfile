@@ -2,9 +2,11 @@ FROM node:18-alpine
 
 WORKDIR /app
 
-# Install dependencies first for caching layers
+# Install dependencies first for caching layers.
+# --ignore-scripts prevents the "prepare" lifecycle script from running
+# npm run build before the source files have been copied.
 COPY package*.json ./
-RUN npm install
+RUN npm install --ignore-scripts
 
 COPY tsconfig.json .
 COPY src ./src
