@@ -1,23 +1,37 @@
 # Zaru MCP Server
 
-`zaru-mcp-server` is the SSE-transport MCP bridge that lets the Zaru client talk to AEGIS through SMCP.
+MCP bridge that lets the Zaru client talk to AEGIS through SMCP. Supports StreamableHTTP (primary) and SSE (legacy) transports.
 
 ## What It Does
 
-- Accepts MCP JSON-RPC over SSE transport on `/mcp/v1/sse`
-- Validates the Zaru client user token from `X-Zaru-User-Token`
+- Accepts MCP JSON-RPC over StreamableHTTP at `/mcp/v1` (primary) and SSE at `/mcp/v1/sse` (legacy)
+- Validates the Zaru client JWT from `Authorization: Bearer` header or `X-Zaru-User-Token`
 - Resolves the user's `zaru_tier` claim to an AEGIS `SecurityContext`
-- Discovers the current AEGIS tool inventory from the orchestrator instead of hardcoding tools locally
+- Discovers the current AEGIS tool inventory from the orchestrator (not hardcoded locally)
 - Attests an ephemeral Ed25519 session and forwards `tools/call` requests as SMCP envelopes to AEGIS
+- Proxies execution event streams from the orchestrator for Glass Lab visualization
 
-The orchestrator owns the `aegis.*` tool surface and filters it by the caller's tier-derived `SecurityContext`, so `zaru-pro`, `zaru-business`, and `zaru-enterprise` can surface the full management set while `zaru-free` remains restricted. That includes workflow execution inspection, live logs, and the workflow control flows exposed by the orchestrator.
-
-This server does not publish local `aegis.*` helper tools. The `aegis.*` namespace is reserved for the real AEGIS tool surface exposed through the orchestrator.
+The orchestrator owns the `aegis.*` tool surface and filters it by the caller's tier-derived `SecurityContext`, so `zaru-pro`, `zaru-business`, and `zaru-enterprise` surface the full management set while `zaru-free` remains restricted.
 
 ## Endpoints
 
-- `GET /mcp/v1/sse` — Establishes an SSE session; sends an `endpoint` event with the POST URL
-- `POST /mcp/v1/messages?sessionId=<id>` — Receives JSON-RPC messages for a session
+### StreamableHTTP (Primary)
+
+- `POST /mcp/v1` — Handle MCP JSON-RPC messages (tool calls, initialization)
+- `GET /mcp/v1` — Server-initiated push (currently 405)
+- `DELETE /mcp/v1` — Clean up MCP session
+
+### SSE (Legacy)
+
+- `GET /mcp/v1/sse` — Establish SSE session; sends `endpoint` event with POST URL
+- `POST /mcp/v1/messages?sessionId=<id>` — Receive JSON-RPC messages for a session
+
+### Execution Streaming
+
+- `GET /proxy/v1/executions/:executionId/stream` — Proxy SSE execution events from the orchestrator (for Glass Lab)
+
+### Health
+
 - `GET /health` — Health check
 
 ## Environment
@@ -27,49 +41,89 @@ PORT=3000
 JWKS_URI=http://keycloak:8080/realms/zaru-consumer/protocol/openid-connect/certs
 AEGIS_ORCHESTRATOR_URL=http://aegis-node:8088
 
-# Optional override if tool discovery is exposed at a non-default path.
+# Optional: override tool discovery path
 AEGIS_TOOL_DISCOVERY_URL=http://aegis-node:8088/v1/smcp/tools
 
-# Optional cache for orchestrator tool discovery responses.
+# Optional: cache TTL for tool discovery responses
 AEGIS_TOOL_CACHE_TTL_MS=5000
 
-# Local testing only.
+# Local testing only
 BYPASS_AUTH=false
 ```
 
 ## Auth Contract
 
-- Zaru expects the incoming Zaru client JWT in `X-Zaru-User-Token`
-- JWT verification is performed against `JWKS_URI`
+The server accepts JWTs via two mechanisms (checked in order):
+
+1. `X-Zaru-User-Token` header (custom header)
+2. `Authorization: Bearer <token>` header (standard HTTP auth)
+3. `token` query parameter (for SSE GET requests)
+
+JWT verification is performed against `JWKS_URI` (Keycloak JWKS endpoint):
+
 - `sub` becomes the Zaru user identity
 - `zaru_tier` must resolve to one of `free`, `pro`, `business`, or `enterprise`
-- Tiers are mapped to `zaru-free`, `zaru-pro`, `zaru-business`, and `zaru-enterprise`
+- Tiers map to SecurityContexts: `zaru-free`, `zaru-pro`, `zaru-business`, `zaru-enterprise`
 
 ## SMCP Contract
 
-- Attestation: `POST ${AEGIS_ORCHESTRATOR_URL}/v1/smcp/attest`
-- Invocation: `POST ${AEGIS_ORCHESTRATOR_URL}/v1/smcp/invoke`
-- Discovery: `GET ${AEGIS_TOOL_DISCOVERY_URL}` with fallback to orchestrator-backed `tools/list`
+### Attestation
 
-Every tool invocation is wrapped in an SMCP envelope with:
+```text
+POST ${AEGIS_ORCHESTRATOR_URL}/v1/smcp/attest
+```
 
-- `protocol: "smcp/v1"`
-- `security_token`
-- `signature`
-- `payload`
-- `timestamp`
-
-The envelope signature is computed from the canonical SMCP message:
+Request body:
 
 ```json
 {
-  "payload": { "...": "..." },
-  "security_token": "<JWT>",
-  "timestamp": 1711024496
+  "agent_public_key": "<base64-encoded 32-byte Ed25519 public key>",
+  "user_id": "<keycloak-sub>",
+  "workload_id": "zaru:<userId>:<sessionId>",
+  "security_context": "zaru-<tier>",
+  "zaru_tier": "<tier>",
+  "container_id": "zaru-mcp-server:<sessionId>"
 }
 ```
 
-Keys are sorted lexicographically before signing.
+Response: `{ "security_token": "<JWT>" }`
+
+### Tool Invocation
+
+```text
+POST ${AEGIS_ORCHESTRATOR_URL}/v1/smcp/invoke
+```
+
+Every tool invocation is wrapped in an SMCP envelope:
+
+```json
+{
+  "protocol": "smcp/v1",
+  "security_token": "<JWT from attestation>",
+  "signature": "<base64-encoded Ed25519 signature>",
+  "payload": { "<MCP JSON-RPC>" },
+  "timestamp": "<ISO 8601 UTC>"
+}
+```
+
+### Tool Discovery
+
+```text
+GET ${AEGIS_TOOL_DISCOVERY_URL}
+Header: X-Zaru-Security-Context: zaru-<tier>
+```
+
+Fallback: JSON-RPC `tools/list` via SMCP invoke.
+
+### Canonical Message Format
+
+The signature is computed over a canonical message with lexicographically sorted keys:
+
+```json
+{"payload":{"..."},"security_token":"<JWT>","timestamp":1711024496}
+```
+
+Where `timestamp` is Unix epoch seconds derived from the ISO 8601 timestamp.
 
 ## Development
 

@@ -127,7 +127,7 @@ test('invokeTool attests and sends a spec-shaped SMCP envelope', async () => {
     assert.equal(calls[0]?.body?.zaru_tier, 'enterprise');
     assert.equal(calls[0]?.body?.agent_id, undefined);
     assert.equal(calls[0]?.body?.execution_id, undefined);
-    assert.equal(typeof calls[0]?.body?.public_key, 'string');
+    assert.equal(typeof calls[0]?.body?.agent_public_key, 'string');
     assert.equal(calls[1]?.url, 'http://aegis.test/v1/smcp/invoke');
     assert.equal(calls[1]?.body?.protocol, 'smcp/v1');
     assert.equal(calls[1]?.body?.security_token, 'issued-token');

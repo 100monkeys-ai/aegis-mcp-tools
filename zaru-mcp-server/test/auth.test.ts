@@ -45,6 +45,34 @@ test('auth middleware validates token claims and maps tier to security context',
     });
 });
 
+test('auth middleware accepts Authorization: Bearer header as fallback', async () => {
+    const middleware = createZaruAuthMiddleware(async () => ({
+        sub: 'user-456',
+        zaru_tier: 'free'
+    }));
+
+    const req = {
+        headers: {
+            authorization: 'Bearer my-bearer-token'
+        },
+        query: {}
+    } as any;
+    const res = createResponseRecorder();
+    let nextCalled = false;
+
+    await middleware(req, res, (() => {
+        nextCalled = true;
+    }) as NextFunction);
+
+    assert.equal(nextCalled, true);
+    assert.deepEqual(req.zaruUser, {
+        userId: 'user-456',
+        tier: 'free',
+        securityContext: 'zaru-free',
+        token: 'my-bearer-token'
+    });
+});
+
 test('auth middleware rejects unsupported tiers', async () => {
     const middleware = createZaruAuthMiddleware(async () => ({
         sub: 'user-123',

@@ -94,11 +94,18 @@ export async function verifyJwtWithJwks(token: string): Promise<VerifiedClaims> 
     });
 }
 
+function extractBearerToken(header?: string): string | undefined {
+    if (!header) return undefined;
+    const match = header.match(/^Bearer\s+(.+)$/i);
+    return match?.[1];
+}
+
 export function createZaruAuthMiddleware(verifier: JwtVerifier = verifyJwtWithJwks) {
     return async (req: ZaruRequest, res: Response, next: NextFunction) => {
         // Support token from header (normal requests) or query parameter (SSE GET requests)
         const rawToken =
             (req.headers[TOKEN_HEADER] as string | undefined) ??
+            extractBearerToken(req.headers.authorization as string | undefined) ??
             (req.query[TOKEN_QUERY_PARAM] as string | undefined);
 
         if (!rawToken) {
