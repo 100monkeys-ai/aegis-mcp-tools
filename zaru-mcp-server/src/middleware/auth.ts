@@ -24,7 +24,7 @@ const TOKEN_HEADER = 'x-zaru-user-token';
 const TOKEN_QUERY_PARAM = 'token';
 
 const client = jwksClient({
-    jwksUri: process.env.JWKS_URI || 'http://localhost:3080/oauth/jwks'
+    jwksUri: process.env.JWKS_URI || 'http://localhost:8180/realms/zaru-consumer/protocol/openid-connect/certs'
 });
 
 function getKey(header: jwt.JwtHeader, callback: jwt.SigningKeyCallback) {
@@ -105,7 +105,7 @@ export function createZaruAuthMiddleware(verifier: JwtVerifier = verifyJwtWithJw
         if (process.env.BYPASS_AUTH === 'true') {
             const tier = normalizeTier((req.headers['x-zaru-tier'] as string | undefined) ?? 'free');
             req.zaruUser = {
-                userId: (req.headers['x-librechat-user-id'] as string | undefined) ?? 'bypass-user',
+                userId: (req.headers['x-zaru-user-id'] as string | undefined) ?? 'bypass-user',
                 tier,
                 securityContext: mapTierToSecurityContext(tier),
                 token: rawToken
