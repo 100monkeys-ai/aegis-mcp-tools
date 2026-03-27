@@ -1,10 +1,7 @@
 import type { Response } from 'express';
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
-import { Server } from '@modelcontextprotocol/sdk/server';
-import {
-    ListToolsRequestSchema,
-    CallToolRequestSchema,
-} from '@modelcontextprotocol/sdk/types';
+import { Server } from '@modelcontextprotocol/sdk/server/index.js';
+import { ListToolsRequestSchema, CallToolRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import type { ZaruRequest, ZaruUser } from '../middleware/auth.js';
 import { OrchestratorClient } from './orchestrator-client.js';
 
