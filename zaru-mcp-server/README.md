@@ -1,10 +1,10 @@
 # Zaru MCP Server
 
-`zaru-mcp-server` is the Streamable HTTP MCP bridge that lets LibreChat talk to AEGIS through SMCP.
+`zaru-mcp-server` is the SSE-transport MCP bridge that lets LibreChat talk to AEGIS through SMCP.
 
 ## What It Does
 
-- Accepts MCP JSON-RPC on `POST /mcp/v1/`
+- Accepts MCP JSON-RPC over SSE transport on `/mcp/v1/sse`
 - Validates the LibreChat user token from `X-Zaru-User-Token`
 - Resolves the user's `zaru_tier` claim to an AEGIS `SecurityContext`
 - Discovers the current AEGIS tool inventory from the orchestrator instead of hardcoding tools locally
@@ -16,11 +16,9 @@ This server does not publish local `aegis.*` helper tools. The `aegis.*` namespa
 
 ## Endpoints
 
-- `POST /mcp/v1/`
-  - `initialize`
-  - `tools/list`
-  - `tools/call`
-- `GET /health`
+- `GET /mcp/v1/sse` — Establishes an SSE session; sends an `endpoint` event with the POST URL
+- `POST /mcp/v1/messages?sessionId=<id>` — Receives JSON-RPC messages for a session
+- `GET /health` — Health check
 
 ## Environment
 

@@ -21,6 +21,7 @@ export type VerifiedClaims = JwtPayload & {
 export type JwtVerifier = (token: string) => Promise<VerifiedClaims>;
 
 const TOKEN_HEADER = 'x-zaru-user-token';
+const TOKEN_QUERY_PARAM = 'token';
 
 const client = jwksClient({
     jwksUri: process.env.JWKS_URI || 'http://localhost:3080/oauth/jwks'
@@ -91,10 +92,13 @@ export async function verifyJwtWithJwks(token: string): Promise<VerifiedClaims> 
 
 export function createZaruAuthMiddleware(verifier: JwtVerifier = verifyJwtWithJwks) {
     return async (req: ZaruRequest, res: Response, next: NextFunction) => {
-        const rawToken = req.headers[TOKEN_HEADER] as string | undefined;
+        // Support token from header (normal requests) or query parameter (SSE GET requests)
+        const rawToken =
+            (req.headers[TOKEN_HEADER] as string | undefined) ??
+            (req.query[TOKEN_QUERY_PARAM] as string | undefined);
 
         if (!rawToken) {
-            res.status(401).json({ error: `Unauthorized: Missing ${TOKEN_HEADER}` });
+            res.status(401).json({ error: `Unauthorized: Missing ${TOKEN_HEADER} header or ${TOKEN_QUERY_PARAM} query parameter` });
             return;
         }
 
