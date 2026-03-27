@@ -54,6 +54,10 @@ export function normalizeTier(rawTier?: string): string {
         return 'pro';
     }
 
+    if (tier === 'zaru-business' || tier === 'business') {
+        return 'business';
+    }
+
     if (tier === 'zaru-enterprise' || tier === 'enterprise') {
         return 'enterprise';
     }

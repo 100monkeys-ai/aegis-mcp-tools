@@ -3,6 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import { zaruAuthMiddleware, type ZaruRequest } from './middleware/auth.js';
 import { handleSseConnection, handleSseMessage } from './mcp/sse.js';
+import { handleStreamableHttp, handleStreamableHttpGet, handleStreamableHttpDelete } from './mcp/streamable-http.js';
 import { OrchestratorClient } from './mcp/orchestrator-client.js';
 
 dotenv.config();
@@ -68,7 +69,12 @@ app.get('/proxy/v1/executions/:executionId/stream', zaruAuthMiddleware, async (r
     }
 });
 
-// SSE transport endpoints (MCP protocol version 2024-11-05)
+// StreamableHTTP transport (ADR-071 recommended)
+app.post('/mcp/v1', zaruAuthMiddleware, handleStreamableHttp);
+app.get('/mcp/v1', zaruAuthMiddleware, handleStreamableHttpGet);
+app.delete('/mcp/v1', zaruAuthMiddleware, handleStreamableHttpDelete);
+
+// Legacy SSE transport (backward compatibility)
 app.get('/mcp/v1/sse', zaruAuthMiddleware, handleSseConnection);
 app.post('/mcp/v1/messages', handleSseMessage);
 
