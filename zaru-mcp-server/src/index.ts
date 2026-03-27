@@ -78,7 +78,7 @@ app.delete('/mcp/v1', zaruAuthMiddleware, handleStreamableHttpDelete);
 app.get('/mcp/v1/sse', zaruAuthMiddleware, handleSseConnection);
 app.post('/mcp/v1/messages', handleSseMessage);
 
-app.get('/health', (req, res) => {
+app.get('/health', (_req, res) => {
     res.json({ status: 'ok' });
 });
 

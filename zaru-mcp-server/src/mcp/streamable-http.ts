@@ -1,6 +1,6 @@
 import type { Response } from 'express';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import { Server } from '@modelcontextprotocol/sdk/server/index.js';
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { ListToolsRequestSchema, CallToolRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import type { ZaruRequest, ZaruUser } from '../middleware/auth.js';
 import { OrchestratorClient } from './orchestrator-client.js';
@@ -9,7 +9,7 @@ const orchestratorClient = new OrchestratorClient();
 
 interface StreamableHttpSession {
     transport: StreamableHTTPServerTransport;
-    server: Server;
+    server: McpServer;
     user: ZaruUser;
 }
 
@@ -40,8 +40,8 @@ function normalizeToolResult(result: unknown): { content: Array<{ type: string; 
     };
 }
 
-function createMcpServerForUser(user: ZaruUser): Server {
-    const server = new Server(
+function createMcpServerForUser(user: ZaruUser): McpServer {
+    const mcpServer = new McpServer(
         {
             name: 'zaru-mcp-server',
             version: '0.14.0-pre-alpha',
@@ -56,12 +56,12 @@ function createMcpServerForUser(user: ZaruUser): Server {
         }
     );
 
-    server.setRequestHandler(ListToolsRequestSchema, async () => {
+    mcpServer.server.setRequestHandler(ListToolsRequestSchema, async () => {
         const tools = await orchestratorClient.listTools(user);
         return { tools };
     });
 
-    server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    mcpServer.server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const { name, arguments: args } = request.params;
         const result = await orchestratorClient.invokeTool(
             user,
@@ -72,7 +72,7 @@ function createMcpServerForUser(user: ZaruUser): Server {
         return normalizeToolResult(result);
     });
 
-    return server;
+    return mcpServer;
 }
 
 /**
@@ -108,6 +108,7 @@ export async function handleStreamableHttp(req: ZaruRequest, res: Response): Pro
 
     const server = createMcpServerForUser(user);
     await server.connect(transport);
+
 
     // Store the session if a session ID was generated
     const newSessionId = transport.sessionId;

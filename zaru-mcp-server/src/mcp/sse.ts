@@ -1,6 +1,6 @@
 import type { Response } from 'express';
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
-import { Server } from '@modelcontextprotocol/sdk/server/index.js';
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { ListToolsRequestSchema, CallToolRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import type { ZaruRequest, ZaruUser } from '../middleware/auth.js';
 import { OrchestratorClient } from './orchestrator-client.js';
@@ -18,8 +18,8 @@ const sessions = new Map<string, SseSession>();
 /**
  * Creates an MCP Server instance wired to the orchestrator for a given user.
  */
-function createMcpServerForUser(user: ZaruUser): Server {
-    const server = new Server(
+function createMcpServerForUser(user: ZaruUser): McpServer {
+    const mcpServer = new McpServer(
         {
             name: 'zaru-mcp-server',
             version: '0.14.0-pre-alpha',
@@ -34,12 +34,12 @@ function createMcpServerForUser(user: ZaruUser): Server {
         }
     );
 
-    server.setRequestHandler(ListToolsRequestSchema, async () => {
+    mcpServer.server.setRequestHandler(ListToolsRequestSchema, async () => {
         const tools = await orchestratorClient.listTools(user);
         return { tools };
     });
 
-    server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    mcpServer.server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const { name, arguments: args } = request.params;
         const result = await orchestratorClient.invokeTool(
             user,
@@ -50,7 +50,7 @@ function createMcpServerForUser(user: ZaruUser): Server {
         return normalizeToolResult(result);
     });
 
-    return server;
+    return mcpServer;
 }
 
 function normalizeToolResult(result: unknown): { content: Array<{ type: string; text: string }>; isError: boolean } {
