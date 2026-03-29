@@ -2,21 +2,40 @@
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-> **Curated, security-hardened Model Context Protocol (MCP) tool implementations for AEGIS**
+> **Secure MCP gateway that proxies tool calls to the**
+> **AEGIS orchestrator via SMCP envelope signing**
 
-This repository provides vetted and sandboxed MCP server implementations that integrate safely with the AEGIS orchestrator. Unlike community tools, these implementations include strict security controls, resource limits, and audit logging.
+This repository contains the **zaru-mcp-server**, an
+MCP-compliant gateway/proxy that securely forwards
+`tools/list` and `tools/call` requests to the AEGIS
+orchestrator. It does not implement individual tools —
+instead, it exposes whatever tools are registered in the
+orchestrator, handling authentication, SMCP envelope
+signing, and transport (SSE and Streamable HTTP).
 
-## 🎯 Purpose
+## Purpose
 
-AEGIS addresses the "Supply Chain Risk" identified in OpenClaw deployments by providing:
+The zaru-mcp-server addresses the "Supply Chain Risk"
+identified in OpenClaw deployments by providing:
 
-1. **Vetted Tools**: Each MCP server is security-reviewed and tested
-2. **Sandboxed Execution**: Tools run with minimal permissions
+1. **Secure Gateway**: All tool calls are authenticated
+   and signed via SMCP envelopes
+2. **Sandboxed Execution**: Tools run with minimal
+   permissions on the orchestrator side
 3. **Audit Trail**: All tool invocations are logged immutably
-4. **Resource Limits**: CPU, memory, and network caps enforced
+4. **Resource Limits**: CPU, memory, and network caps enforced by the orchestrator
 5. **Fail-Safe Defaults**: Tools default to read-only operations
 
-## 📦 Available Tools
+## Available Tools (Orchestrator Catalog)
+
+> **Note:** The tool catalog below is served by the
+> AEGIS orchestrator, not implemented in this
+> repository. This repo contains the MCP gateway
+> (`zaru-mcp-server`) that securely proxies
+> `tools/list` and `tools/call` requests to the
+> orchestrator via SMCP envelope signing. The tools
+> listed here describe the orchestrator's tool
+> catalog for reference.
 
 ### Core Tools (Maintained by AEGIS Core Team)
 
@@ -24,25 +43,25 @@ AEGIS addresses the "Supply Chain Risk" identified in OpenClaw deployments by pr
 
 - **Description**: Read/write files with strict path restrictions
 - **Permissions**: Configurable chroot jail
-- **Status**: ✅ Production Ready
+- **Status**: Production Ready
 
 #### **web-search** - Internet Search
 
 - **Description**: Search via multiple providers (DuckDuckGo, Brave, Google)
 - **Permissions**: Egress to search APIs only
-- **Status**: ✅ Production Ready
+- **Status**: Production Ready
 
 #### **browser** - Web Automation
 
 - **Description**: Headless browser control via Playwright
 - **Permissions**: Sandboxed Chromium with network policies
-- **Status**: 🚧 Beta
+- **Status**: Beta
 
 #### **database** - SQL Query Interface
 
 - **Description**: Safe SQL execution with query analysis
 - **Permissions**: Read-only by default, configurable write
-- **Status**: ✅ Production Ready
+- **Status**: Production Ready
 
 ### Integration Tools
 
@@ -50,25 +69,25 @@ AEGIS addresses the "Supply Chain Risk" identified in OpenClaw deployments by pr
 
 - **Description**: Read/send emails via Gmail API
 - **Permissions**: OAuth2 with scope restrictions
-- **Status**: ✅ Production Ready
+- **Status**: Production Ready
 
 #### **github** - Repository Operations
 
 - **Description**: Read repos, create PRs, manage issues
 - **Permissions**: Fine-grained access tokens
-- **Status**: ✅ Production Ready
+- **Status**: Production Ready
 
 #### **slack** - Team Communication
 
 - **Description**: Send messages, read channels
 - **Permissions**: Bot token with channel restrictions
-- **Status**: ✅ Production Ready
+- **Status**: Production Ready
 
 #### **discord** - Community Management
 
 - **Description**: Bot interactions and webhooks
 - **Permissions**: Limited to configured guilds
-- **Status**: ✅ Production Ready
+- **Status**: Production Ready
 
 ### Utility Tools
 
@@ -76,21 +95,21 @@ AEGIS addresses the "Supply Chain Risk" identified in OpenClaw deployments by pr
 
 - **Description**: Run shell commands in isolated environment
 - **Permissions**: Allowlist of approved commands
-- **Status**: ⚠️ Advanced Users Only
+- **Status**: Advanced Users Only
 
 #### **http** - HTTP Client
 
 - **Description**: Make HTTP requests with policies
 - **Permissions**: Domain allowlist + rate limiting
-- **Status**: ✅ Production Ready
+- **Status**: Production Ready
 
 #### **vector-db** - Memory Storage
 
 - **Description**: Cortex integration for persistent memory
 - **Permissions**: Agent-scoped data isolation
-- **Status**: ✅ Production Ready
+- **Status**: Production Ready
 
-## 🔐 Security Model
+## Security Model
 
 Every tool in this repository adheres to AEGIS security principles:
 
@@ -122,7 +141,7 @@ security:
 4. **Rate Limiting**: Prevents abuse via request throttling
 5. **Audit Logging**: Every action logged for compliance
 
-## 📖 Usage
+## Usage
 
 ### With AEGIS Orchestrator
 
@@ -165,15 +184,27 @@ const agent = await Agent.fromManifest('agent.yaml');
 const result = await agent.execute('Search the web and save results');
 ```
 
-## 🔧 Development
+## Development
 
-### Creating a New Tool
+### Registering a New Tool
 
-1. **Define the tool interface** (`tools/my-tool/schema.json`)
-2. **Implement the MCP server** (`tools/my-tool/server.py` or `.ts`)
-3. **Add security manifest** (`tools/my-tool/security.yaml`)
-4. **Write tests** (`tools/my-tool/tests/`)
-5. **Submit PR with security review checklist**
+New tools are registered in the **AEGIS orchestrator**,
+not created as directories in this repository. The
+zaru-mcp-server automatically exposes any tools
+registered in the orchestrator via its `tools/list`
+and `tools/call` proxy endpoints.
+
+To add a new tool to the AEGIS platform:
+
+1. **Define the tool schema** in the orchestrator's tool registry
+2. **Implement the tool handler** in the orchestrator codebase
+3. **Add security manifest** with permissions, resource limits, and audit config
+4. **Write tests** in the orchestrator's test suite
+5. **Submit PR with security review checklist** to the orchestrator repo
+
+The zaru-mcp-server will automatically surface the
+new tool to MCP clients once it is registered in
+the orchestrator.
 
 ### Security Review Checklist
 
@@ -186,35 +217,43 @@ const result = await agent.execute('Search the web and save results');
 - [ ] Rate limiting configured
 - [ ] Documentation includes threat model
 
-## 📂 Repository Structure
+## Repository Structure
 
-```markdown
+```text
 aegis-mcp-tools/
-├── tools/
-│   ├── filesystem/         # Core tools
-│   ├── web-search/
-│   ├── browser/
-│   ├── database/
-│   ├── gmail/              # Integration tools
-│   ├── github/
-│   ├── slack/
-│   ├── discord/
-│   ├── shell/              # Utility tools
-│   ├── http/
-│   └── vector-db/
-├── lib/
-│   ├── security/           # Security wrappers
-│   ├── audit/              # Logging utilities
-│   └── validators/         # Input validation
-├── schemas/                # MCP protocol schemas
-├── tests/                  # Integration tests
-├── docs/                   # Tool documentation
-│   ├── SECURITY.md
-│   └── CONTRIBUTING.md
+├── .github/
+│   ├── dependabot.yml
+│   └── workflows/
+├── zaru-mcp-server/          # MCP gateway/proxy server
+│   ├── src/
+│   │   ├── index.ts          # Server entry point
+│   │   ├── mcp/
+│   │   │   ├── index.ts      # MCP protocol handler
+│   │   │   ├── orchestrator-client.ts  # AEGIS orchestrator client
+│   │   │   ├── smcp.ts       # SMCP envelope signing
+│   │   │   ├── sse.ts        # SSE transport
+│   │   │   ├── streamable-http.ts      # Streamable HTTP transport
+│   │   │   └── types.ts      # Shared type definitions
+│   │   └── middleware/
+│   │       └── auth.ts       # Authentication middleware
+│   ├── test/
+│   │   ├── auth.test.ts
+│   │   ├── orchestrator-client.test.ts
+│   │   └── smcp.test.ts
+│   ├── dist/                  # Compiled output
+│   ├── Dockerfile
+│   ├── package.json
+│   ├── package-lock.json
+│   ├── tsconfig.json
+│   └── README.md
+├── CODE_OF_CONDUCT.md
+├── CONTRIBUTING.md
+├── LICENSE
+├── SECURITY.md
 └── README.md
 ```
 
-## 🚀 Installation
+## Installation
 
 ### From AEGIS Registry (Recommended)
 
@@ -226,8 +265,9 @@ aegis tools install filesystem web-search gmail
 
 ```bash
 git clone https://github.com/100monkeys-ai/aegis-mcp-tools.git
-cd aegis-mcp-tools
-aegis tools install --local ./tools
+cd aegis-mcp-tools/zaru-mcp-server
+npm install
+npm run build
 ```
 
 ### Docker
@@ -236,7 +276,7 @@ aegis tools install --local ./tools
 docker pull aegis/mcp-tools:latest
 ```
 
-## 🤝 Contributing
+## Contributing
 
 We welcome contributions of new tools, but all submissions must pass security review:
 
@@ -248,7 +288,7 @@ We welcome contributions of new tools, but all submissions must pass security re
 6. Add comprehensive tests
 7. Submit PR with security checklist
 
-## 🛡️ Security Policy
+## Security Policy
 
 Found a security vulnerability? Please **DO NOT** open a public issue.
 
@@ -256,7 +296,7 @@ Email: <security@100monkeys.ai> (PGP key available)
 
 See [SECURITY.md](SECURITY.md) for our responsible disclosure policy.
 
-## 📊 Tool Compatibility Matrix
+## Tool Compatibility Matrix
 
 | Tool | MCP Version | AEGIS Version | Python | TypeScript | Rust |
 | ------ | ------------ | --------------- | -------- | ------------ | ------ |
@@ -268,11 +308,11 @@ See [SECURITY.md](SECURITY.md) for our responsible disclosure policy.
 | github | 1.0 | ≥0.1.0 | ✅ | ✅ | ⚠️ |
 | slack | 1.0 | ≥0.1.0 | ✅ | ✅ | ❌ |
 
-## 📜 License
+## License
 
 MIT License - See [LICENSE](LICENSE) for details.
 
-## 🔗 Links
+## Links
 
 - **Main Repository**: [github.com/100monkeys-ai/aegis-orchestrator](https://github.com/100monkeys-ai/aegis-orchestrator)
 - **Documentation**: [docs.100monkeys.ai](https://docs.100monkeys.ai)
