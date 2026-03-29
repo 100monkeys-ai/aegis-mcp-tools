@@ -115,6 +115,13 @@ Header: X-Zaru-Security-Context: zaru-<tier>
 
 Fallback: JSON-RPC `tools/list` via SMCP invoke.
 
+The orchestrator also exposes `aegis.tools.list` and `aegis.tools.search` as first-class MCP tools for programmatic tool discovery. These return the full tool catalog (filtered by the caller's `SecurityContext`) and can be invoked through the standard SMCP invoke path:
+
+```json
+{"tool": "aegis.tools.list", "arguments": {}}
+{"tool": "aegis.tools.search", "arguments": {"query": "workflow"}}
+```
+
 ### Canonical Message Format
 
 The signature is computed over a canonical message with lexicographically sorted keys:
