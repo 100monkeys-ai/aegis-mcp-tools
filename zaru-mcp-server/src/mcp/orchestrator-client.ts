@@ -188,9 +188,19 @@ export class OrchestratorClient {
             body: JSON.stringify(envelope)
         });
 
-        if (response.status === 401) {
+        if (response.status === 401 || response.status === 403) {
             this.sessionCache.delete(user.userId);
             return this.invokeJsonRpcWithFreshSession(user, payload);
+        }
+
+        // Session expired returns as 400 with "Session is inactive" — re-attest
+        if (response.status === 400) {
+            const body = await response.text();
+            if (body.includes('Session is inactive') || body.includes('session')) {
+                this.sessionCache.delete(user.userId);
+                return this.invokeJsonRpcWithFreshSession(user, payload);
+            }
+            throw new Error(`AEGIS invoke failed: ${response.status} ${body}`);
         }
 
         if (!response.ok) {
