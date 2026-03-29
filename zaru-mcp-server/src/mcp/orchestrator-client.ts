@@ -252,7 +252,9 @@ export class OrchestratorClient {
                 user_id: user.userId,
                 workload_id: `zaru:${user.userId}:${sessionId}`,
                 security_context: user.securityContext,
-                zaru_tier: user.tier,
+                ...(user.isOperator
+                    ? { aegis_role: user.tier }
+                    : { zaru_tier: user.tier }),
                 agent_public_key: keyPair.publicKeyRaw.toString('base64'),
                 container_id: `zaru-mcp-server:${sessionId}`
             })

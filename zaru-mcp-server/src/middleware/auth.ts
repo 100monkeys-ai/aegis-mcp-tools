@@ -6,21 +6,32 @@ export interface ZaruUser {
     tier: string;
     securityContext: string;
     token: string;
+    isOperator: boolean;
 }
 
 export interface ZaruRequest extends Request {
     zaruUser?: ZaruUser;
 }
 
+export type AegisRole = 'admin' | 'operator' | 'readonly';
+
 export type VerifiedClaims = JWTPayload & {
     sub: string;
     zaru_tier?: string;
+    aegis_role?: AegisRole;
 };
 
 export type JwtVerifier = (token: string) => Promise<VerifiedClaims>;
 
 const TOKEN_HEADER = 'x-zaru-user-token';
 const TOKEN_QUERY_PARAM = 'token';
+
+const VALID_AEGIS_ROLES = new Set<string>(['admin', 'operator', 'readonly']);
+const OPERATOR_SECURITY_CONTEXT = 'aegis-system-operator';
+
+function isValidAegisRole(role: unknown): role is AegisRole {
+    return typeof role === 'string' && VALID_AEGIS_ROLES.has(role);
+}
 
 const jwksUri = process.env.JWKS_URI || 'http://localhost:8180/realms/zaru-consumer/protocol/openid-connect/certs';
 const JWKS = createRemoteJWKSet(new URL(jwksUri));
@@ -83,27 +94,50 @@ export function createZaruAuthMiddleware(verifier: JwtVerifier = verifyJwtWithJw
         }
 
         if (process.env.BYPASS_AUTH === 'true') {
-            const tier = normalizeTier((req.headers['x-zaru-tier'] as string | undefined) ?? 'free');
-            req.zaruUser = {
-                userId: (req.headers['x-zaru-user-id'] as string | undefined) ?? 'bypass-user',
-                tier,
-                securityContext: mapTierToSecurityContext(tier),
-                token: rawToken
-            };
+            const bypassRole = req.headers['x-aegis-role'] as string | undefined;
+            if (isValidAegisRole(bypassRole)) {
+                req.zaruUser = {
+                    userId: (req.headers['x-zaru-user-id'] as string | undefined) ?? 'bypass-user',
+                    tier: bypassRole,
+                    securityContext: OPERATOR_SECURITY_CONTEXT,
+                    token: rawToken,
+                    isOperator: true
+                };
+            } else {
+                const tier = normalizeTier((req.headers['x-zaru-tier'] as string | undefined) ?? 'free');
+                req.zaruUser = {
+                    userId: (req.headers['x-zaru-user-id'] as string | undefined) ?? 'bypass-user',
+                    tier,
+                    securityContext: mapTierToSecurityContext(tier),
+                    token: rawToken,
+                    isOperator: false
+                };
+            }
             next();
             return;
         }
 
         try {
             const claims = await verifier(rawToken);
-            const tier = normalizeTier(claims.zaru_tier);
 
-            req.zaruUser = {
-                userId: claims.sub,
-                tier,
-                securityContext: mapTierToSecurityContext(tier),
-                token: rawToken
-            };
+            if (isValidAegisRole(claims.aegis_role)) {
+                req.zaruUser = {
+                    userId: claims.sub,
+                    tier: claims.aegis_role,
+                    securityContext: OPERATOR_SECURITY_CONTEXT,
+                    token: rawToken,
+                    isOperator: true
+                };
+            } else {
+                const tier = normalizeTier(claims.zaru_tier);
+                req.zaruUser = {
+                    userId: claims.sub,
+                    tier,
+                    securityContext: mapTierToSecurityContext(tier),
+                    token: rawToken,
+                    isOperator: false
+                };
+            }
 
             next();
         } catch (error) {
