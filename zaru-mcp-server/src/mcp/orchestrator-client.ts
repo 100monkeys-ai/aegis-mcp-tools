@@ -134,7 +134,7 @@ export class OrchestratorClient {
         executionId: string
     ): Promise<globalThis.Response> {
         const session = await this.getOrCreateSession(user);
-        const url = resolveUrl(this.baseUrl, `/v1/executions/${executionId}/stream?token=${session.securityToken}`);
+        const url = resolveUrl(this.baseUrl, `/v1/executions/${executionId}/events?token=${session.securityToken}`);
 
         const response = await this.fetchImpl(url, {
             method: 'GET',
@@ -147,7 +147,7 @@ export class OrchestratorClient {
         if (response.status === 401) {
             this.sessionCache.delete(user.userId);
             const freshSession = await this.getOrCreateSession(user);
-            const retryUrl = resolveUrl(this.baseUrl, `/v1/executions/${executionId}/stream?token=${freshSession.securityToken}`);
+            const retryUrl = resolveUrl(this.baseUrl, `/v1/executions/${executionId}/events?token=${freshSession.securityToken}`);
             return this.fetchImpl(retryUrl, {
                 method: 'GET',
                 headers: {
