@@ -63,13 +63,18 @@ function createMcpServerForUser(user: ZaruUser): McpServer {
 
     mcpServer.server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const { name, arguments: args } = request.params;
-        const result = await orchestratorClient.invokeTool(
-            user,
-            name,
-            args ?? {},
-            null
-        );
-        return normalizeToolResult(result);
+        try {
+            const result = await orchestratorClient.invokeTool(
+                user,
+                name,
+                args ?? {},
+                null
+            );
+            return normalizeToolResult(result);
+        } catch (error) {
+            console.error(`Tool invocation failed: ${name}`, error instanceof Error ? error.message : error);
+            throw error;
+        }
     });
 
     return mcpServer;
