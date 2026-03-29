@@ -1,5 +1,5 @@
 import type { NextFunction, Request, Response } from 'express';
-import { createRemoteJWKSet, jwtVerify, type JWTPayload } from 'jose';
+import { createRemoteJWKSet, decodeJwt, jwtVerify, type JWTPayload } from 'jose';
 
 export interface ZaruUser {
     userId: string;
@@ -33,8 +33,24 @@ function isValidAegisRole(role: unknown): role is AegisRole {
     return typeof role === 'string' && VALID_AEGIS_ROLES.has(role);
 }
 
+// Derive the trusted Keycloak host from JWKS_URI (strip /realms/... suffix)
 const jwksUri = process.env.JWKS_URI || 'http://localhost:8180/realms/zaru-consumer/protocol/openid-connect/certs';
-const JWKS = createRemoteJWKSet(new URL(jwksUri));
+const keycloakHost = jwksUri.replace(/\/realms\/.*$/, '');
+
+// Per-issuer JWKS verifier cache — one instance per realm, each handles key rotation internally
+const jwksCache = new Map<string, ReturnType<typeof createRemoteJWKSet>>();
+
+function getJwksForIssuer(issuer: string): ReturnType<typeof createRemoteJWKSet> {
+    const realmPrefix = keycloakHost + '/realms/';
+    if (!issuer.startsWith(realmPrefix)) {
+        throw new Error(`Untrusted issuer: ${issuer}`);
+    }
+    if (!jwksCache.has(issuer)) {
+        const jwksEndpoint = `${issuer}/protocol/openid-connect/certs`;
+        jwksCache.set(issuer, createRemoteJWKSet(new URL(jwksEndpoint)));
+    }
+    return jwksCache.get(issuer)!;
+}
 
 export function normalizeTier(rawTier?: string): string {
     const tier = (rawTier ?? 'free').trim().toLowerCase();
@@ -63,8 +79,16 @@ export function mapTierToSecurityContext(rawTier?: string): string {
 }
 
 export async function verifyJwtWithJwks(token: string): Promise<VerifiedClaims> {
-    const { payload } = await jwtVerify(token, JWKS, {
+    // Decode without verification to extract the issuer for JWKS routing
+    const unverified = decodeJwt(token);
+    if (!unverified.iss) {
+        throw new Error('Token missing iss claim');
+    }
+
+    const jwks = getJwksForIssuer(unverified.iss);
+    const { payload } = await jwtVerify(token, jwks, {
         algorithms: ['RS256'],
+        issuer: unverified.iss,
     });
 
     if (!payload.sub || typeof payload.sub !== 'string') {
