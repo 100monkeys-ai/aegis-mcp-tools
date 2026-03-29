@@ -1,6 +1,5 @@
 import type { NextFunction, Request, Response } from 'express';
-import jwt, { type JwtPayload } from 'jsonwebtoken';
-import jwksClient from 'jwks-rsa';
+import { createRemoteJWKSet, jwtVerify, type JWTPayload } from 'jose';
 
 export interface ZaruUser {
     userId: string;
@@ -13,7 +12,7 @@ export interface ZaruRequest extends Request {
     zaruUser?: ZaruUser;
 }
 
-export type VerifiedClaims = JwtPayload & {
+export type VerifiedClaims = JWTPayload & {
     sub: string;
     zaru_tier?: string;
 };
@@ -23,25 +22,8 @@ export type JwtVerifier = (token: string) => Promise<VerifiedClaims>;
 const TOKEN_HEADER = 'x-zaru-user-token';
 const TOKEN_QUERY_PARAM = 'token';
 
-const client = jwksClient({
-    jwksUri: process.env.JWKS_URI || 'http://localhost:8180/realms/zaru-consumer/protocol/openid-connect/certs'
-});
-
-function getKey(header: jwt.JwtHeader, callback: jwt.SigningKeyCallback) {
-    if (!header.kid) {
-        callback(new Error('JWT missing kid header'), undefined);
-        return;
-    }
-
-    client.getSigningKey(header.kid, (err, key) => {
-        if (err || !key) {
-            callback(err || new Error('Unable to resolve JWKS signing key'), undefined);
-            return;
-        }
-
-        callback(null, key.getPublicKey());
-    });
-}
+const jwksUri = process.env.JWKS_URI || 'http://localhost:8180/realms/zaru-consumer/protocol/openid-connect/certs';
+const JWKS = createRemoteJWKSet(new URL(jwksUri));
 
 export function normalizeTier(rawTier?: string): string {
     const tier = (rawTier ?? 'free').trim().toLowerCase();
@@ -70,28 +52,15 @@ export function mapTierToSecurityContext(rawTier?: string): string {
 }
 
 export async function verifyJwtWithJwks(token: string): Promise<VerifiedClaims> {
-    return new Promise((resolve, reject) => {
-        jwt.verify(
-            token,
-            getKey,
-            {
-                algorithms: ['RS256']
-            },
-            (err, decoded) => {
-                if (err || !decoded || typeof decoded === 'string') {
-                    reject(err || new Error('Invalid JWT payload'));
-                    return;
-                }
-
-                if (!decoded.sub || typeof decoded.sub !== 'string') {
-                    reject(new Error('Token missing sub claim'));
-                    return;
-                }
-
-                resolve(decoded as VerifiedClaims);
-            }
-        );
+    const { payload } = await jwtVerify(token, JWKS, {
+        algorithms: ['RS256'],
     });
+
+    if (!payload.sub || typeof payload.sub !== 'string') {
+        throw new Error('Token missing sub claim');
+    }
+
+    return payload as VerifiedClaims;
 }
 
 function extractBearerToken(header?: string): string | undefined {
