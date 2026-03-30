@@ -58,18 +58,49 @@ function createMcpServerForUser(user: ZaruUser): McpServer {
 
     mcpServer.server.setRequestHandler(ListToolsRequestSchema, async () => {
         const tools = await orchestratorClient.listTools(user);
-        return { tools };
+        return {
+            tools: [
+                ...tools,
+                {
+                    name: 'zaru.switch_mode',
+                    description:
+                        "Suggest the user switch to a different conversation mode. Use this when the user's request cannot be fulfilled in the current mode. This renders a confirmation card inline in the chat — the user can accept, refuse, or dismiss.",
+                    inputSchema: {
+                        type: 'object',
+                        properties: {
+                            target_mode: {
+                                type: 'string',
+                                enum: ['chat', 'agentic', 'architect', 'operator'],
+                                description: 'The mode to switch to.',
+                            },
+                            reason: {
+                                type: 'string',
+                                description: 'Short, plain-language explanation for the user. One sentence.',
+                            },
+                        },
+                        required: ['target_mode', 'reason'],
+                    },
+                },
+            ],
+        };
     });
 
     mcpServer.server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const { name, arguments: args } = request.params;
+
+        // Handle client-side tools locally — never forward to AEGIS
+        if (name === 'zaru.switch_mode') {
+            const targetMode = (args as Record<string, unknown>)?.target_mode as string;
+            const reason = (args as Record<string, unknown>)?.reason as string;
+            return normalizeToolResult({
+                action: 'mode_switch_requested',
+                target_mode: targetMode,
+                reason,
+            });
+        }
+
         try {
-            const result = await orchestratorClient.invokeTool(
-                user,
-                name,
-                args ?? {},
-                null
-            );
+            const result = await orchestratorClient.invokeTool(user, name, args ?? {}, null);
             return normalizeToolResult(result);
         } catch (error) {
             console.error(`Tool invocation failed: ${name}`, error instanceof Error ? error.message : error);
