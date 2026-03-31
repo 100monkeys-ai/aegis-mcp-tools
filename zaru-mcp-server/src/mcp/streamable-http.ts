@@ -70,7 +70,7 @@ function createMcpServerForUser(user: ZaruUser): McpServer {
                         properties: {
                             target_mode: {
                                 type: 'string',
-                                enum: ['chat', 'agentic', 'architect', 'operator'],
+                                enum: ['chat', 'agentic', 'architect', 'operator', 'execute'],
                                 description: 'The mode to switch to.',
                             },
                             reason: {
