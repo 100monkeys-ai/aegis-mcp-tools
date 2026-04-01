@@ -231,7 +231,7 @@ export class OrchestratorClient {
 
     private async getOrCreateSession(user: ZaruUser): Promise<ZaruSmcpSession> {
         const existing = this.sessionCache.get(user.userId);
-        if (existing && existing.securityContext === user.securityContext) {
+        if (existing && existing.securityContext === user.securityContext && Date.now() < existing.expiresAt) {
             return existing;
         }
 
@@ -269,11 +269,16 @@ export class OrchestratorClient {
             throw new Error('Attestation response did not include security_token');
         }
 
+        const expiresAt = body.expires_at
+            ? new Date(body.expires_at).getTime()
+            : Date.now() + 50 * 60 * 1000;
+
         return {
             sessionId,
             securityToken: body.security_token,
             securityContext: user.securityContext,
-            keyPair
+            keyPair,
+            expiresAt
         };
     }
 }

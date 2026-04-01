@@ -12,6 +12,7 @@ export interface ZaruSmcpSession {
     securityToken: string;
     securityContext: string;
     keyPair: SessionKeyPair;
+    expiresAt: number;
 }
 
 function sortRecursively(value: unknown): unknown {
