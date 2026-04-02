@@ -183,7 +183,8 @@ export class OrchestratorClient {
         const response = await this.fetchImpl(resolveUrl(this.baseUrl, '/v1/seal/invoke'), {
             method: 'POST',
             headers: {
-                'Content-Type': 'application/json'
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${session.securityToken}`
             },
             body: JSON.stringify(envelope)
         });
@@ -217,7 +218,8 @@ export class OrchestratorClient {
         const response = await this.fetchImpl(resolveUrl(this.baseUrl, '/v1/seal/invoke'), {
             method: 'POST',
             headers: {
-                'Content-Type': 'application/json'
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${session.securityToken}`
             },
             body: JSON.stringify(envelope)
         });
