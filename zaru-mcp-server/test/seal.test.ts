@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { verify } from 'crypto';
-import { buildCanonicalMessage, buildSmcpEnvelope, createSessionKeyPair, stableStringify } from '../src/mcp/smcp.js';
+import { buildCanonicalMessage, buildSealEnvelope, createSessionKeyPair, stableStringify } from '../src/mcp/seal.js';
 
 test('stableStringify sorts object keys recursively', () => {
     const value = {
@@ -15,7 +15,7 @@ test('stableStringify sorts object keys recursively', () => {
     assert.equal(stableStringify(value), '{"a":{"b":2,"c":3},"z":1}');
 });
 
-test('buildSmcpEnvelope produces a verifiable canonical signature', () => {
+test('buildSealEnvelope produces a verifiable canonical signature', () => {
     const keyPair = createSessionKeyPair();
     const payload = {
         jsonrpc: '2.0',
@@ -29,10 +29,10 @@ test('buildSmcpEnvelope produces a verifiable canonical signature', () => {
         }
     };
 
-    const envelope = buildSmcpEnvelope('security-token', payload, keyPair.privateKey, '2026-03-21T12:34:56.000Z');
+    const envelope = buildSealEnvelope('security-token', payload, keyPair.privateKey, '2026-03-21T12:34:56.000Z');
     const message = buildCanonicalMessage(envelope.security_token, envelope.payload, envelope.timestamp);
 
-    assert.equal(envelope.protocol, 'smcp/v1');
+    assert.equal(envelope.protocol, 'seal/v1');
     assert.match(envelope.timestamp, /^2026-03-21T12:34:56.000Z$/);
     assert.equal(
         verify(null, message, keyPair.publicKey, Buffer.from(envelope.signature, 'base64')),

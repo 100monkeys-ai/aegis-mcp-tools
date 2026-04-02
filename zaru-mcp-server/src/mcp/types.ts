@@ -26,8 +26,8 @@ export interface AegisToolDefinition {
     inputSchema: Record<string, unknown>;
 }
 
-export interface SmcpEnvelope {
-    protocol: "smcp/v1";
+export interface SealEnvelope {
+    protocol: "seal/v1";
     security_token: string;
     signature: string;
     payload: JsonRpcRequest;

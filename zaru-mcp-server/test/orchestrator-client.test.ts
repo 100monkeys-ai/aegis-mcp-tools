@@ -15,7 +15,7 @@ test('listTools uses orchestrator discovery and caches by security context', asy
     const calls: Array<{ method: string; url: string; headers?: Record<string, string> }> = [];
     const client = new OrchestratorClient({
         baseUrl: 'http://aegis.test',
-        toolDiscoveryUrl: 'http://aegis.test/v1/smcp/tools',
+        toolDiscoveryUrl: 'http://aegis.test/v1/seal/tools',
         cacheTtlMs: 60_000,
         fetchImpl: async (input, init) => {
             calls.push({
@@ -65,7 +65,7 @@ test('listTools uses orchestrator discovery and caches by security context', asy
     assert.equal(calls.length, 1);
     assert.deepEqual(calls[0], {
         method: 'GET',
-        url: 'http://aegis.test/v1/smcp/tools',
+        url: 'http://aegis.test/v1/seal/tools',
         headers: {
             Accept: 'application/json',
             'X-Zaru-Security-Context': 'zaru-free'
@@ -73,7 +73,7 @@ test('listTools uses orchestrator discovery and caches by security context', asy
     });
 });
 
-test('invokeTool attests and sends a spec-shaped SMCP envelope', async () => {
+test('invokeTool attests and sends a spec-shaped SEAL envelope', async () => {
     const calls: Array<{ url: string; body?: Record<string, unknown> }> = [];
     const client = new OrchestratorClient({
         baseUrl: 'http://aegis.test',
@@ -82,11 +82,11 @@ test('invokeTool attests and sends a spec-shaped SMCP envelope', async () => {
             const body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : undefined;
             calls.push({ url, body });
 
-            if (url.endsWith('/v1/smcp/attest')) {
+            if (url.endsWith('/v1/seal/attest')) {
                 return jsonResponse({ security_token: 'issued-token' });
             }
 
-            if (url.endsWith('/v1/smcp/invoke')) {
+            if (url.endsWith('/v1/seal/invoke')) {
                 return jsonResponse({
                     jsonrpc: '2.0',
                     id: 'req-2',
@@ -120,7 +120,7 @@ test('invokeTool attests and sends a spec-shaped SMCP envelope', async () => {
         isError: false
     });
     assert.equal(calls.length, 2);
-    assert.equal(calls[0]?.url, 'http://aegis.test/v1/smcp/attest');
+    assert.equal(calls[0]?.url, 'http://aegis.test/v1/seal/attest');
     assert.equal(calls[0]?.body?.user_id, 'user-2');
     assert.equal(calls[0]?.body?.workload_id?.toString().startsWith('zaru:user-2:'), true);
     assert.equal(calls[0]?.body?.security_context, 'zaru-enterprise');
@@ -128,8 +128,8 @@ test('invokeTool attests and sends a spec-shaped SMCP envelope', async () => {
     assert.equal(calls[0]?.body?.agent_id, undefined);
     assert.equal(calls[0]?.body?.execution_id, undefined);
     assert.equal(typeof calls[0]?.body?.agent_public_key, 'string');
-    assert.equal(calls[1]?.url, 'http://aegis.test/v1/smcp/invoke');
-    assert.equal(calls[1]?.body?.protocol, 'smcp/v1');
+    assert.equal(calls[1]?.url, 'http://aegis.test/v1/seal/invoke');
+    assert.equal(calls[1]?.body?.protocol, 'seal/v1');
     assert.equal(calls[1]?.body?.security_token, 'issued-token');
     assert.equal((calls[1]?.body?.payload as { method: string }).method, 'tools/call');
     assert.deepEqual((calls[1]?.body?.payload as { params: unknown }).params, {

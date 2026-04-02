@@ -3,14 +3,14 @@
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 > **Secure MCP gateway that proxies tool calls to the**
-> **AEGIS orchestrator via SMCP envelope signing**
+> **AEGIS orchestrator via SEAL envelope signing**
 
 This repository contains the **zaru-mcp-server**, an
 MCP-compliant gateway/proxy that securely forwards
 `tools/list` and `tools/call` requests to the AEGIS
 orchestrator. It does not implement individual tools —
 instead, it exposes whatever tools are registered in the
-orchestrator, handling authentication, SMCP envelope
+orchestrator, handling authentication, SEAL envelope
 signing, and transport (SSE and Streamable HTTP).
 
 ## Purpose
@@ -19,7 +19,7 @@ The zaru-mcp-server addresses the "Supply Chain Risk"
 identified in OpenClaw deployments by providing:
 
 1. **Secure Gateway**: All tool calls are authenticated
-   and signed via SMCP envelopes
+   and signed via SEAL envelopes
 2. **Sandboxed Execution**: Tools run with minimal
    permissions on the orchestrator side
 3. **Audit Trail**: All tool invocations are logged immutably
@@ -33,7 +33,7 @@ identified in OpenClaw deployments by providing:
 > repository. This repo contains the MCP gateway
 > (`zaru-mcp-server`) that securely proxies
 > `tools/list` and `tools/call` requests to the
-> orchestrator via SMCP envelope signing. The tools
+> orchestrator via SEAL envelope signing. The tools
 > listed here describe the orchestrator's tool
 > catalog for reference.
 
@@ -230,7 +230,7 @@ aegis-mcp-tools/
 │   │   ├── mcp/
 │   │   │   ├── index.ts      # MCP protocol handler
 │   │   │   ├── orchestrator-client.ts  # AEGIS orchestrator client
-│   │   │   ├── smcp.ts       # SMCP envelope signing
+│   │   │   ├── seal.ts       # SEAL envelope signing
 │   │   │   ├── sse.ts        # SSE transport
 │   │   │   ├── streamable-http.ts      # Streamable HTTP transport
 │   │   │   └── types.ts      # Shared type definitions
@@ -239,7 +239,7 @@ aegis-mcp-tools/
 │   ├── test/
 │   │   ├── auth.test.ts
 │   │   ├── orchestrator-client.test.ts
-│   │   └── smcp.test.ts
+│   │   └── seal.test.ts
 │   ├── dist/                  # Compiled output
 │   ├── Dockerfile
 │   ├── package.json

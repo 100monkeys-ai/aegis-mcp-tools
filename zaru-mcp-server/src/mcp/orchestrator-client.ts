@@ -1,5 +1,5 @@
 import type { ZaruUser } from '../middleware/auth.js';
-import { buildSmcpEnvelope, createSessionId, createSessionKeyPair, type ZaruSmcpSession } from './smcp.js';
+import { buildSealEnvelope, createSessionId, createSessionKeyPair, type ZaruSealSession } from './seal.js';
 import type { AegisToolDefinition, JsonRpcRequest } from './types.js';
 
 type FetchLike = typeof fetch;
@@ -72,7 +72,7 @@ export class OrchestratorClient {
     private readonly toolDiscoveryUrl: string;
     private readonly fetchImpl: FetchLike;
     private readonly cacheTtlMs: number;
-    private readonly sessionCache = new Map<string, ZaruSmcpSession>();
+    private readonly sessionCache = new Map<string, ZaruSealSession>();
     private readonly toolCache = new Map<string, ToolDiscoveryCacheEntry>();
 
     constructor(options: OrchestratorClientOptions = {}) {
@@ -80,7 +80,7 @@ export class OrchestratorClient {
         this.toolDiscoveryUrl =
             options.toolDiscoveryUrl ??
             process.env.AEGIS_TOOL_DISCOVERY_URL ??
-            resolveUrl(this.baseUrl, '/v1/smcp/tools');
+            resolveUrl(this.baseUrl, '/v1/seal/tools');
         this.fetchImpl = options.fetchImpl ?? fetch;
         this.cacheTtlMs = options.cacheTtlMs ?? Number(process.env.AEGIS_TOOL_CACHE_TTL_MS ?? 5000);
     }
@@ -179,8 +179,8 @@ export class OrchestratorClient {
 
     private async invokeJsonRpc(user: ZaruUser, payload: JsonRpcRequest): Promise<unknown> {
         const session = await this.getOrCreateSession(user);
-        const envelope = buildSmcpEnvelope(session.securityToken, payload, session.keyPair.privateKey);
-        const response = await this.fetchImpl(resolveUrl(this.baseUrl, '/v1/smcp/invoke'), {
+        const envelope = buildSealEnvelope(session.securityToken, payload, session.keyPair.privateKey);
+        const response = await this.fetchImpl(resolveUrl(this.baseUrl, '/v1/seal/invoke'), {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -213,8 +213,8 @@ export class OrchestratorClient {
     private async invokeJsonRpcWithFreshSession(user: ZaruUser, payload: JsonRpcRequest): Promise<unknown> {
         const session = await this.createSession(user);
         this.sessionCache.set(user.userId, session);
-        const envelope = buildSmcpEnvelope(session.securityToken, payload, session.keyPair.privateKey);
-        const response = await this.fetchImpl(resolveUrl(this.baseUrl, '/v1/smcp/invoke'), {
+        const envelope = buildSealEnvelope(session.securityToken, payload, session.keyPair.privateKey);
+        const response = await this.fetchImpl(resolveUrl(this.baseUrl, '/v1/seal/invoke'), {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -229,7 +229,7 @@ export class OrchestratorClient {
         return normalizeToolCallResult(await response.json());
     }
 
-    private async getOrCreateSession(user: ZaruUser): Promise<ZaruSmcpSession> {
+    private async getOrCreateSession(user: ZaruUser): Promise<ZaruSealSession> {
         const existing = this.sessionCache.get(user.userId);
         if (existing && existing.securityContext === user.securityContext && Date.now() < existing.expiresAt) {
             return existing;
@@ -240,10 +240,10 @@ export class OrchestratorClient {
         return session;
     }
 
-    private async createSession(user: ZaruUser): Promise<ZaruSmcpSession> {
+    private async createSession(user: ZaruUser): Promise<ZaruSealSession> {
         const sessionId = createSessionId();
         const keyPair = createSessionKeyPair();
-        const response = await this.fetchImpl(resolveUrl(this.baseUrl, '/v1/smcp/attest'), {
+        const response = await this.fetchImpl(resolveUrl(this.baseUrl, '/v1/seal/attest'), {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'

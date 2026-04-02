@@ -30,7 +30,7 @@ function createMcpServerForUser(user: ZaruUser): McpServer {
                     listChanged: true,
                 },
             },
-            instructions: 'This MCP endpoint proxies AEGIS tools over SMCP v1.',
+            instructions: 'This MCP endpoint proxies AEGIS tools over SEAL v1.',
         }
     );
 

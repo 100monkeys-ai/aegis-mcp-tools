@@ -82,10 +82,10 @@ export async function handleMcpRequest(req: ZaruRequest, res: Response) {
                     name: 'zaru-mcp-server',
                     version: '0.14.0-pre-alpha'
                 },
-                instructions: 'This MCP endpoint proxies AEGIS tools over SMCP v1.',
+                instructions: 'This MCP endpoint proxies AEGIS tools over SEAL v1.',
                 _meta: {
-                    smcp: {
-                        protocol: 'smcp/v1',
+                    seal: {
+                        protocol: 'seal/v1',
                         transport: 'streamable-http',
                         discovery: 'orchestrator'
                     }

@@ -1,6 +1,6 @@
 # Zaru MCP Server
 
-MCP bridge that lets the Zaru client talk to AEGIS through SMCP. Supports StreamableHTTP (primary) and SSE (legacy) transports.
+MCP bridge that lets the Zaru client talk to AEGIS through SEAL. Supports StreamableHTTP (primary) and SSE (legacy) transports.
 
 ## What It Does
 
@@ -8,7 +8,7 @@ MCP bridge that lets the Zaru client talk to AEGIS through SMCP. Supports Stream
 - Validates the Zaru client JWT from `Authorization: Bearer` header or `X-Zaru-User-Token`
 - Resolves the user's `zaru_tier` claim to an AEGIS `SecurityContext`
 - Discovers the current AEGIS tool inventory from the orchestrator (not hardcoded locally)
-- Attests an ephemeral Ed25519 session and forwards `tools/call` requests as SMCP envelopes to AEGIS
+- Attests an ephemeral Ed25519 session and forwards `tools/call` requests as SEAL envelopes to AEGIS
 - Proxies execution event streams from the orchestrator for Glass Lab visualization
 
 The orchestrator owns the `aegis.*` tool surface and filters it by the caller's tier-derived `SecurityContext`, so `zaru-pro`, `zaru-business`, and `zaru-enterprise` surface the full management set while `zaru-free` remains restricted.
@@ -42,7 +42,7 @@ JWKS_URI=http://keycloak:8080/realms/zaru-consumer/protocol/openid-connect/certs
 AEGIS_ORCHESTRATOR_URL=http://aegis-node:8088
 
 # Optional: override tool discovery path
-AEGIS_TOOL_DISCOVERY_URL=http://aegis-node:8088/v1/smcp/tools
+AEGIS_TOOL_DISCOVERY_URL=http://aegis-node:8088/v1/seal/tools
 
 # Optional: cache TTL for tool discovery responses
 AEGIS_TOOL_CACHE_TTL_MS=5000
@@ -65,12 +65,12 @@ JWT verification is performed against `JWKS_URI` (Keycloak JWKS endpoint):
 - `zaru_tier` must resolve to one of `free`, `pro`, `business`, or `enterprise`
 - Tiers map to SecurityContexts: `zaru-free`, `zaru-pro`, `zaru-business`, `zaru-enterprise`
 
-## SMCP Contract
+## SEAL Contract
 
 ### Attestation
 
 ```text
-POST ${AEGIS_ORCHESTRATOR_URL}/v1/smcp/attest
+POST ${AEGIS_ORCHESTRATOR_URL}/v1/seal/attest
 ```
 
 Request body:
@@ -91,14 +91,14 @@ Response: `{ "security_token": "<JWT>" }`
 ### Tool Invocation
 
 ```text
-POST ${AEGIS_ORCHESTRATOR_URL}/v1/smcp/invoke
+POST ${AEGIS_ORCHESTRATOR_URL}/v1/seal/invoke
 ```
 
-Every tool invocation is wrapped in an SMCP envelope:
+Every tool invocation is wrapped in an SEAL envelope:
 
 ```json
 {
-  "protocol": "smcp/v1",
+  "protocol": "seal/v1",
   "security_token": "<JWT from attestation>",
   "signature": "<base64-encoded Ed25519 signature>",
   "payload": { "<MCP JSON-RPC>" },
@@ -113,9 +113,9 @@ GET ${AEGIS_TOOL_DISCOVERY_URL}
 Header: X-Zaru-Security-Context: zaru-<tier>
 ```
 
-Fallback: JSON-RPC `tools/list` via SMCP invoke.
+Fallback: JSON-RPC `tools/list` via SEAL invoke.
 
-The orchestrator also exposes `aegis.tools.list` and `aegis.tools.search` as first-class MCP tools for programmatic tool discovery. These return the full tool catalog (filtered by the caller's `SecurityContext`) and can be invoked through the standard SMCP invoke path:
+The orchestrator also exposes `aegis.tools.list` and `aegis.tools.search` as first-class MCP tools for programmatic tool discovery. These return the full tool catalog (filtered by the caller's `SecurityContext`) and can be invoked through the standard SEAL invoke path:
 
 ```json
 {"tool": "aegis.tools.list", "arguments": {}}

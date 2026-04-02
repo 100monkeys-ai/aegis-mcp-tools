@@ -1,5 +1,5 @@
 import { generateKeyPairSync, randomUUID, sign, type KeyObject } from 'crypto';
-import type { JsonRpcRequest, SmcpEnvelope } from './types.js';
+import type { JsonRpcRequest, SealEnvelope } from './types.js';
 
 export interface SessionKeyPair {
     privateKey: KeyObject;
@@ -7,7 +7,7 @@ export interface SessionKeyPair {
     publicKeyRaw: Buffer;
 }
 
-export interface ZaruSmcpSession {
+export interface ZaruSealSession {
     sessionId: string;
     securityToken: string;
     securityContext: string;
@@ -41,7 +41,7 @@ export function createSessionKeyPair(): SessionKeyPair {
     const jwk = publicKey.export({ format: 'jwk' }) as JsonWebKey;
 
     if (!jwk.x) {
-        throw new Error('Unable to export Ed25519 public key for SMCP attestation');
+        throw new Error('Unable to export Ed25519 public key for SEAL attestation');
     }
 
     return {
@@ -62,7 +62,7 @@ export function buildCanonicalMessage(
 ): Buffer {
     const timestampUnix = Math.floor(new Date(timestampIso).getTime() / 1000);
     if (!Number.isFinite(timestampUnix)) {
-        throw new Error(`Invalid SMCP timestamp: ${timestampIso}`);
+        throw new Error(`Invalid SEAL timestamp: ${timestampIso}`);
     }
 
     return Buffer.from(
@@ -75,17 +75,17 @@ export function buildCanonicalMessage(
     );
 }
 
-export function buildSmcpEnvelope(
+export function buildSealEnvelope(
     securityToken: string,
     payload: JsonRpcRequest,
     privateKey: SessionKeyPair['privateKey'],
     timestampIso = new Date().toISOString()
-): SmcpEnvelope {
+): SealEnvelope {
     const message = buildCanonicalMessage(securityToken, payload, timestampIso);
     const signature = sign(null, message, privateKey).toString('base64');
 
     return {
-        protocol: 'smcp/v1',
+        protocol: 'seal/v1',
         security_token: securityToken,
         signature,
         payload,
