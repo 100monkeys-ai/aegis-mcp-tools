@@ -257,7 +257,7 @@ export class OrchestratorClient {
                 ...(user.isOperator
                     ? { aegis_role: user.tier }
                     : { zaru_tier: user.tier }),
-                agent_public_key: keyPair.publicKeyRaw.toString('base64'),
+                public_key: keyPair.publicKeyRaw.toString('base64'),
                 container_id: `zaru-mcp-server:${sessionId}`
             })
         });
