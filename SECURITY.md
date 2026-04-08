@@ -25,23 +25,23 @@ AEGIS MCP Tools is designed to address the "Supply Chain Risk" identified in Ope
 
 ```markdown
 ┌─────────────────────────────────────────┐
-│         AEGIS Orchestrator              │
-│         (Trusted Runtime)               │
+│ AEGIS Orchestrator │
+│ (Trusted Runtime) │
 └──────────────┬──────────────────────────┘
-               │
-               ▼
+│
+▼
 ┌─────────────────────────────────────────┐
-│         MCP Tool (This Repository)      │
-│         (Sandboxed Execution)           │
-│  • Input validation                     │
-│  • Resource limits                      │
-│  • Permission enforcement               │
+│ MCP Tool (This Repository) │
+│ (Sandboxed Execution) │
+│ • Input validation │
+│ • Resource limits │
+│ • Permission enforcement │
 └──────────────┬──────────────────────────┘
-               │
-               ▼
+│
+▼
 ┌─────────────────────────────────────────┐
-│     External Services / Filesystem      │
-│     (Untrusted)                         │
+│ External Services / Filesystem │
+│ (Untrusted) │
 └─────────────────────────────────────────┘
 ```
 
@@ -65,11 +65,11 @@ from aegis_mcp_tools.validators import validate_path, validate_url
 def read_file(path: str):
     # Validate and sanitize
     safe_path = validate_path(path, allowed_dirs=["/data"])
-    
+
     # Enforce chroot
     if not safe_path.startswith("/data"):
         raise SecurityError("Path outside allowed directory")
-    
+
     # Check file size
     if os.path.getsize(safe_path) > MAX_FILE_SIZE:
         raise SecurityError("File too large")
@@ -81,10 +81,10 @@ Every tool has hard limits:
 
 ```yaml
 resources:
-  max_memory: "256MB"     # Hard limit
-  max_cpu: "0.5"          # CPU shares
-  timeout: "30s"          # Max execution time
-  max_network: "10MB/s"   # Bandwidth cap
+  max_memory: "256MB" # Hard limit
+  max_cpu: "0.5" # CPU shares
+  timeout: "30s" # Max execution time
+  max_network: "10MB/s" # Bandwidth cap
 ```
 
 ### 3. Permission Enforcement

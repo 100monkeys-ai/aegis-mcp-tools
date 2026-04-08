@@ -150,11 +150,11 @@ security:
 version: "1.0"
 agent:
   name: "my-agent"
-  
+
 tools:
   - "mcp:filesystem@aegis/mcp-tools"
   - "mcp:web-search@aegis/mcp-tools"
-  
+
 permissions:
   filesystem:
     read: ["/data"]
@@ -176,12 +176,12 @@ result = await agent.execute("Search the web and save results")
 ### With AEGIS SDK (TypeScript)
 
 ```typescript
-import { Agent } from '@aegis/sdk';
+import { Agent } from "@aegis/sdk";
 
-const agent = await Agent.fromManifest('agent.yaml');
+const agent = await Agent.fromManifest("agent.yaml");
 
 // Tools inherit agent's security context
-const result = await agent.execute('Search the web and save results');
+const result = await agent.execute("Search the web and save results");
 ```
 
 ## Development
@@ -298,15 +298,15 @@ See [SECURITY.md](SECURITY.md) for our responsible disclosure policy.
 
 ## Tool Compatibility Matrix
 
-| Tool | MCP Version | AEGIS Version | Python | TypeScript | Rust |
-| ------ | ------------ | --------------- | -------- | ------------ | ------ |
-| filesystem | 1.0 | ≥0.1.0 | ✅ | ✅ | ✅ |
-| web-search | 1.0 | ≥0.1.0 | ✅ | ✅ | ✅ |
-| browser | 1.0 | ≥0.2.0 | ✅ | ✅ | ⚠️ |
-| database | 1.0 | ≥0.1.0 | ✅ | ✅ | ✅ |
-| gmail | 1.0 | ≥0.1.0 | ✅ | ✅ | ❌ |
-| github | 1.0 | ≥0.1.0 | ✅ | ✅ | ⚠️ |
-| slack | 1.0 | ≥0.1.0 | ✅ | ✅ | ❌ |
+| Tool       | MCP Version | AEGIS Version | Python | TypeScript | Rust |
+| ---------- | ----------- | ------------- | ------ | ---------- | ---- |
+| filesystem | 1.0         | ≥0.1.0        | ✅     | ✅         | ✅   |
+| web-search | 1.0         | ≥0.1.0        | ✅     | ✅         | ✅   |
+| browser    | 1.0         | ≥0.2.0        | ✅     | ✅         | ⚠️   |
+| database   | 1.0         | ≥0.1.0        | ✅     | ✅         | ✅   |
+| gmail      | 1.0         | ≥0.1.0        | ✅     | ✅         | ❌   |
+| github     | 1.0         | ≥0.1.0        | ✅     | ✅         | ⚠️   |
+| slack      | 1.0         | ≥0.1.0        | ✅     | ✅         | ❌   |
 
 ## License
 

@@ -27,12 +27,12 @@ git checkout -b tool/my-new-tool
 
 ```markdown
 tools/my-tool/
-├── schema.json          # MCP schema definition
-├── server.py            # Implementation (Python or TypeScript)
-├── security.yaml        # Security manifest
-├── README.md            # Tool documentation
+├── schema.json # MCP schema definition
+├── server.py # Implementation (Python or TypeScript)
+├── security.yaml # Security manifest
+├── README.md # Tool documentation
 └── tests/
-    └── test_my_tool.py  # Comprehensive tests
+└── test_my_tool.py # Comprehensive tests
 ```
 
 ### 4. Security Manifest (Required)
