@@ -146,37 +146,19 @@ export class OrchestratorClient {
     user: ZaruUser,
     executionId: string,
   ): Promise<globalThis.Response> {
-    const session = await this.getOrCreateSession(user);
     const url = resolveUrl(
       this.baseUrl,
-      `/v1/executions/${executionId}/events?token=${session.securityToken}`,
+      `/v1/executions/${executionId}/events`,
     );
 
-    const response = await this.fetchImpl(url, {
+    return this.fetchImpl(url, {
       method: "GET",
       headers: {
         Accept: "text/event-stream",
         "Cache-Control": "no-cache",
+        Authorization: `Bearer ${user.token}`,
       },
     });
-
-    if (response.status === 401) {
-      this.sessionCache.delete(user.userId);
-      const freshSession = await this.getOrCreateSession(user);
-      const retryUrl = resolveUrl(
-        this.baseUrl,
-        `/v1/executions/${executionId}/events?token=${freshSession.securityToken}`,
-      );
-      return this.fetchImpl(retryUrl, {
-        method: "GET",
-        headers: {
-          Accept: "text/event-stream",
-          "Cache-Control": "no-cache",
-        },
-      });
-    }
-
-    return response;
   }
 
   async invokeTool(
