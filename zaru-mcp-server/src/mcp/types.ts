@@ -1,35 +1,35 @@
 export interface JsonRpcRequest {
-    jsonrpc: string;
-    id?: string | number | null;
-    method: string;
-    params?: Record<string, unknown>;
+  jsonrpc: string;
+  id?: string | number | null;
+  method: string;
+  params?: Record<string, unknown>;
 }
 
 export interface JsonRpcSuccess {
-    jsonrpc: "2.0";
-    id: string | number | null;
-    result: unknown;
+  jsonrpc: "2.0";
+  id: string | number | null;
+  result: unknown;
 }
 
 export interface JsonRpcFailure {
-    jsonrpc: "2.0";
-    id: string | number | null;
-    error: {
-        code: number;
-        message: string;
-    };
+  jsonrpc: "2.0";
+  id: string | number | null;
+  error: {
+    code: number;
+    message: string;
+  };
 }
 
 export interface AegisToolDefinition {
-    name: string;
-    description: string;
-    inputSchema: Record<string, unknown>;
+  name: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
 }
 
 export interface SealEnvelope {
-    protocol: "seal/v1";
-    security_token: string;
-    signature: string;
-    payload: JsonRpcRequest;
-    timestamp: string;
+  protocol: "seal/v1";
+  security_token: string;
+  signature: string;
+  payload: JsonRpcRequest;
+  timestamp: string;
 }

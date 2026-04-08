@@ -126,11 +126,9 @@ export function createZaruAuthMiddleware(
       (req.query[TOKEN_QUERY_PARAM] as string | undefined);
 
     if (!rawToken) {
-      res
-        .status(401)
-        .json({
-          error: `Unauthorized: Missing ${TOKEN_HEADER} header or ${TOKEN_QUERY_PARAM} query parameter`,
-        });
+      res.status(401).json({
+        error: `Unauthorized: Missing ${TOKEN_HEADER} header or ${TOKEN_QUERY_PARAM} query parameter`,
+      });
       return;
     }
 
