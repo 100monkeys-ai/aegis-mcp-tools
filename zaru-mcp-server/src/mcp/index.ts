@@ -93,7 +93,7 @@ export async function handleMcpRequest(req: ZaruRequest, res: Response) {
         },
         serverInfo: {
           name: "zaru-mcp-server",
-          version: "0.14.0-pre-alpha",
+          version: "0.15.0-pre-alpha",
         },
         instructions: "This MCP endpoint proxies AEGIS tools over SEAL v1.",
         _meta: {
