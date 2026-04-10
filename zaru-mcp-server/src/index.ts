@@ -59,21 +59,32 @@ app.get(
         return;
       }
 
-      const pump = async () => {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          res.write(value);
-        }
-        res.end();
-      };
+      let clientDisconnected = false;
 
-      // Handle client disconnect
       req.on("close", () => {
-        reader.cancel();
+        clientDisconnected = true;
+        reader.cancel().catch(() => {});
       });
 
-      pump().catch(() => res.end());
+      const pump = async () => {
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            if (!res.writableEnded) res.write(value);
+          }
+        } catch {
+          if (!clientDisconnected && !res.writableEnded) {
+            res.write(
+              `event: error\ndata: ${JSON.stringify({ message: "stream terminated" })}\n\n`,
+            );
+          }
+        } finally {
+          if (!res.writableEnded) res.end();
+        }
+      };
+
+      pump();
     } catch (error) {
       if (!res.headersSent) {
         res.status(502).json({ error: "Failed to connect to orchestrator" });
