@@ -77,7 +77,7 @@ function createMcpServerForUser(user: ZaruUser): McpServer {
             properties: {
               target_mode: {
                 type: "string",
-                enum: ["chat", "agentic", "architect", "operator", "execute"],
+                enum: ["chat", "agentic", "workflow", "operator", "execute"],
                 description: "The mode to switch to.",
               },
               reason: {
