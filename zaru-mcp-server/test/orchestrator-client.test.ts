@@ -190,3 +190,52 @@ test("invokeTool attests and sends a spec-shaped SEAL envelope", async () => {
   assert.equal(typeof calls[1]?.body?.timestamp, "string");
   assert.equal(typeof calls[1]?.body?.signature, "string");
 });
+
+test("invokeTool does NOT retry when 400 body contains 'session' in an unrelated error", async () => {
+  let invokeCount = 0;
+  const client = new OrchestratorClient({
+    baseUrl: "http://aegis.test",
+    fetchImpl: async (input, init) => {
+      const url = String(input);
+
+      if (url.endsWith("/v1/seal/attest")) {
+        return jsonResponse({ security_token: "issued-token" });
+      }
+
+      if (url.endsWith("/v1/seal/invoke")) {
+        invokeCount++;
+        // Simulate a non-session error that happens to contain the word "session"
+        return new Response(
+          "SEAL session error: aegis.execution.file: storage error",
+          { status: 400 },
+        );
+      }
+
+      return jsonResponse({}, 404);
+    },
+  });
+
+  const user = {
+    userId: "user-retry",
+    tier: "free",
+    securityContext: "zaru-free",
+    token: "jwt",
+  };
+
+  await assert.rejects(
+    () =>
+      client.invokeTool(user, "fs.read", { path: "/tmp/test" }, "req-retry"),
+    (err: Error) => {
+      assert.match(err.message, /AEGIS invoke failed: 400/);
+      assert.match(err.message, /storage error/);
+      return true;
+    },
+  );
+
+  // Must NOT have retried — only one invoke call
+  assert.equal(
+    invokeCount,
+    1,
+    "should not retry on non-session 400 errors containing 'session'",
+  );
+});

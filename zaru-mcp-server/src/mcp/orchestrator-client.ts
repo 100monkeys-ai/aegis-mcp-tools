@@ -205,13 +205,21 @@ export class OrchestratorClient {
       return this.invokeJsonRpcWithFreshSession(user, payload);
     }
 
-    // Session expired returns as 400 with "Session is inactive" — re-attest
+    // Session expired returns as 400 with specific session error codes — re-attest
     if (response.status === 400) {
       const body = await response.text();
-      if (body.includes("Session is inactive") || body.includes("session")) {
+      if (
+        body.includes("Session is inactive") ||
+        body.includes("SessionExpired") ||
+        body.includes("SessionInactive")
+      ) {
         this.sessionCache.delete(user.userId);
         return this.invokeJsonRpcWithFreshSession(user, payload);
       }
+      console.error(
+        `[mcp:orchestrator] SEAL invoke failed: ${response.status}`,
+        body,
+      );
       throw new Error(`AEGIS invoke failed: ${response.status} ${body}`);
     }
 
