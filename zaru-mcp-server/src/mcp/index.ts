@@ -46,7 +46,8 @@ function normalizeToolResult(result: unknown): unknown {
   if (
     result &&
     typeof result === "object" &&
-    ("content" in (result as Record<string, unknown>) ||
+    (("content" in (result as Record<string, unknown>) &&
+      Array.isArray((result as Record<string, unknown>).content)) ||
       "structuredContent" in (result as Record<string, unknown>))
   ) {
     return result;
