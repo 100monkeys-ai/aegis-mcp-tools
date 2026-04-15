@@ -191,6 +191,123 @@ test("invokeTool attests and sends a spec-shaped SEAL envelope", async () => {
   assert.equal(typeof calls[1]?.body?.signature, "string");
 });
 
+test("invokeJsonRpc passes an AbortSignal with 330s timeout to fetchImpl for /v1/seal/invoke", async () => {
+  const capturedSignals: Array<AbortSignal | undefined> = [];
+  const client = new OrchestratorClient({
+    baseUrl: "http://aegis.test",
+    fetchImpl: async (input, init) => {
+      const url = String(input);
+
+      if (url.endsWith("/v1/seal/attest")) {
+        return jsonResponse({ security_token: "issued-token" });
+      }
+
+      if (url.endsWith("/v1/seal/invoke")) {
+        capturedSignals.push(init?.signal as AbortSignal | undefined);
+        return jsonResponse({
+          jsonrpc: "2.0",
+          id: "req-timeout",
+          result: { content: [{ type: "text", text: "ok" }], isError: false },
+        });
+      }
+
+      return jsonResponse({}, 404);
+    },
+  });
+
+  const user = {
+    userId: "user-timeout",
+    tier: "free",
+    securityContext: "zaru-free",
+    token: "jwt",
+  };
+
+  await client.invokeTool(
+    user,
+    "aegis.execute.wait",
+    { execution_id: "exec-1" },
+    "req-timeout",
+  );
+
+  assert.equal(
+    capturedSignals.length,
+    1,
+    "fetchImpl should be called once for /v1/seal/invoke",
+  );
+  assert.ok(
+    capturedSignals[0] instanceof AbortSignal,
+    "signal must be an AbortSignal",
+  );
+  assert.equal(
+    capturedSignals[0]?.aborted,
+    false,
+    "signal must not be pre-aborted",
+  );
+});
+
+test("invokeJsonRpcWithFreshSession (re-attestation path) also passes AbortSignal to fetchImpl", async () => {
+  let invokeCount = 0;
+  const capturedSignals: Array<AbortSignal | undefined> = [];
+  const client = new OrchestratorClient({
+    baseUrl: "http://aegis.test",
+    fetchImpl: async (input, init) => {
+      const url = String(input);
+
+      if (url.endsWith("/v1/seal/attest")) {
+        return jsonResponse({ security_token: "issued-token" });
+      }
+
+      if (url.endsWith("/v1/seal/invoke")) {
+        invokeCount++;
+        capturedSignals.push(init?.signal as AbortSignal | undefined);
+        if (invokeCount === 1) {
+          // First invoke returns 401 to force re-attestation path
+          return new Response("Unauthorized", { status: 401 });
+        }
+        return jsonResponse({
+          jsonrpc: "2.0",
+          id: "req-reattest",
+          result: { content: [{ type: "text", text: "ok" }], isError: false },
+        });
+      }
+
+      return jsonResponse({}, 404);
+    },
+  });
+
+  const user = {
+    userId: "user-reattest",
+    tier: "free",
+    securityContext: "zaru-free",
+    token: "jwt",
+  };
+
+  await client.invokeTool(
+    user,
+    "aegis.execute.wait",
+    { execution_id: "exec-2" },
+    "req-reattest",
+  );
+
+  assert.equal(
+    invokeCount,
+    2,
+    "should have retried via invokeJsonRpcWithFreshSession",
+  );
+  assert.equal(
+    capturedSignals.length,
+    2,
+    "both invoke calls should capture a signal",
+  );
+  for (const signal of capturedSignals) {
+    assert.ok(
+      signal instanceof AbortSignal,
+      "each signal must be an AbortSignal",
+    );
+    assert.equal(signal?.aborted, false, "signal must not be pre-aborted");
+  }
+});
+
 test("invokeTool does NOT retry when 400 body contains 'session' in an unrelated error", async () => {
   let invokeCount = 0;
   const client = new OrchestratorClient({

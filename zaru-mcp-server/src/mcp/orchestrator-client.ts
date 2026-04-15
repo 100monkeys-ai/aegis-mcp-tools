@@ -197,6 +197,7 @@ export class OrchestratorClient {
           Authorization: `Bearer ${session.securityToken}`,
         },
         body: JSON.stringify(envelope),
+        signal: AbortSignal.timeout(330_000),
       },
     );
 
@@ -252,6 +253,7 @@ export class OrchestratorClient {
           Authorization: `Bearer ${session.securityToken}`,
         },
         body: JSON.stringify(envelope),
+        signal: AbortSignal.timeout(330_000),
       },
     );
 
