@@ -8,6 +8,7 @@ import {
 import type { ZaruRequest, ZaruUser } from "../middleware/auth.js";
 import { OrchestratorClient } from "./orchestrator-client.js";
 import { getZaruInit } from "../prompts/index.js";
+import { searchDocs } from "../docs/index.js";
 
 const orchestratorClient = new OrchestratorClient();
 
@@ -93,6 +94,22 @@ Available modes:
           },
         },
         {
+          name: "zaru.docs",
+          description:
+            "Search the AEGIS and Zaru documentation. Use this when the user asks how to do something, needs help with a feature, or wants to understand a concept. Returns relevant documentation sections.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              query: {
+                type: "string",
+                description:
+                  "Search query — what the user wants to know about. Examples: 'how to create an agent', 'workflow state machine', 'MCP setup', 'pricing plans'",
+              },
+            },
+            required: ["query"],
+          },
+        },
+        {
           name: "zaru.mode",
           description:
             "Switch Zaru's conversation mode. Returns the updated system prompt and available tools for the new mode. Use this when the user's intent shifts — for example, from chatting about a task to actually executing it with agents.",
@@ -135,6 +152,39 @@ Available modes:
         };
       }
       return normalizeToolResult(result);
+    }
+
+    if (name === "zaru.docs") {
+      const query = (args as Record<string, unknown>)?.query as string;
+      if (!query) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({ error: "Query is required" }),
+            },
+          ],
+          isError: true,
+        };
+      }
+      try {
+        const result = await searchDocs(query);
+        return normalizeToolResult(result);
+      } catch (err) {
+        console.error(
+          "zaru.docs search failed:",
+          err instanceof Error ? err.message : err,
+        );
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({ error: "Failed to search docs" }),
+            },
+          ],
+          isError: true,
+        };
+      }
     }
 
     if (name === "zaru.mode") {

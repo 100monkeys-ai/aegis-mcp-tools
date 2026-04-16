@@ -303,9 +303,10 @@ const PROMPTS: Record<string, string> = {
 };
 
 const TOOL_SCOPES: Record<string, string[]> = {
-  chat: ["zaru.mode"],
+  chat: ["zaru.mode", "zaru.docs"],
   agentic: [
     "zaru.mode",
+    "zaru.docs",
     "aegis.agent.generate",
     "aegis.agent.wait",
     "aegis.agent.list",
@@ -321,6 +322,7 @@ const TOOL_SCOPES: Record<string, string[]> = {
   ],
   execute: [
     "zaru.mode",
+    "zaru.docs",
     "aegis.execute.intent",
     "aegis.execute.status",
     "aegis.execute.wait",
@@ -328,6 +330,7 @@ const TOOL_SCOPES: Record<string, string[]> = {
   ],
   workflow: [
     "zaru.mode",
+    "zaru.docs",
     "aegis.workflow.generate",
     "aegis.workflow.list",
     "aegis.workflow.logs",
