@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import type { NextFunction, Response } from "express";
-import { createZaruAuthMiddleware } from "../src/middleware/auth.js";
+import { createZaruAuthMiddleware, isApiKey } from "../src/middleware/auth.js";
 
 function createResponseRecorder() {
   return {
@@ -18,7 +18,9 @@ function createResponseRecorder() {
   } as Response & { statusCode: number; body: unknown };
 }
 
-test("auth middleware validates token claims and maps tier to security context", async () => {
+// ── JWT Auth Tests ──────────────────────────────────────────────────────────
+
+test("auth middleware validates JWT claims and maps tier to security context", async () => {
   const middleware = createZaruAuthMiddleware(async () => ({
     sub: "user-123",
     zaru_tier: "pro",
@@ -42,6 +44,7 @@ test("auth middleware validates token claims and maps tier to security context",
     tier: "pro",
     securityContext: "zaru-pro",
     token: "jwt-token",
+    isOperator: false,
   });
 });
 
@@ -70,10 +73,11 @@ test("auth middleware accepts Authorization: Bearer header as fallback", async (
     tier: "free",
     securityContext: "zaru-free",
     token: "my-bearer-token",
+    isOperator: false,
   });
 });
 
-test("auth middleware rejects unsupported tiers", async () => {
+test("auth middleware normalizes unknown tier to free", async () => {
   const middleware = createZaruAuthMiddleware(async () => ({
     sub: "user-123",
     zaru_tier: "godmode",
@@ -85,11 +89,212 @@ test("auth middleware rejects unsupported tiers", async () => {
     },
   } as any;
   const res = createResponseRecorder();
+  let nextCalled = false;
+
+  await middleware(req, res, (() => {
+    nextCalled = true;
+  }) as NextFunction);
+
+  assert.equal(nextCalled, true);
+  assert.deepEqual(req.zaruUser, {
+    userId: "user-123",
+    tier: "free",
+    securityContext: "zaru-free",
+    token: "jwt-token",
+    isOperator: false,
+  });
+});
+
+test("auth middleware maps aegis_role operator to operator identity", async () => {
+  const middleware = createZaruAuthMiddleware(async () => ({
+    sub: "operator-1",
+    aegis_role: "admin" as const,
+  }));
+
+  const req = {
+    headers: {
+      "x-zaru-user-token": "jwt-token",
+    },
+  } as any;
+  const res = createResponseRecorder();
+  let nextCalled = false;
+
+  await middleware(req, res, (() => {
+    nextCalled = true;
+  }) as NextFunction);
+
+  assert.equal(nextCalled, true);
+  assert.deepEqual(req.zaruUser, {
+    userId: "operator-1",
+    tier: "admin",
+    securityContext: "aegis-system-operator",
+    token: "jwt-token",
+    isOperator: true,
+  });
+});
+
+test("auth middleware rejects request with no token", async () => {
+  const middleware = createZaruAuthMiddleware(async () => ({
+    sub: "user-123",
+  }));
+
+  const req = {
+    headers: {},
+    query: {},
+  } as any;
+  const res = createResponseRecorder();
+  let nextCalled = false;
+
+  await middleware(req, res, (() => {
+    nextCalled = true;
+  }) as NextFunction);
+
+  assert.equal(nextCalled, false);
+  assert.equal(res.statusCode, 401);
+});
+
+// ── API Key Detection Tests ─────────────────────────────────────────────────
+
+test("isApiKey returns true for aegis_ prefixed tokens", () => {
+  assert.equal(isApiKey("aegis_abc123def456"), true);
+  assert.equal(isApiKey("aegis_"), true);
+});
+
+test("isApiKey returns false for JWT-like tokens", () => {
+  assert.equal(isApiKey("eyJhbGciOiJSUzI1NiJ9.xxx.yyy"), false);
+  assert.equal(isApiKey("some-random-token"), false);
+  assert.equal(isApiKey(""), false);
+});
+
+// ── API Key Auth Tests ──────────────────────────────────────────────────────
+
+test("auth middleware validates aegis_ API key via apiKeyValidator", async () => {
+  const jwtVerifier = async () => {
+    throw new Error("JWT verifier should not be called for API keys");
+  };
+  const apiKeyValidator = async (token: string) => {
+    assert.equal(token, "aegis_test_key_12345");
+    return {
+      user_id: "api-user-789",
+      aegis_role: "operator" as const,
+      scopes: ["agent:read", "agent:execute"],
+    };
+  };
+
+  const middleware = createZaruAuthMiddleware(jwtVerifier, apiKeyValidator);
+
+  const req = {
+    headers: {
+      authorization: "Bearer aegis_test_key_12345",
+    },
+    query: {},
+  } as any;
+  const res = createResponseRecorder();
+  let nextCalled = false;
+
+  await middleware(req, res, (() => {
+    nextCalled = true;
+  }) as NextFunction);
+
+  assert.equal(nextCalled, true);
+  assert.deepEqual(req.zaruUser, {
+    userId: "api-user-789",
+    tier: "operator",
+    securityContext: "aegis-system-operator",
+    token: "aegis_test_key_12345",
+    isOperator: true,
+  });
+});
+
+test("auth middleware rejects invalid API key", async () => {
+  const jwtVerifier = async () => {
+    throw new Error("JWT verifier should not be called for API keys");
+  };
+  const apiKeyValidator = async () => {
+    throw new Error("Invalid API key");
+  };
+
+  const middleware = createZaruAuthMiddleware(jwtVerifier, apiKeyValidator);
+
+  const req = {
+    headers: {
+      authorization: "Bearer aegis_bad_key",
+    },
+    query: {},
+  } as any;
+  const res = createResponseRecorder();
+  let nextCalled = false;
+
+  await middleware(req, res, (() => {
+    nextCalled = true;
+  }) as NextFunction);
+
+  assert.equal(nextCalled, false);
+  assert.equal(res.statusCode, 401);
+  assert.deepEqual(res.body, { error: "Invalid API key" });
+});
+
+test("auth middleware routes aegis_ token from x-zaru-user-token header to API key validator", async () => {
+  const apiKeyValidator = async (token: string) => {
+    assert.equal(token, "aegis_header_key");
+    return {
+      user_id: "header-user",
+      aegis_role: "admin" as const,
+      scopes: ["key:list"],
+    };
+  };
+
+  const middleware = createZaruAuthMiddleware(async () => {
+    throw new Error("should not be called");
+  }, apiKeyValidator);
+
+  const req = {
+    headers: {
+      "x-zaru-user-token": "aegis_header_key",
+    },
+  } as any;
+  const res = createResponseRecorder();
+  let nextCalled = false;
+
+  await middleware(req, res, (() => {
+    nextCalled = true;
+  }) as NextFunction);
+
+  assert.equal(nextCalled, true);
+  assert.deepEqual(req.zaruUser, {
+    userId: "header-user",
+    tier: "admin",
+    securityContext: "aegis-system-operator",
+    token: "aegis_header_key",
+    isOperator: true,
+  });
+});
+
+test("auth middleware does not call API key validator for non-aegis_ tokens", async () => {
+  let apiKeyValidatorCalled = false;
+  const apiKeyValidator = async () => {
+    apiKeyValidatorCalled = true;
+    return {
+      user_id: "should-not-happen",
+      aegis_role: "admin" as const,
+      scopes: [],
+    };
+  };
+
+  const middleware = createZaruAuthMiddleware(async () => {
+    return { sub: "jwt-user", zaru_tier: "pro" };
+  }, apiKeyValidator);
+
+  const req = {
+    headers: {
+      authorization: "Bearer eyJhbGciOiJSUzI1NiJ9.payload.sig",
+    },
+    query: {},
+  } as any;
+  const res = createResponseRecorder();
 
   await middleware(req, res, (() => undefined) as NextFunction);
 
-  assert.equal(res.statusCode, 403);
-  assert.deepEqual(res.body, {
-    error: "Unsupported zaru_tier claim: godmode",
-  });
+  assert.equal(apiKeyValidatorCalled, false);
+  assert.equal(req.zaruUser?.userId, "jwt-user");
 });

@@ -28,6 +28,65 @@ export type VerifiedClaims = JWTPayload & {
 
 export type JwtVerifier = (token: string) => Promise<VerifiedClaims>;
 
+// ── API Key Authentication ──────────────────────────────────────────────────
+
+const API_KEY_PREFIX = "aegis_";
+
+export function isApiKey(token: string): boolean {
+  return token.startsWith(API_KEY_PREFIX);
+}
+
+/**
+ * Response shape from the orchestrator's `POST /v1/api-keys/validate` endpoint.
+ * Returns the identity associated with the API key.
+ */
+export interface ApiKeyIdentity {
+  user_id: string;
+  aegis_role: AegisRole;
+  scopes: string[];
+}
+
+export type ApiKeyValidator = (token: string) => Promise<ApiKeyIdentity>;
+
+/**
+ * Validate an API key against the orchestrator's `/v1/api-keys/validate` endpoint.
+ * The orchestrator hashes the key, looks it up in the DB, and returns the owner identity.
+ */
+export async function validateApiKeyWithOrchestrator(
+  token: string,
+): Promise<ApiKeyIdentity> {
+  const orchestratorUrl =
+    process.env.AEGIS_ORCHESTRATOR_URL || "http://localhost:8088";
+  const response = await fetch(`${orchestratorUrl}/v1/api-keys/validate`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ api_key: token }),
+  });
+
+  if (!response.ok) {
+    if (response.status === 401 || response.status === 403) {
+      throw new Error("Invalid API key");
+    }
+    throw new Error(
+      `API key validation failed: ${response.status} ${await response.text()}`,
+    );
+  }
+
+  const body = (await response.json()) as ApiKeyIdentity;
+  if (!body.user_id) {
+    throw new Error("API key validation response missing user_id");
+  }
+  if (!isValidAegisRole(body.aegis_role)) {
+    throw new Error(
+      `API key validation response has invalid aegis_role: ${body.aegis_role}`,
+    );
+  }
+
+  return body;
+}
+
 const TOKEN_HEADER = "x-zaru-user-token";
 const TOKEN_QUERY_PARAM = "token";
 
@@ -117,6 +176,7 @@ function extractBearerToken(header?: string): string | undefined {
 
 export function createZaruAuthMiddleware(
   verifier: JwtVerifier = verifyJwtWithJwks,
+  apiKeyValidator: ApiKeyValidator = validateApiKeyWithOrchestrator,
 ) {
   return async (req: ZaruRequest, res: Response, next: NextFunction) => {
     // Support token from header (normal requests) or query parameter (SSE GET requests)
@@ -162,6 +222,28 @@ export function createZaruAuthMiddleware(
       return;
     }
 
+    // API key authentication: tokens with `aegis_` prefix are API keys,
+    // validated against the orchestrator instead of Keycloak JWKS.
+    if (isApiKey(rawToken)) {
+      try {
+        const identity = await apiKeyValidator(rawToken);
+        req.zaruUser = {
+          userId: identity.user_id,
+          tier: identity.aegis_role,
+          securityContext: OPERATOR_SECURITY_CONTEXT,
+          token: rawToken,
+          isOperator: true,
+        };
+        next();
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Invalid API key";
+        res.status(401).json({ error: message });
+      }
+      return;
+    }
+
+    // JWT authentication: validate via Keycloak JWKS
     try {
       const claims = await verifier(rawToken);
 
