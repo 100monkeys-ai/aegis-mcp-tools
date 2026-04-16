@@ -1,69 +1,102 @@
 # Zaru MCP Server
 
-MCP bridge that lets the Zaru client talk to AEGIS through SEAL. Supports StreamableHTTP (primary) and SSE (legacy) transports.
+Node.js/Express MCP gateway that authenticates clients, proxies
+tool calls to the AEGIS orchestrator via SEAL envelope signing,
+and hosts the canonical Zaru system prompts.
 
-## What It Does
+## Features
 
-- Accepts MCP JSON-RPC over StreamableHTTP at `/mcp/v1` (primary) and SSE at `/mcp/v1/sse` (legacy)
-- Validates the Zaru client JWT from `Authorization: Bearer` header or `X-Zaru-User-Token`
-- Resolves the user's `zaru_tier` claim to an AEGIS `SecurityContext`
-- Discovers the current AEGIS tool inventory from the orchestrator (not hardcoded locally)
-- Attests an ephemeral Ed25519 session and forwards `tools/call` requests as SEAL envelopes to AEGIS
-- Proxies execution event streams from the orchestrator for Glass Lab visualization
-
-The orchestrator owns the `aegis.*` tool surface and filters it by the caller's tier-derived `SecurityContext`, so `zaru-pro`, `zaru-business`, and `zaru-enterprise` surface the full management set while `zaru-free` remains restricted.
+- **StreamableHTTP + SSE MCP transports** --
+  StreamableHTTP (primary) with session management;
+  SSE (legacy) for backward-compatible clients
+- **Dual authentication** --
+  Keycloak JWT (Zaru consumer client) or AEGIS API key
+  (`aegis_`-prefixed tokens validated against the orchestrator)
+  for external clients like Claude Code
+- **SEAL protocol tool invocation** --
+  ephemeral Ed25519 session keypairs, attestation against the
+  orchestrator, and cryptographically signed envelopes for every
+  tool call
+- **`zaru.init`** --
+  activate the Zaru persona with mode-specific system prompts
+  (chat, agentic, workflow, execute, operator)
+- **`zaru.mode`** --
+  switch conversation modes at runtime; returns the updated
+  system prompt and available tool scope
+- **Execution event streaming proxy** --
+  pipes SSE execution events from the orchestrator for Glass
+  Laboratory visualization
+- **Tool discovery and caching** --
+  fetches the AEGIS tool catalog from the orchestrator
+  (filtered by the caller's `SecurityContext`) with a
+  configurable TTL cache (default 5 s)
 
 ## Endpoints
 
 ### StreamableHTTP (Primary)
 
-- `POST /mcp/v1` — Handle MCP JSON-RPC messages (tool calls, initialization)
-- `GET /mcp/v1` — Server-initiated push (currently 405)
-- `DELETE /mcp/v1` — Clean up MCP session
+- `POST /mcp/v1` --
+  Handle MCP JSON-RPC messages (tool calls, initialization)
+- `GET /mcp/v1` --
+  Server-initiated SSE push (delegates to session transport,
+  or 405 if no session)
+- `DELETE /mcp/v1` --
+  Clean up an MCP session by `Mcp-Session-Id` header
 
 ### SSE (Legacy)
 
-- `GET /mcp/v1/sse` — Establish SSE session; sends `endpoint` event with POST URL
-- `POST /mcp/v1/messages?sessionId=<id>` — Receive JSON-RPC messages for a session
+- `GET /mcp/v1/sse` --
+  Establish SSE session; sends `endpoint` event with POST URL
+- `POST /mcp/v1/messages?sessionId=<id>` --
+  Receive JSON-RPC messages for an SSE session
 
 ### Execution Streaming
 
-- `GET /proxy/v1/executions/:executionId/stream` — Proxy SSE execution events from the orchestrator (for Glass Lab)
+- `GET /proxy/v1/executions/:executionId/stream` --
+  Proxy SSE execution events from the orchestrator
+  (Glass Laboratory)
 
 ### Health
 
-- `GET /health` — Health check
+- `GET /health` -- Health check
 
-## Environment
+## Environment Variables
 
-```env
-PORT=3000
-JWKS_URI=http://keycloak:8080/realms/zaru-consumer/protocol/openid-connect/certs
-AEGIS_ORCHESTRATOR_URL=http://aegis-node:8088
+- **`PORT`** (default `3000`) --
+  Server listen port
+- **`AEGIS_ORCHESTRATOR_URL`** (default `http://localhost:8088`)
+  -- Base URL of the AEGIS orchestrator
+- **`JWKS_URI`** (default
+  `http://localhost:8180/realms/zaru-consumer/protocol/openid-connect/certs`)
+  -- Keycloak JWKS endpoint for JWT verification
+- **`AEGIS_TOOL_DISCOVERY_URL`** (default
+  `${AEGIS_ORCHESTRATOR_URL}/v1/seal/tools`) --
+  Override tool discovery endpoint
+- **`AEGIS_TOOL_CACHE_TTL_MS`** (default `5000`) --
+  Cache TTL for tool discovery responses (ms)
+- **`BYPASS_AUTH`** (default `false`) --
+  Skip JWT/API-key verification (local testing only)
 
-# Optional: override tool discovery path
-AEGIS_TOOL_DISCOVERY_URL=http://aegis-node:8088/v1/seal/tools
+## Authentication
 
-# Optional: cache TTL for tool discovery responses
-AEGIS_TOOL_CACHE_TTL_MS=5000
+The server accepts tokens via three mechanisms
+(checked in order):
 
-# Local testing only
-BYPASS_AUTH=false
-```
-
-## Auth Contract
-
-The server accepts JWTs via two mechanisms (checked in order):
-
-1. `X-Zaru-User-Token` header (custom header)
-2. `Authorization: Bearer <token>` header (standard HTTP auth)
+1. `X-Zaru-User-Token` header
+2. `Authorization: Bearer <token>` header
 3. `token` query parameter (for SSE GET requests)
 
-JWT verification is performed against `JWKS_URI` (Keycloak JWKS endpoint):
+**Keycloak JWT** -- verified against JWKS_URI with per-issuer
+key rotation caching. The `sub` claim becomes the user identity;
+`zaru_tier` resolves to a `SecurityContext` (`zaru-free`,
+`zaru-pro`, `zaru-business`, `zaru-enterprise`). Tokens with an
+`aegis_role` claim (`admin`, `operator`, `readonly`) are treated
+as operator identities.
 
-- `sub` becomes the Zaru user identity
-- `zaru_tier` must resolve to one of `free`, `pro`, `business`, or `enterprise`
-- Tiers map to SecurityContexts: `zaru-free`, `zaru-pro`, `zaru-business`, `zaru-enterprise`
+**AEGIS API key** -- tokens prefixed with `aegis_` are validated
+against `POST ${AEGIS_ORCHESTRATOR_URL}/v1/api-keys/validate`.
+The orchestrator hashes the key, looks it up, and returns the
+owner identity and role.
 
 ## SEAL Contract
 
@@ -73,20 +106,10 @@ JWT verification is performed against `JWKS_URI` (Keycloak JWKS endpoint):
 POST ${AEGIS_ORCHESTRATOR_URL}/v1/seal/attest
 ```
 
-Request body:
-
-```json
-{
-  "agent_public_key": "<base64-encoded 32-byte Ed25519 public key>",
-  "user_id": "<keycloak-sub>",
-  "workload_id": "zaru:<userId>:<sessionId>",
-  "security_context": "zaru-<tier>",
-  "zaru_tier": "<tier>",
-  "container_id": "zaru-mcp-server:<sessionId>"
-}
-```
-
-Response: `{ "security_token": "<JWT>" }`
+The server generates an ephemeral Ed25519 keypair per session,
+sends the public key to the orchestrator along with the user
+identity and security context, and receives a `security_token`
+JWT used for subsequent invocations.
 
 ### Tool Invocation
 
@@ -94,16 +117,24 @@ Response: `{ "security_token": "<JWT>" }`
 POST ${AEGIS_ORCHESTRATOR_URL}/v1/seal/invoke
 ```
 
-Every tool invocation is wrapped in an SEAL envelope:
+Every tool call is wrapped in a SEAL envelope:
 
 ```json
 {
   "protocol": "seal/v1",
   "security_token": "<JWT from attestation>",
-  "signature": "<base64-encoded Ed25519 signature>",
+  "signature": "<base64 Ed25519 signature>",
   "payload": { "<MCP JSON-RPC>" },
   "timestamp": "<ISO 8601 UTC>"
 }
+```
+
+The signature is computed over a canonical message with
+lexicographically sorted keys, where `timestamp` is Unix epoch
+seconds:
+
+```json
+{"payload":{...},"security_token":"<JWT>","timestamp":1711024496}
 ```
 
 ### Tool Discovery
@@ -113,24 +144,15 @@ GET ${AEGIS_TOOL_DISCOVERY_URL}
 Header: X-Zaru-Security-Context: zaru-<tier>
 ```
 
-Fallback: JSON-RPC `tools/list` via SEAL invoke.
+Falls back to JSON-RPC `tools/list` via SEAL invoke if the
+discovery endpoint returns 404/405.
 
-The orchestrator also exposes `aegis.tools.list` and `aegis.tools.search` as first-class MCP tools for programmatic tool discovery. These return the full tool catalog (filtered by the caller's `SecurityContext`) and can be invoked through the standard SEAL invoke path:
+## Docker
 
-```json
-{"tool": "aegis.tools.list", "arguments": {}}
-{"tool": "aegis.tools.search", "arguments": {"query": "workflow"}}
+```bash
+docker build -t zaru-mcp-server .
+docker run -p 3000:3000 zaru-mcp-server
 ```
-
-### Canonical Message Format
-
-The signature is computed over a canonical message with lexicographically sorted keys:
-
-```json
-{"payload":{"..."},"security_token":"<JWT>","timestamp":1711024496}
-```
-
-Where `timestamp` is Unix epoch seconds derived from the ISO 8601 timestamp.
 
 ## Development
 
@@ -139,3 +161,7 @@ npm install
 npm run build
 npm test
 ```
+
+## License
+
+MIT
