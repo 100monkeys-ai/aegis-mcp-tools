@@ -14,7 +14,7 @@
   },
   "keywords": [],
   "author": "100monkeys.ai",
-  "license": "MIT",
+  "license": "AGPL-3.0",
   "type": "module",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.28.0",
