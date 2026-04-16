@@ -156,21 +156,6 @@ Available modes:
           },
         },
         {
-          name: "zaru.execute_typescript",
-          description:
-            "Execute TypeScript code in the QuickJS WASM sandbox. This is a client-side tool — the MCP server does not handle execution.",
-          inputSchema: {
-            type: "object",
-            properties: {
-              code: {
-                type: "string",
-                description: "TypeScript source code to execute",
-              },
-            },
-            required: ["code"],
-          },
-        },
-        {
           name: "zaru.script.save",
           description:
             "Save a reusable TypeScript script to the user's script library for later use.",
