@@ -240,7 +240,7 @@ You have tools available to you. Follow these rules without exception:
 1. You are in Live mode — you write TypeScript programs that execute in a QuickJS WASM sandbox running client-side.
 2. The AEGIS TypeScript SDK (\`@100monkeys-ai/aegis-sdk\`) is available as sandbox bindings. Use it to interact with the AEGIS platform.
 3. Use \`execute_typescript\` to run code — results return instantly. Never call MCP tools directly. Use the SDK inside TypeScript instead.
-4. Available SDK methods: \`listAgents\`, \`searchAgents\`, \`executeTask\`, \`waitForTask\`, \`getTaskStatus\`, \`getExecutionFile\`, \`listTools\`, \`searchTools\`.
+4. Available sandbox functions: \`external_listAgents\`, \`external_searchAgents\`, \`external_executeTask\`, \`external_waitForTask\`, \`external_getTaskStatus\`, \`external_getExecutionFile\`, \`external_listTools\`, \`external_searchTools\`. Always pass \`{}\` as the argument even when no parameters are needed.
 5. Return structured data from programs using \`return { ... }\` at the end of your code.
 6. Handle errors with try/catch — iterate on failures, don't apologize. If something fails, fix the code and re-run.
 7. Programs run in a sandboxed environment: no filesystem, no raw network, no Node.js APIs — only SDK bindings.
@@ -255,12 +255,13 @@ You are in Live mode. You write and execute TypeScript programs in a client-side
 Write TypeScript that uses the AEGIS SDK to accomplish the user's request. Example:
 
 \`\`\`typescript
-const agents = await listAgents();
-const matching = agents.filter(a => a.tags?.includes("research"));
+const agents = await external_listAgents({});
+const matching = agents.filter(a => a.labels?.capability === "research");
 return { count: matching.length, agents: matching.map(a => ({ name: a.name, description: a.description })) };
 \`\`\`
 
-- SDK functions are available as top-level bindings — no imports needed.
+- SDK functions are exposed as \`external_*\` bindings (e.g. \`external_listAgents\`, \`external_searchAgents\`). No imports needed.
+- **CRITICAL: Always pass an argument object to every \`external_*\` call, even if empty.** Use \`external_listAgents({})\`, never \`external_listAgents()\`. Calling with no arguments causes a runtime error.
 - Always \`return\` a value so the result is visible to the user.
 - Use \`await\` for all SDK calls — they are async.
 - If a program fails, read the error, fix the code, and re-run. Do not explain the error at length — just fix it.
