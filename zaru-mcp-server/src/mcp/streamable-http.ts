@@ -7,6 +7,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import type { ZaruRequest, ZaruUser } from "../middleware/auth.js";
 import { OrchestratorClient } from "./orchestrator-client.js";
+import { getZaruInit } from "../prompts/index.js";
 
 const orchestratorClient = new OrchestratorClient();
 
@@ -70,24 +71,46 @@ function createMcpServerForUser(user: ZaruUser): McpServer {
       tools: [
         ...tools,
         {
-          name: "zaru.switch_mode",
-          description:
-            "Suggest the user switch to a different conversation mode. Use this when the user's request cannot be fulfilled in the current mode. This renders a confirmation card inline in the chat — the user can accept, refuse, or dismiss.",
+          name: "zaru.init",
+          description: `Initialize Zaru — an AI agent orchestration assistant powered by the AEGIS platform. Zaru can discover, execute, and coordinate AI agents, build multi-agent workflows, manage credentials and secrets, and operate the full platform. Call this tool when the user wants to activate Zaru, says "zaru init", or asks for Zaru's help with agent orchestration. Returns a system prompt to adopt and the available tools for the requested mode. If no mode is specified, defaults to chat mode.
+
+Available modes:
+- chat: Conversation, planning, and Q&A — no tool execution
+- agentic: Discover and orchestrate AI agents to perform tasks
+- workflow: Design state machines that chain agents with conditional transitions
+- execute: Turn natural language intent into running code in one shot
+- operator: Full platform access including destructive operations and deployment`,
           inputSchema: {
             type: "object",
             properties: {
-              target_mode: {
+              mode: {
                 type: "string",
-                enum: ["chat", "agentic", "workflow", "operator", "execute"],
-                description: "The mode to switch to.",
+                enum: ["chat", "agentic", "workflow", "execute", "operator"],
+                description:
+                  "Conversation mode. Defaults to chat if not specified.",
+              },
+            },
+          },
+        },
+        {
+          name: "zaru.mode",
+          description:
+            "Switch Zaru's conversation mode. Returns the updated system prompt and available tools for the new mode. Use this when the user's intent shifts — for example, from chatting about a task to actually executing it with agents.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              mode: {
+                type: "string",
+                enum: ["chat", "agentic", "workflow", "execute", "operator"],
+                description: "Target conversation mode",
               },
               reason: {
                 type: "string",
                 description:
-                  "Short, plain-language explanation for the user. One sentence.",
+                  "Short explanation of why the mode switch is appropriate",
               },
             },
-            required: ["target_mode", "reason"],
+            required: ["mode"],
           },
         },
       ],
@@ -98,14 +121,40 @@ function createMcpServerForUser(user: ZaruUser): McpServer {
     const { name, arguments: args } = request.params;
 
     // Handle client-side tools locally — never forward to AEGIS
-    if (name === "zaru.switch_mode") {
-      const targetMode = (args as Record<string, unknown>)
-        ?.target_mode as string;
-      const reason = (args as Record<string, unknown>)?.reason as string;
+    if (name === "zaru.init") {
+      const mode = (args as Record<string, unknown>)?.mode as
+        | string
+        | undefined;
+      const result = getZaruInit(mode);
+      if (!result) {
+        return {
+          content: [
+            { type: "text", text: JSON.stringify({ error: "Unknown mode" }) },
+          ],
+          isError: true,
+        };
+      }
+      return normalizeToolResult(result);
+    }
+
+    if (name === "zaru.mode") {
+      const targetMode = (args as Record<string, unknown>)?.mode as string;
+      const reason = (args as Record<string, unknown>)?.reason as
+        | string
+        | undefined;
+      const result = getZaruInit(targetMode);
+      if (!result) {
+        return {
+          content: [
+            { type: "text", text: JSON.stringify({ error: "Unknown mode" }) },
+          ],
+          isError: true,
+        };
+      }
       return normalizeToolResult({
-        action: "mode_switch_requested",
-        target_mode: targetMode,
+        ...result,
         reason,
+        action: "mode_switch_requested",
       });
     }
 
