@@ -42,7 +42,9 @@ export function isApiKey(token: string): boolean {
  */
 export interface ApiKeyIdentity {
   user_id: string;
-  aegis_role: AegisRole;
+  tenant_id: string | null;
+  aegis_role: AegisRole | null;
+  zaru_tier: string | null;
   scopes: string[];
 }
 
@@ -61,8 +63,8 @@ export async function validateApiKeyWithOrchestrator(
     method: "POST",
     headers: {
       "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
     },
-    body: JSON.stringify({ api_key: token }),
   });
 
   if (!response.ok) {
@@ -78,11 +80,7 @@ export async function validateApiKeyWithOrchestrator(
   if (!body.user_id) {
     throw new Error("API key validation response missing user_id");
   }
-  if (!isValidAegisRole(body.aegis_role)) {
-    throw new Error(
-      `API key validation response has invalid aegis_role: ${body.aegis_role}`,
-    );
-  }
+  // aegis_role is null for consumer users (they have zaru_tier instead)
 
   return body;
 }
@@ -227,12 +225,18 @@ export function createZaruAuthMiddleware(
     if (isApiKey(rawToken)) {
       try {
         const identity = await apiKeyValidator(rawToken);
+        const isOp =
+          identity.aegis_role === "admin" || identity.aegis_role === "operator";
+        const tier = identity.aegis_role ?? identity.zaru_tier ?? "free";
+        const secCtx = isOp
+          ? OPERATOR_SECURITY_CONTEXT
+          : `zaru-${identity.zaru_tier ?? "free"}`;
         req.zaruUser = {
           userId: identity.user_id,
-          tier: identity.aegis_role,
-          securityContext: OPERATOR_SECURITY_CONTEXT,
+          tier,
+          securityContext: secCtx,
           token: rawToken,
-          isOperator: true,
+          isOperator: isOp,
         };
         next();
       } catch (error) {
