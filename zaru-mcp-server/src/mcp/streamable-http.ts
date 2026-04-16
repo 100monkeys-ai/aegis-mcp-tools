@@ -80,15 +80,33 @@ Available modes:
 - agentic: Discover and orchestrate AI agents to perform tasks
 - workflow: Design state machines that chain agents with conditional transitions
 - execute: Turn natural language intent into running code in one shot
+- live: Write and run TypeScript programs in a client-side QuickJS WASM sandbox with AEGIS SDK bindings
 - operator: Full platform access including destructive operations and deployment`,
           inputSchema: {
             type: "object",
             properties: {
               mode: {
                 type: "string",
-                enum: ["chat", "agentic", "workflow", "execute", "operator"],
+                enum: [
+                  "chat",
+                  "agentic",
+                  "workflow",
+                  "execute",
+                  "live",
+                  "operator",
+                ],
                 description:
                   "Conversation mode. Defaults to chat if not specified.",
+              },
+              client: {
+                type: "object",
+                properties: {
+                  runtime: { type: "string" },
+                  capabilities: {
+                    type: "array",
+                    items: { type: "string" },
+                  },
+                },
               },
             },
           },
@@ -118,7 +136,14 @@ Available modes:
             properties: {
               mode: {
                 type: "string",
-                enum: ["chat", "agentic", "workflow", "execute", "operator"],
+                enum: [
+                  "chat",
+                  "agentic",
+                  "workflow",
+                  "execute",
+                  "live",
+                  "operator",
+                ],
                 description: "Target conversation mode",
               },
               reason: {
@@ -128,6 +153,62 @@ Available modes:
               },
             },
             required: ["mode"],
+          },
+        },
+        {
+          name: "zaru.execute_typescript",
+          description:
+            "Execute TypeScript code in the QuickJS WASM sandbox. This is a client-side tool — the MCP server does not handle execution.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              code: {
+                type: "string",
+                description: "TypeScript source code to execute",
+              },
+            },
+            required: ["code"],
+          },
+        },
+        {
+          name: "zaru.script.save",
+          description:
+            "Save a reusable TypeScript script to the user's script library for later use.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              name: {
+                type: "string",
+                description: "Script name for later retrieval",
+              },
+              description: {
+                type: "string",
+                description: "Short description of what the script does",
+              },
+              code: {
+                type: "string",
+                description: "TypeScript source code to save",
+              },
+            },
+            required: ["name", "description", "code"],
+          },
+        },
+        {
+          name: "zaru.script.run",
+          description: "Load and execute a previously saved script by name.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              name: {
+                type: "string",
+                description: "Name of the saved script to run",
+              },
+              input: {
+                type: "object",
+                description: "Optional input parameters to pass to the script",
+              },
+            },
+            required: ["name"],
           },
         },
       ],
@@ -142,7 +223,10 @@ Available modes:
       const mode = (args as Record<string, unknown>)?.mode as
         | string
         | undefined;
-      const result = getZaruInit(mode);
+      const client = (args as Record<string, unknown>)?.client as
+        | { runtime?: string; capabilities?: string[] }
+        | undefined;
+      const result = getZaruInit(mode, client);
       if (!result) {
         return {
           content: [
@@ -205,6 +289,37 @@ Available modes:
         ...result,
         reason,
         action: "mode_switch_requested",
+      });
+    }
+
+    if (name === "zaru.execute_typescript") {
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              error:
+                "execute_typescript is a client-side tool and must be handled by the client, not the MCP server.",
+            }),
+          },
+        ],
+        isError: true,
+      };
+    }
+
+    if (name === "zaru.script.save") {
+      return normalizeToolResult({
+        status: "not_implemented",
+        message:
+          "Script persistence requires orchestrator endpoints. Coming soon.",
+      });
+    }
+
+    if (name === "zaru.script.run") {
+      return normalizeToolResult({
+        status: "not_implemented",
+        message:
+          "Script persistence requires orchestrator endpoints. Coming soon.",
       });
     }
 
