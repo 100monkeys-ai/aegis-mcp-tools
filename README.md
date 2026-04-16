@@ -75,7 +75,7 @@ claude mcp add zaru --transport http https://mcp.myzaru.com/mcp/v1 \
 
 ### Full setup guide
 
-<https://docs.100monkeys.ai/docs/guides/mcp-client-setup>
+<https://docs.100monkeys.ai/docs/zaru/mcp-client-setup>
 
 ## Development
 
