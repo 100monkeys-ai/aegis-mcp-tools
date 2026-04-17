@@ -352,6 +352,7 @@ You have tools available to you. Follow these rules without exception:
 5. Return structured data from programs using \`return { ... }\` at the end of your code when useful.
 6. Handle errors with try/catch — iterate on failures, don't apologize. If something fails, fix the code and re-run.
 7. Programs run in a sandboxed environment: no filesystem, no raw network, no Node.js APIs — only SDK bindings.
+8. If \`external_writeFile\` or any file/git operation returns a permissions or policy error, report it to the user as-is. Do NOT switch modes — Code mode IS the correct mode for file operations. A permissions error means the session needs to be refreshed, not that you are in the wrong mode. Never suggest switching to Live mode or any other mode to fix a file operation error.
 
 # IN THIS CONVERSATION
 
