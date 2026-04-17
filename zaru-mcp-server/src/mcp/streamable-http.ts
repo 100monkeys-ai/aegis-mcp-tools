@@ -12,6 +12,48 @@ import { searchDocs } from "../docs/index.js";
 
 const orchestratorClient = new OrchestratorClient();
 
+/**
+ * Extract an array of script DTOs from an `aegis.script.list` tool result.
+ *
+ * The SEAL-gateway wraps orchestrator responses in an MCP tool-call envelope:
+ *   `{ content: [{ type: "text", text: "<JSON string>" }], isError: false }`
+ * — where the `text` holds the JSON-serialized array returned by the
+ * orchestrator's `GET /v1/scripts` endpoint. We also tolerate direct arrays
+ * and `{type: "json"}` envelopes in case upstream shapes change.
+ */
+export function extractScriptsArray(
+  result: unknown,
+): Array<{ id: string; name: string }> {
+  if (Array.isArray(result)) {
+    return result as Array<{ id: string; name: string }>;
+  }
+  if (!result || typeof result !== "object") {
+    return [];
+  }
+  const r = result as Record<string, unknown>;
+  if (Array.isArray(r.content) && r.content[0]) {
+    const first = r.content[0] as Record<string, unknown>;
+    if (first.type === "text" && typeof first.text === "string") {
+      try {
+        const parsed = JSON.parse(first.text);
+        if (Array.isArray(parsed)) {
+          return parsed as Array<{ id: string; name: string }>;
+        }
+      } catch {
+        // fall through — not valid JSON, return empty
+      }
+    }
+    if (
+      first.type === "json" &&
+      first.json &&
+      Array.isArray(first.json as unknown)
+    ) {
+      return first.json as Array<{ id: string; name: string }>;
+    }
+  }
+  return [];
+}
+
 interface StreamableHttpSession {
   transport: StreamableHTTPServerTransport;
   server: McpServer;
@@ -20,6 +62,101 @@ interface StreamableHttpSession {
 
 /** Active StreamableHTTP sessions keyed by Mcp-Session-Id header */
 const sessions = new Map<string, StreamableHttpSession>();
+
+/**
+ * Dispatch `zaru.script.save` / `zaru.script.run` onto the orchestrator via the
+ * SEAL-gateway `aegis.script.*` native tools.
+ *
+ * `zaru.script.save` is a thin pass-through to `aegis.script.save`.
+ * `zaru.script.run` loads the script DTO (by `id` or by `name` via
+ * `aegis.script.list` + exact-match resolution) and returns it to the LLM so
+ * the caller can execute the `code` field via `zaru.execute_typescript`.
+ *
+ * Exported for unit testing.
+ */
+export async function handleZaruScriptTool(
+  client: Pick<OrchestratorClient, "invokeTool">,
+  user: ZaruUser,
+  name: "zaru.script.save" | "zaru.script.run",
+  args: unknown,
+): Promise<{
+  content: Array<{ type: string; text: string }>;
+  isError: boolean;
+}> {
+  if (name === "zaru.script.save") {
+    const result = await client.invokeTool(
+      user,
+      "aegis.script.save",
+      (args as Record<string, unknown>) ?? {},
+      null,
+    );
+    return normalizeToolResult(result);
+  }
+
+  // zaru.script.run
+  const a = (args as Record<string, unknown>) ?? {};
+  const scriptId = typeof a.id === "string" ? a.id : undefined;
+  const scriptName = typeof a.name === "string" ? a.name : undefined;
+
+  if (!scriptId && !scriptName) {
+    return normalizeToolResult({
+      isError: true,
+      content: [
+        {
+          type: "text",
+          text: "zaru.script.run requires either 'id' or 'name' to look up the script.",
+        },
+      ],
+    });
+  }
+
+  let resolvedId = scriptId;
+  if (!resolvedId && scriptName) {
+    const listResult = await client.invokeTool(
+      user,
+      "aegis.script.list",
+      { q: scriptName },
+      null,
+    );
+    const scripts = extractScriptsArray(listResult);
+    const matches = scripts.filter(
+      (s) => s.name?.toLowerCase() === scriptName.toLowerCase(),
+    );
+    if (matches.length === 0) {
+      return normalizeToolResult({
+        isError: true,
+        content: [
+          {
+            type: "text",
+            text: `No saved script named "${scriptName}".`,
+          },
+        ],
+      });
+    }
+    if (matches.length > 1) {
+      return normalizeToolResult({
+        isError: true,
+        content: [
+          {
+            type: "text",
+            text: `Multiple saved scripts match "${scriptName}". Specify by id instead: ${matches
+              .map((m) => m.id)
+              .join(", ")}.`,
+          },
+        ],
+      });
+    }
+    resolvedId = matches[0].id;
+  }
+
+  const scriptResult = await client.invokeTool(
+    user,
+    "aegis.script.get",
+    { id: resolvedId },
+    null,
+  );
+  return normalizeToolResult(scriptResult);
+}
 
 function normalizeToolResult(result: unknown): {
   content: Array<{ type: string; text: string }>;
@@ -292,20 +429,8 @@ Available modes:
       };
     }
 
-    if (name === "zaru.script.save") {
-      return normalizeToolResult({
-        status: "not_implemented",
-        message:
-          "Script persistence requires orchestrator endpoints. Coming soon.",
-      });
-    }
-
-    if (name === "zaru.script.run") {
-      return normalizeToolResult({
-        status: "not_implemented",
-        message:
-          "Script persistence requires orchestrator endpoints. Coming soon.",
-      });
+    if (name === "zaru.script.save" || name === "zaru.script.run") {
+      return handleZaruScriptTool(orchestratorClient, user, name, args);
     }
 
     try {
