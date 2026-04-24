@@ -298,3 +298,162 @@ test("auth middleware does not call API key validator for non-aegis_ tokens", as
   assert.equal(apiKeyValidatorCalled, false);
   assert.equal(req.zaruUser?.userId, "jwt-user");
 });
+
+// ── Tenant ID Resolution Tests ──────────────────────────────────────────────
+
+test("JWT with tenant_id claim populates req.zaruUser.tenantId", async () => {
+  const middleware = createZaruAuthMiddleware(async () => ({
+    sub: "user-tenant-1",
+    zaru_tier: "pro",
+    tenant_id: "t-personal-abc",
+  }));
+
+  const req = {
+    headers: {
+      "x-zaru-user-token": "jwt-token",
+    },
+  } as any;
+  const res = createResponseRecorder();
+  let nextCalled = false;
+
+  await middleware(req, res, (() => {
+    nextCalled = true;
+  }) as NextFunction);
+
+  assert.equal(nextCalled, true);
+  assert.equal(req.zaruUser?.tenantId, "t-personal-abc");
+});
+
+test("x-zaru-active-tenant header with t- prefix overrides JWT tenant_id", async () => {
+  const middleware = createZaruAuthMiddleware(async () => ({
+    sub: "user-tenant-2",
+    zaru_tier: "pro",
+    tenant_id: "t-personal-abc",
+  }));
+
+  const req = {
+    headers: {
+      "x-zaru-user-token": "jwt-token",
+      "x-zaru-active-tenant": "t-team-xyz",
+    },
+  } as any;
+  const res = createResponseRecorder();
+  let nextCalled = false;
+
+  await middleware(req, res, (() => {
+    nextCalled = true;
+  }) as NextFunction);
+
+  assert.equal(nextCalled, true);
+  assert.equal(req.zaruUser?.tenantId, "t-team-xyz");
+});
+
+test("x-zaru-active-tenant without t- prefix is ignored; JWT tenant_id used instead", async () => {
+  const middleware = createZaruAuthMiddleware(async () => ({
+    sub: "user-tenant-3",
+    zaru_tier: "pro",
+    tenant_id: "t-personal-abc",
+  }));
+
+  const req = {
+    headers: {
+      "x-zaru-user-token": "jwt-token",
+      "x-zaru-active-tenant": "invalid-header",
+    },
+  } as any;
+  const res = createResponseRecorder();
+  let nextCalled = false;
+
+  await middleware(req, res, (() => {
+    nextCalled = true;
+  }) as NextFunction);
+
+  assert.equal(nextCalled, true);
+  assert.equal(req.zaruUser?.tenantId, "t-personal-abc");
+});
+
+test("x-zaru-active-tenant value 't-' alone (length <= 2) is ignored", async () => {
+  const middleware = createZaruAuthMiddleware(async () => ({
+    sub: "user-tenant-4",
+    zaru_tier: "free",
+    tenant_id: "t-personal-def",
+  }));
+
+  const req = {
+    headers: {
+      "x-zaru-user-token": "jwt-token",
+      "x-zaru-active-tenant": "t-",
+    },
+  } as any;
+  const res = createResponseRecorder();
+  let nextCalled = false;
+
+  await middleware(req, res, (() => {
+    nextCalled = true;
+  }) as NextFunction);
+
+  assert.equal(nextCalled, true);
+  assert.equal(req.zaruUser?.tenantId, "t-personal-def");
+});
+
+test("API key path stores identity.tenant_id on ZaruUser.tenantId", async () => {
+  const middleware = createZaruAuthMiddleware(
+    async () => {
+      throw new Error("should not be called");
+    },
+    async () => ({
+      user_id: "api-user-tenant",
+      tenant_id: "t-api-tenant-123",
+      aegis_role: null,
+      zaru_tier: "pro",
+      scopes: [],
+    }),
+  );
+
+  const req = {
+    headers: {
+      authorization: "Bearer aegis_key_with_tenant",
+    },
+    query: {},
+  } as any;
+  const res = createResponseRecorder();
+  let nextCalled = false;
+
+  await middleware(req, res, (() => {
+    nextCalled = true;
+  }) as NextFunction);
+
+  assert.equal(nextCalled, true);
+  assert.equal(req.zaruUser?.tenantId, "t-api-tenant-123");
+});
+
+test("API key path with null tenant_id results in undefined tenantId", async () => {
+  const middleware = createZaruAuthMiddleware(
+    async () => {
+      throw new Error("should not be called");
+    },
+    async () => ({
+      user_id: "api-user-no-tenant",
+      tenant_id: null,
+      aegis_role: null,
+      zaru_tier: "free",
+      scopes: [],
+    }),
+  );
+
+  const req = {
+    headers: {
+      authorization: "Bearer aegis_key_no_tenant",
+    },
+    query: {},
+  } as any;
+  const res = createResponseRecorder();
+  let nextCalled = false;
+
+  await middleware(req, res, (() => {
+    nextCalled = true;
+  }) as NextFunction);
+
+  assert.equal(nextCalled, true);
+  assert.equal(req.zaruUser?.tenantId, undefined);
+});

@@ -12,6 +12,7 @@ export interface ZaruUser {
   securityContext: string;
   token: string;
   isOperator: boolean;
+  tenantId?: string;
 }
 
 export interface ZaruRequest extends Request {
@@ -24,6 +25,7 @@ export type VerifiedClaims = JWTPayload & {
   sub: string;
   zaru_tier?: string;
   aegis_role?: AegisRole;
+  tenant_id?: string;
 };
 
 export type JwtVerifier = (token: string) => Promise<VerifiedClaims>;
@@ -237,6 +239,7 @@ export function createZaruAuthMiddleware(
           securityContext: secCtx,
           token: rawToken,
           isOperator: isOp,
+          tenantId: identity.tenant_id ?? undefined,
         };
         next();
       } catch (error) {
@@ -251,6 +254,18 @@ export function createZaruAuthMiddleware(
     try {
       const claims = await verifier(rawToken);
 
+      const jwtTenantId = claims.tenant_id ?? undefined;
+      const teamTenantHeader = req.headers["x-zaru-active-tenant"] as
+        | string
+        | undefined;
+      const teamTenantId =
+        teamTenantHeader &&
+        teamTenantHeader.startsWith("t-") &&
+        teamTenantHeader.length > 2
+          ? teamTenantHeader
+          : undefined;
+      const tenantId = teamTenantId ?? jwtTenantId;
+
       if (isValidAegisRole(claims.aegis_role)) {
         req.zaruUser = {
           userId: claims.sub,
@@ -258,6 +273,7 @@ export function createZaruAuthMiddleware(
           securityContext: OPERATOR_SECURITY_CONTEXT,
           token: rawToken,
           isOperator: true,
+          tenantId,
         };
       } else {
         const tier = normalizeTier(claims.zaru_tier);
@@ -267,6 +283,7 @@ export function createZaruAuthMiddleware(
           securityContext: mapTierToSecurityContext(tier),
           token: rawToken,
           isOperator: false,
+          tenantId,
         };
       }
 

@@ -162,7 +162,7 @@ test("invokeTool attests and sends a spec-shaped SEAL envelope", async () => {
   });
   assert.equal(calls.length, 2);
   assert.equal(calls[0]?.url, "http://aegis.test/v1/seal/attest");
-  assert.equal(calls[0]?.body?.user_id, "user-2");
+  assert.equal(calls[0]?.body?.user_id, undefined);
   assert.equal(
     calls[0]?.body?.workload_id?.toString().startsWith("zaru:user-2:"),
     true,
@@ -354,5 +354,133 @@ test("invokeTool does NOT retry when 400 body contains 'session' in an unrelated
     invokeCount,
     1,
     "should not retry on non-session 400 errors containing 'session'",
+  );
+});
+
+// ── Tenant ID in SEAL Attestation Tests ────────────────────────────────────
+
+test("createSession includes tenant_id in attest body when user.tenantId is set", async () => {
+  const attestBodies: Array<Record<string, unknown>> = [];
+  const client = new OrchestratorClient({
+    baseUrl: "http://aegis.test",
+    fetchImpl: async (input, init) => {
+      const url = String(input);
+      if (url.endsWith("/v1/seal/attest")) {
+        attestBodies.push(
+          JSON.parse(String(init?.body)) as Record<string, unknown>,
+        );
+        return jsonResponse({ security_token: "tok" });
+      }
+      if (url.endsWith("/v1/seal/invoke")) {
+        return jsonResponse({
+          jsonrpc: "2.0",
+          id: "r1",
+          result: { content: [], isError: false },
+        });
+      }
+      return jsonResponse({}, 404);
+    },
+  });
+
+  const user = {
+    userId: "u-tenant",
+    tier: "pro",
+    securityContext: "zaru-pro",
+    token: "jwt",
+    isOperator: false,
+    tenantId: "t-team-abc",
+  };
+
+  await client.invokeTool(user, "aegis.agent.list", {}, "r1");
+
+  assert.equal(attestBodies.length, 1);
+  assert.equal(attestBodies[0]?.tenant_id, "t-team-abc");
+});
+
+test("createSession omits tenant_id from attest body when user.tenantId is absent", async () => {
+  const attestBodies: Array<Record<string, unknown>> = [];
+  const client = new OrchestratorClient({
+    baseUrl: "http://aegis.test",
+    fetchImpl: async (input, init) => {
+      const url = String(input);
+      if (url.endsWith("/v1/seal/attest")) {
+        attestBodies.push(
+          JSON.parse(String(init?.body)) as Record<string, unknown>,
+        );
+        return jsonResponse({ security_token: "tok" });
+      }
+      if (url.endsWith("/v1/seal/invoke")) {
+        return jsonResponse({
+          jsonrpc: "2.0",
+          id: "r2",
+          result: { content: [], isError: false },
+        });
+      }
+      return jsonResponse({}, 404);
+    },
+  });
+
+  const user = {
+    userId: "u-no-tenant",
+    tier: "free",
+    securityContext: "zaru-free",
+    token: "jwt",
+    isOperator: false,
+  };
+
+  await client.invokeTool(user, "aegis.agent.list", {}, "r2");
+
+  assert.equal(attestBodies.length, 1);
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(attestBodies[0], "tenant_id"),
+    false,
+    "tenant_id must not be present in attest body when tenantId is absent",
+  );
+});
+
+test("session cache uses separate entries for same userId with different tenantIds", async () => {
+  let attestCount = 0;
+  const client = new OrchestratorClient({
+    baseUrl: "http://aegis.test",
+    cacheTtlMs: 60_000,
+    fetchImpl: async (input, init) => {
+      const url = String(input);
+      if (url.endsWith("/v1/seal/attest")) {
+        attestCount++;
+        return jsonResponse({ security_token: `tok-${attestCount}` });
+      }
+      if (url.endsWith("/v1/seal/invoke")) {
+        return jsonResponse({
+          jsonrpc: "2.0",
+          id: "r3",
+          result: { content: [], isError: false },
+        });
+      }
+      return jsonResponse({}, 404);
+    },
+  });
+
+  const baseUser = {
+    userId: "shared-user",
+    tier: "pro",
+    securityContext: "zaru-pro",
+    token: "jwt",
+    isOperator: false,
+  };
+
+  const userPersonal = { ...baseUser, tenantId: undefined };
+  const userTeam = { ...baseUser, tenantId: "t-team-xyz" };
+
+  // First call for personal tenant — attests once
+  await client.invokeTool(userPersonal, "aegis.agent.list", {}, "r3a");
+  // Second call for team tenant — must attest again (different cache key)
+  await client.invokeTool(userTeam, "aegis.agent.list", {}, "r3b");
+  // Third call for personal tenant — must use cached session, no new attest
+  await client.invokeTool(userPersonal, "aegis.agent.list", {}, "r3c");
+
+  assert.equal(
+    attestCount,
+    2,
+    "should attest twice: once per distinct tenantId, personal reuses cache",
   );
 });

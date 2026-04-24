@@ -201,8 +201,9 @@ export class OrchestratorClient {
       },
     );
 
+    const cacheKey = `${user.userId}:${user.tenantId ?? "personal"}`;
     if (response.status === 401 || response.status === 403) {
-      this.sessionCache.delete(user.userId);
+      this.sessionCache.delete(cacheKey);
       return this.invokeJsonRpcWithFreshSession(user, payload);
     }
 
@@ -214,7 +215,7 @@ export class OrchestratorClient {
         body.includes("SessionExpired") ||
         body.includes("SessionInactive")
       ) {
-        this.sessionCache.delete(user.userId);
+        this.sessionCache.delete(cacheKey);
         return this.invokeJsonRpcWithFreshSession(user, payload);
       }
       console.error(
@@ -238,7 +239,10 @@ export class OrchestratorClient {
     payload: JsonRpcRequest,
   ): Promise<unknown> {
     const session = await this.createSession(user);
-    this.sessionCache.set(user.userId, session);
+    this.sessionCache.set(
+      `${user.userId}:${user.tenantId ?? "personal"}`,
+      session,
+    );
     const envelope = buildSealEnvelope(
       session.securityToken,
       payload,
@@ -267,7 +271,8 @@ export class OrchestratorClient {
   }
 
   private async getOrCreateSession(user: ZaruUser): Promise<ZaruSealSession> {
-    const existing = this.sessionCache.get(user.userId);
+    const cacheKey = `${user.userId}:${user.tenantId ?? "personal"}`;
+    const existing = this.sessionCache.get(cacheKey);
     if (
       existing &&
       existing.securityContext === user.securityContext &&
@@ -277,7 +282,7 @@ export class OrchestratorClient {
     }
 
     const session = await this.createSession(user);
-    this.sessionCache.set(user.userId, session);
+    this.sessionCache.set(cacheKey, session);
     return session;
   }
 
@@ -292,12 +297,12 @@ export class OrchestratorClient {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          user_id: user.userId,
           workload_id: `zaru:${user.userId}:${sessionId}`,
           security_context: user.securityContext,
           ...(user.isOperator
             ? { aegis_role: user.tier }
             : { zaru_tier: user.tier }),
+          ...(user.tenantId ? { tenant_id: user.tenantId } : {}),
           public_key: keyPair.publicKeyRaw.toString("base64"),
           container_id:
             process.env.CONTAINER_ID ??
