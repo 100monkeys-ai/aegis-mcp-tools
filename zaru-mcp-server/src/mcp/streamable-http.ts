@@ -1,4 +1,5 @@
 import type { Response } from "express";
+import { randomUUID } from "node:crypto";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import {
@@ -193,7 +194,7 @@ function normalizeToolResult(result: unknown): {
  * attachments to these tools — defence-in-depth on top of the orchestrator and
  * the Zaru web client gates.
  */
-const ATTACHMENT_CAPABLE_TOOLS = new Set([
+export const ATTACHMENT_CAPABLE_TOOLS: ReadonlySet<string> = new Set([
   "aegis.task.execute",
   "aegis.agent.generate",
   "aegis.execute.intent",
@@ -204,7 +205,7 @@ const ATTACHMENT_CAPABLE_TOOLS = new Set([
  * — either at the top level or nested under `input` (the conventional shape
  * for `aegis.task.execute` / `aegis.agent.generate` / `aegis.execute.intent`).
  */
-function hasAttachments(args: unknown): boolean {
+export function hasAttachments(args: unknown): boolean {
   if (!args || typeof args !== "object") return false;
   const a = args as Record<string, unknown>;
   if (Array.isArray(a.attachments) && a.attachments.length > 0) return true;
@@ -219,6 +220,34 @@ function hasAttachments(args: unknown): boolean {
     if (Array.isArray(i.attachments) && i.attachments.length > 0) return true;
   }
   return false;
+}
+
+/**
+ * ADR-113 defence-in-depth predicate. Returns true when an MCP `tools/call`
+ * payload carries attachments to an attachment-capable tool from a session
+ * that has NOT declared the "chat-uploads" capability via `zaru.init` /
+ * `zaru.mode`.
+ *
+ * All three conditions MUST hold to reject:
+ *   1. The tool name is in `ATTACHMENT_CAPABLE_TOOLS`.
+ *   2. The payload actually contains a non-empty `attachments` array.
+ *   3. The session has not declared `chat-uploads`.
+ *
+ * Calls without attachments — regardless of tool name or capability state —
+ * MUST pass through. Locking external MCP clients out of normal use of
+ * `aegis.agent.generate` / `aegis.task.execute` / `aegis.execute.intent`
+ * was the regression this predicate is written to prevent.
+ */
+export function shouldRejectAttachments(
+  toolName: string,
+  args: unknown,
+  capabilities: ReadonlySet<string>,
+): boolean {
+  return (
+    ATTACHMENT_CAPABLE_TOOLS.has(toolName) &&
+    hasAttachments(args) &&
+    !capabilities.has("chat-uploads")
+  );
 }
 
 function createMcpServerForUser(user: ZaruUser): McpServer {
@@ -510,11 +539,7 @@ Available modes:
     // not declared the "chat-uploads" capability for this session. The
     // orchestrator and the Zaru web client also gate this — the MCP server
     // must not silently forward attachments from a non-capable client.
-    if (
-      ATTACHMENT_CAPABLE_TOOLS.has(name) &&
-      hasAttachments(args) &&
-      !sessionCapabilities.has("chat-uploads")
-    ) {
+    if (shouldRejectAttachments(name, args, sessionCapabilities)) {
       return {
         content: [
           {
@@ -577,9 +602,18 @@ export async function handleStreamableHttp(
     // Session not found - fall through to create a new one
   }
 
-  // Create a new transport and server for this session
+  // Create a new transport and server for this session.
+  //
+  // We run in stateful mode (`sessionIdGenerator` returns a UUID) so that
+  // per-session state populated by client-side tools — notably the
+  // `sessionCapabilities` set written by `zaru.init` / `zaru.mode` — is
+  // preserved across subsequent `tools/call` requests within the same MCP
+  // session. In stateless mode (`sessionIdGenerator: undefined`) every HTTP
+  // request gets a fresh `McpServer` with empty capabilities, which broke
+  // the ADR-113 chat-uploads gate by losing the client's declared
+  // capabilities between `zaru.init` and the next tool call.
   const transport = new StreamableHTTPServerTransport({
-    sessionIdGenerator: undefined,
+    sessionIdGenerator: () => randomUUID(),
     enableJsonResponse: true,
   });
 
