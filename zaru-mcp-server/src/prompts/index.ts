@@ -452,6 +452,28 @@ const PROMPTS: Record<string, string> = {
   operator: OPERATOR_PROMPT,
 };
 
+// ---------------------------------------------------------------------------
+// chat-uploads capability — additive system prompt teaching for attachment-
+// aware modes (agentic, workflow). When a client declares the "chat-uploads"
+// capability, the user may attach files in chat which arrive as an
+// `attachments` array on tool call inputs. The LLM must pass these through
+// faithfully to downstream agent / workflow dispatches.
+// ---------------------------------------------------------------------------
+
+const CHAT_UPLOADS_TEACHING = `
+
+# CHAT ATTACHMENTS — PASS-THROUGH RULE
+
+The user may attach files to their messages. When attachments are present, your tool call inputs will include an \`attachments\` field — an array of \`{volume_id, path, name, mime_type, size}\` references that point at files staged in a sandbox-readable volume. Zaru handles file references deterministically; you do not need to construct, paraphrase, rename, or modify them.
+
+- When dispatching an agent (\`aegis.task.execute\`, \`aegis.agent.generate\`) or running a workflow, pass the same \`attachments\` array through verbatim on the call. The downstream agent or workflow needs the references to read the files inside its sandbox.
+- Do NOT read, summarise, or describe the file contents yourself before dispatching — the 100monkeys read the files in their sandbox. You just hand off the references.
+- Do NOT fabricate \`attachments\` entries. Only forward what the client supplied.
+- If the user's intent involves processing an attached file, ensure every agent or workflow you dispatch receives the same \`attachments\` array on its input.`;
+
+/** Modes that accept and forward `attachments` when the chat-uploads capability is active. */
+const CHAT_UPLOADS_MODES = new Set(["agentic", "workflow"]);
+
 const TOOL_SCOPES: Record<string, string[]> = {
   chat: ["zaru.mode", "zaru.docs"],
   agentic: [
@@ -545,9 +567,19 @@ export function getZaruInit(
   const prompt = PROMPTS[effectiveMode];
   const tools = TOOL_SCOPES[effectiveMode];
   if (!prompt || !tools) return null;
+
+  // When the client declares the "chat-uploads" capability and is in an
+  // attachment-aware mode, augment the system prompt with pass-through
+  // teaching for the `attachments` field on tool call inputs.
+  const augmentedPrompt =
+    client?.capabilities?.includes("chat-uploads") &&
+    CHAT_UPLOADS_MODES.has(effectiveMode)
+      ? prompt + CHAT_UPLOADS_TEACHING
+      : prompt;
+
   return {
     mode: effectiveMode,
-    system_prompt: prompt,
+    system_prompt: augmentedPrompt,
     available_tools: tools,
     version: ZARU_VERSION,
   };

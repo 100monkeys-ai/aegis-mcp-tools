@@ -187,7 +187,46 @@ function normalizeToolResult(result: unknown): {
   };
 }
 
+/**
+ * Tool calls that may carry an `attachments` array per ADR-113. Only clients
+ * that declare the "chat-uploads" capability are permitted to forward
+ * attachments to these tools — defence-in-depth on top of the orchestrator and
+ * the Zaru web client gates.
+ */
+const ATTACHMENT_CAPABLE_TOOLS = new Set([
+  "aegis.task.execute",
+  "aegis.agent.generate",
+  "aegis.execute.intent",
+]);
+
+/**
+ * Returns true if a tool call payload includes a non-empty `attachments` field
+ * — either at the top level or nested under `input` (the conventional shape
+ * for `aegis.task.execute` / `aegis.agent.generate` / `aegis.execute.intent`).
+ */
+function hasAttachments(args: unknown): boolean {
+  if (!args || typeof args !== "object") return false;
+  const a = args as Record<string, unknown>;
+  if (Array.isArray(a.attachments) && a.attachments.length > 0) return true;
+  const input = a.input;
+  if (input && typeof input === "object") {
+    const i = input as Record<string, unknown>;
+    if (Array.isArray(i.attachments) && i.attachments.length > 0) return true;
+  }
+  const inputs = a.inputs;
+  if (inputs && typeof inputs === "object") {
+    const i = inputs as Record<string, unknown>;
+    if (Array.isArray(i.attachments) && i.attachments.length > 0) return true;
+  }
+  return false;
+}
+
 function createMcpServerForUser(user: ZaruUser): McpServer {
+  // Per-session capability state, populated by the client via `zaru.init` /
+  // `zaru.mode`. Used to enforce the chat-uploads gate on subsequent tool
+  // calls within this session.
+  const sessionCapabilities = new Set<string>();
+
   const mcpServer = new McpServer(
     {
       name: "zaru-mcp-server",
@@ -288,6 +327,18 @@ Available modes:
                 description:
                   "Short explanation of why the mode switch is appropriate",
               },
+              client: {
+                type: "object",
+                description:
+                  "Optional client descriptor — re-asserts runtime and capabilities on mode switch. If omitted, the capabilities recorded at zaru.init time are preserved.",
+                properties: {
+                  runtime: { type: "string" },
+                  capabilities: {
+                    type: "array",
+                    items: { type: "string" },
+                  },
+                },
+              },
             },
             required: ["mode"],
           },
@@ -348,6 +399,12 @@ Available modes:
       const client = (args as Record<string, unknown>)?.client as
         | { runtime?: string; capabilities?: string[] }
         | undefined;
+      // Record the client's declared capabilities for this session so
+      // downstream tool calls can be gated (e.g. chat-uploads / attachments).
+      sessionCapabilities.clear();
+      for (const cap of client?.capabilities ?? []) {
+        sessionCapabilities.add(cap);
+      }
       const result = getZaruInit(mode, client);
       if (!result) {
         return {
@@ -398,7 +455,23 @@ Available modes:
       const reason = (args as Record<string, unknown>)?.reason as
         | string
         | undefined;
-      const result = getZaruInit(targetMode);
+      const client = (args as Record<string, unknown>)?.client as
+        | { runtime?: string; capabilities?: string[] }
+        | undefined;
+      // If the client re-asserts capabilities on mode switch, refresh the
+      // session record. Otherwise preserve what was set at zaru.init time.
+      if (client?.capabilities) {
+        sessionCapabilities.clear();
+        for (const cap of client.capabilities) {
+          sessionCapabilities.add(cap);
+        }
+      }
+      const result = getZaruInit(
+        targetMode,
+        client ?? {
+          capabilities: Array.from(sessionCapabilities),
+        },
+      );
       if (!result) {
         return {
           content: [
@@ -431,6 +504,29 @@ Available modes:
 
     if (name === "zaru.script.save" || name === "zaru.script.run") {
       return handleZaruScriptTool(orchestratorClient, user, name, args);
+    }
+
+    // ADR-113 defence-in-depth: reject `attachments` from any client that has
+    // not declared the "chat-uploads" capability for this session. The
+    // orchestrator and the Zaru web client also gate this — the MCP server
+    // must not silently forward attachments from a non-capable client.
+    if (
+      ATTACHMENT_CAPABLE_TOOLS.has(name) &&
+      hasAttachments(args) &&
+      !sessionCapabilities.has("chat-uploads")
+    ) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              error:
+                "attachments are only accepted from clients that declare the 'chat-uploads' capability via zaru.init.",
+            }),
+          },
+        ],
+        isError: true,
+      };
     }
 
     try {
