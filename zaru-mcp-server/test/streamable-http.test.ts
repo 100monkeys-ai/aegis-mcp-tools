@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   ATTACHMENT_CAPABLE_TOOLS,
   hasAttachments,
+  parseCapabilitiesHeader,
   shouldRejectAttachments,
 } from "../src/mcp/streamable-http.js";
 
@@ -145,4 +146,133 @@ test("gate: tools NOT in the attachment-capable set are never rejected", () => {
     false,
   );
   assert.equal(shouldRejectAttachments("zaru.docs", args, new Set()), false);
+});
+
+// ─── parseCapabilitiesHeader regression suite ────────────────────────────
+//
+// Capabilities are sourced from the `X-Zaru-Capabilities` HTTP header on
+// every request. This replaces the prior server-side per-session capability
+// store. Two prior implementations were both wrong:
+//
+//   - Stateless mode + per-session McpServer (commit 23b4e21): capabilities
+//     declared in zaru.init were discarded between calls.
+//   - Stateful mode + in-memory sessions Map (commit b2cf411): capabilities
+//     persisted across calls but were wiped on every server restart,
+//     breaking every active conversation with -32000 "Server not initialized".
+//
+// The header design is correct on both axes: every request carries the
+// canonical client capability set, and the server holds no state.
+
+test("parseCapabilitiesHeader: undefined / empty / null-ish yields empty set", () => {
+  assert.equal(parseCapabilitiesHeader(undefined).size, 0);
+  assert.equal(parseCapabilitiesHeader("").size, 0);
+  assert.equal(parseCapabilitiesHeader(",").size, 0);
+  assert.equal(parseCapabilitiesHeader("   ").size, 0);
+});
+
+test("parseCapabilitiesHeader: single value", () => {
+  const caps = parseCapabilitiesHeader("chat-uploads");
+  assert.equal(caps.size, 1);
+  assert.ok(caps.has("chat-uploads"));
+});
+
+test("parseCapabilitiesHeader: comma-separated values", () => {
+  const caps = parseCapabilitiesHeader("live,vibecode,chat-uploads");
+  assert.equal(caps.size, 3);
+  assert.ok(caps.has("live"));
+  assert.ok(caps.has("vibecode"));
+  assert.ok(caps.has("chat-uploads"));
+});
+
+test("parseCapabilitiesHeader: trims whitespace and lowercases — canonical form is the only stored form", () => {
+  // The canonical form is lowercase, no surrounding whitespace. Inputs that
+  // deviate are normalized rather than rejected; this avoids surprising
+  // false-negatives from a stray space or differing case in client code.
+  const caps = parseCapabilitiesHeader(" Chat-Uploads , LIVE ");
+  assert.equal(caps.size, 2);
+  assert.ok(caps.has("chat-uploads"));
+  assert.ok(caps.has("live"));
+});
+
+test("parseCapabilitiesHeader: array form (Express repeated header) is flattened", () => {
+  const caps = parseCapabilitiesHeader(["chat-uploads", "live,vibecode"]);
+  assert.equal(caps.size, 3);
+  assert.ok(caps.has("chat-uploads"));
+  assert.ok(caps.has("live"));
+  assert.ok(caps.has("vibecode"));
+});
+
+test("gate via header: chat-uploads in header passes attachment-bearing aegis.task.execute", () => {
+  const caps = parseCapabilitiesHeader("chat-uploads");
+  const args = {
+    input: "summarize this",
+    attachments: [{ volume_id: "v", path: "/doc.pdf" }],
+  };
+  assert.equal(
+    shouldRejectAttachments("aegis.task.execute", args, caps),
+    false,
+  );
+});
+
+test("gate via header: missing X-Zaru-Capabilities REJECTS attachment-bearing aegis.task.execute", () => {
+  const caps = parseCapabilitiesHeader(undefined);
+  const args = {
+    input: "summarize this",
+    attachments: [{ volume_id: "v", path: "/doc.pdf" }],
+  };
+  assert.equal(shouldRejectAttachments("aegis.task.execute", args, caps), true);
+});
+
+test("gate via header: live,vibecode WITHOUT chat-uploads REJECTS attachment-bearing call", () => {
+  const caps = parseCapabilitiesHeader("live,vibecode");
+  const args = {
+    input: "summarize this",
+    attachments: [{ volume_id: "v", path: "/doc.pdf" }],
+  };
+  assert.equal(shouldRejectAttachments("aegis.task.execute", args, caps), true);
+});
+
+test("gate via header: mixed-case `Chat-Uploads` is normalized and PASSES", () => {
+  const caps = parseCapabilitiesHeader("Chat-Uploads");
+  const args = {
+    input: "summarize this",
+    attachments: [{ volume_id: "v", path: "/doc.pdf" }],
+  };
+  assert.equal(
+    shouldRejectAttachments("aegis.task.execute", args, caps),
+    false,
+  );
+});
+
+test("regression for b2cf411: header is read on every request, never stored", () => {
+  // Before this fix, capabilities were stored in an in-memory `sessions`
+  // Map keyed by Mcp-Session-Id. A server restart wiped that map, so every
+  // active chat conversation broke with -32000 "Server not initialized".
+  //
+  // The contract under test: each request carries its own header, and
+  // `parseCapabilitiesHeader` + `shouldRejectAttachments` are pure
+  // functions of (header value, tool name, args). No state is shared
+  // between calls — simulating two distinct HTTP requests by simply
+  // calling the predicate twice with the same header reproduces the
+  // exact wire-level behavior across an arbitrary number of requests
+  // and across server restarts.
+  const args = {
+    input: "summarize",
+    attachments: [{ volume_id: "v", path: "/doc.pdf" }],
+  };
+  for (let i = 0; i < 5; i++) {
+    const caps = parseCapabilitiesHeader("chat-uploads");
+    assert.equal(
+      shouldRejectAttachments("aegis.task.execute", args, caps),
+      false,
+      `request #${i + 1} with header must pass`,
+    );
+  }
+  // And a request without the header on the same "server" must reject —
+  // no leaked state from prior requests.
+  const capsNo = parseCapabilitiesHeader(undefined);
+  assert.equal(
+    shouldRejectAttachments("aegis.task.execute", args, capsNo),
+    true,
+  );
 });

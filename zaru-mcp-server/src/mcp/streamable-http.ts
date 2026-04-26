@@ -1,5 +1,4 @@
 import type { Response } from "express";
-import { randomUUID } from "node:crypto";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import {
@@ -54,15 +53,6 @@ export function extractScriptsArray(
   }
   return [];
 }
-
-interface StreamableHttpSession {
-  transport: StreamableHTTPServerTransport;
-  server: McpServer;
-  user: ZaruUser;
-}
-
-/** Active StreamableHTTP sessions keyed by Mcp-Session-Id header */
-const sessions = new Map<string, StreamableHttpSession>();
 
 /**
  * Dispatch `zaru.script.save` / `zaru.script.run` onto the orchestrator via the
@@ -224,14 +214,13 @@ export function hasAttachments(args: unknown): boolean {
 
 /**
  * ADR-113 defence-in-depth predicate. Returns true when an MCP `tools/call`
- * payload carries attachments to an attachment-capable tool from a session
- * that has NOT declared the "chat-uploads" capability via `zaru.init` /
- * `zaru.mode`.
+ * payload carries attachments to an attachment-capable tool from a client
+ * that has NOT declared the "chat-uploads" capability.
  *
  * All three conditions MUST hold to reject:
  *   1. The tool name is in `ATTACHMENT_CAPABLE_TOOLS`.
  *   2. The payload actually contains a non-empty `attachments` array.
- *   3. The session has not declared `chat-uploads`.
+ *   3. The caller has not declared `chat-uploads`.
  *
  * Calls without attachments — regardless of tool name or capability state —
  * MUST pass through. Locking external MCP clients out of normal use of
@@ -250,12 +239,35 @@ export function shouldRejectAttachments(
   );
 }
 
-function createMcpServerForUser(user: ZaruUser): McpServer {
-  // Per-session capability state, populated by the client via `zaru.init` /
-  // `zaru.mode`. Used to enforce the chat-uploads gate on subsequent tool
-  // calls within this session.
-  const sessionCapabilities = new Set<string>();
+/**
+ * Parse the `X-Zaru-Capabilities` HTTP header into a normalized capability
+ * Set. The header is a comma-separated list (e.g. `chat-uploads,live,vibecode`).
+ * Each token is trimmed and lowercased so that the canonical lowercase form
+ * (matching ADR-113 / ADR-110 capability identifiers) is the only value the
+ * gate ever sees. Missing, empty, or non-string headers yield an empty Set —
+ * which the gate treats as "no capabilities declared".
+ *
+ * Exported for unit testing.
+ */
+export function parseCapabilitiesHeader(
+  headerValue: string | string[] | undefined,
+): Set<string> {
+  const out = new Set<string>();
+  if (!headerValue) return out;
+  // Express may surface a repeated header as `string[]`; flatten to a single
+  // comma-joined string before tokenizing.
+  const raw = Array.isArray(headerValue) ? headerValue.join(",") : headerValue;
+  for (const token of raw.split(",")) {
+    const t = token.trim().toLowerCase();
+    if (t.length > 0) out.add(t);
+  }
+  return out;
+}
 
+function createMcpServerForUser(
+  user: ZaruUser,
+  capabilities: ReadonlySet<string>,
+): McpServer {
   const mcpServer = new McpServer(
     {
       name: "zaru-mcp-server",
@@ -359,7 +371,7 @@ Available modes:
               client: {
                 type: "object",
                 description:
-                  "Optional client descriptor — re-asserts runtime and capabilities on mode switch. If omitted, the capabilities recorded at zaru.init time are preserved.",
+                  "Optional client descriptor — runtime and capabilities used for system-prompt augmentation (ADR-110). The chat-uploads gate is driven by the X-Zaru-Capabilities request header, not this field.",
                 properties: {
                   runtime: { type: "string" },
                   capabilities: {
@@ -420,7 +432,16 @@ Available modes:
   mcpServer.server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
 
-    // Handle client-side tools locally — never forward to AEGIS
+    // Handle client-side tools locally — never forward to AEGIS.
+    //
+    // Note: `zaru.init` and `zaru.mode` historically recorded the client's
+    // declared capabilities into per-session server state to drive the
+    // ADR-113 chat-uploads gate. That design was wrong on two axes — see
+    // `parseCapabilitiesHeader` and the commit message for the full
+    // rationale. The capability is a property of the client and is now
+    // sourced from the `X-Zaru-Capabilities` HTTP header on every request.
+    // The `client.capabilities` array on these tools remains in use by
+    // `getZaruInit()` for system-prompt augmentation per ADR-110.
     if (name === "zaru.init") {
       const mode = (args as Record<string, unknown>)?.mode as
         | string
@@ -428,12 +449,6 @@ Available modes:
       const client = (args as Record<string, unknown>)?.client as
         | { runtime?: string; capabilities?: string[] }
         | undefined;
-      // Record the client's declared capabilities for this session so
-      // downstream tool calls can be gated (e.g. chat-uploads / attachments).
-      sessionCapabilities.clear();
-      for (const cap of client?.capabilities ?? []) {
-        sessionCapabilities.add(cap);
-      }
       const result = getZaruInit(mode, client);
       if (!result) {
         return {
@@ -487,20 +502,7 @@ Available modes:
       const client = (args as Record<string, unknown>)?.client as
         | { runtime?: string; capabilities?: string[] }
         | undefined;
-      // If the client re-asserts capabilities on mode switch, refresh the
-      // session record. Otherwise preserve what was set at zaru.init time.
-      if (client?.capabilities) {
-        sessionCapabilities.clear();
-        for (const cap of client.capabilities) {
-          sessionCapabilities.add(cap);
-        }
-      }
-      const result = getZaruInit(
-        targetMode,
-        client ?? {
-          capabilities: Array.from(sessionCapabilities),
-        },
-      );
+      const result = getZaruInit(targetMode, client);
       if (!result) {
         return {
           content: [
@@ -536,17 +538,18 @@ Available modes:
     }
 
     // ADR-113 defence-in-depth: reject `attachments` from any client that has
-    // not declared the "chat-uploads" capability for this session. The
-    // orchestrator and the Zaru web client also gate this — the MCP server
-    // must not silently forward attachments from a non-capable client.
-    if (shouldRejectAttachments(name, args, sessionCapabilities)) {
+    // not declared the "chat-uploads" capability via the X-Zaru-Capabilities
+    // request header. The orchestrator and the Zaru web client also gate
+    // this — the MCP server must not silently forward attachments from a
+    // non-capable client.
+    if (shouldRejectAttachments(name, args, capabilities)) {
       return {
         content: [
           {
             type: "text",
             text: JSON.stringify({
               error:
-                "attachments are only accepted from clients that declare the 'chat-uploads' capability via zaru.init.",
+                "attachments are only accepted from clients that declare the 'chat-uploads' capability via the X-Zaru-Capabilities request header.",
             }),
           },
         ],
@@ -577,8 +580,11 @@ Available modes:
 /**
  * POST /mcp/v1 - Handle StreamableHTTP requests.
  *
- * Creates a per-request transport (stateless mode) or reuses an existing
- * session if an Mcp-Session-Id header is present.
+ * Stateless mode: every HTTP request gets a fresh transport and `McpServer`.
+ * The server holds no per-session state — restart-survival is therefore
+ * trivial. Client capability declarations (ADR-113 chat-uploads gate) are
+ * read from the `X-Zaru-Capabilities` request header on every call, NOT
+ * stored server-side. See `parseCapabilitiesHeader`.
  */
 export async function handleStreamableHttp(
   req: ZaruRequest,
@@ -590,46 +596,22 @@ export async function handleStreamableHttp(
     return;
   }
 
-  const sessionId = req.headers["mcp-session-id"] as string | undefined;
+  const capabilities = parseCapabilitiesHeader(
+    req.headers["x-zaru-capabilities"],
+  );
 
-  // If a session ID is provided, try to reuse the existing session
-  if (sessionId) {
-    const existing = sessions.get(sessionId);
-    if (existing) {
-      await existing.transport.handleRequest(req, res, req.body);
-      return;
-    }
-    // Session not found - fall through to create a new one
-  }
-
-  // Create a new transport and server for this session.
-  //
-  // We run in stateful mode (`sessionIdGenerator` returns a UUID) so that
-  // per-session state populated by client-side tools — notably the
-  // `sessionCapabilities` set written by `zaru.init` / `zaru.mode` — is
-  // preserved across subsequent `tools/call` requests within the same MCP
-  // session. In stateless mode (`sessionIdGenerator: undefined`) every HTTP
-  // request gets a fresh `McpServer` with empty capabilities, which broke
-  // the ADR-113 chat-uploads gate by losing the client's declared
-  // capabilities between `zaru.init` and the next tool call.
   const transport = new StreamableHTTPServerTransport({
-    sessionIdGenerator: () => randomUUID(),
+    sessionIdGenerator: undefined,
     enableJsonResponse: true,
   });
 
-  const server = createMcpServerForUser(user);
+  const server = createMcpServerForUser(user, capabilities);
   await server.connect(transport);
 
-  // Store the session if a session ID was generated
-  const newSessionId = transport.sessionId;
-  if (newSessionId) {
-    const session: StreamableHttpSession = { transport, server, user };
-    sessions.set(newSessionId, session);
-
-    console.log(
-      `StreamableHTTP session established: ${newSessionId} for user ${user.userId}`,
-    );
-  }
+  res.on("close", () => {
+    void transport.close();
+    void server.close();
+  });
 
   await transport.handleRequest(req, res, req.body);
 }
@@ -637,23 +619,12 @@ export async function handleStreamableHttp(
 /**
  * GET /mcp/v1 - Server-initiated notifications via SSE (per StreamableHTTP spec).
  *
- * For now, we don't support server-initiated push, so return 405.
+ * Stateless mode does not support server-initiated push, so return 405.
  */
 export async function handleStreamableHttpGet(
-  req: ZaruRequest,
+  _req: ZaruRequest,
   res: Response,
 ): Promise<void> {
-  const sessionId = req.headers["mcp-session-id"] as string | undefined;
-
-  if (sessionId) {
-    const existing = sessions.get(sessionId);
-    if (existing) {
-      // Delegate to the transport's GET handling for SSE streams
-      await existing.transport.handleRequest(req, res);
-      return;
-    }
-  }
-
   res
     .status(405)
     .json({ error: "Method Not Allowed: server-initiated push not supported" });
@@ -661,24 +632,12 @@ export async function handleStreamableHttpGet(
 
 /**
  * DELETE /mcp/v1 - Session cleanup.
+ *
+ * Stateless mode holds no session state, so DELETE is a no-op.
  */
 export async function handleStreamableHttpDelete(
-  req: ZaruRequest,
+  _req: ZaruRequest,
   res: Response,
 ): Promise<void> {
-  const sessionId = req.headers["mcp-session-id"] as string | undefined;
-
-  if (!sessionId) {
-    res.status(400).json({ error: "Missing Mcp-Session-Id header" });
-    return;
-  }
-
-  const session = sessions.get(sessionId);
-  if (session) {
-    await session.server.close();
-    sessions.delete(sessionId);
-    console.log(`StreamableHTTP session deleted: ${sessionId}`);
-  }
-
   res.status(200).json({ status: "ok" });
 }
