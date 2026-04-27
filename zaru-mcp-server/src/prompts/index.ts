@@ -538,28 +538,40 @@ const TOOL_SCOPES: Record<string, string[]> = {
 // Public API
 // ---------------------------------------------------------------------------
 
+/**
+ * Resolve the Zaru system prompt and available-tool surface for a mode.
+ *
+ * Capability transport is unified per the ADR-110 amendment / ADR-113
+ * correction wave: the caller passes a single pre-merged `Set<string>` of
+ * capabilities, sourced from the `X-Zaru-Capabilities` HTTP header (canonical)
+ * with `client.capabilities` from tool args as the legacy fallback. This
+ * function is intentionally agnostic about where the capabilities came from —
+ * it just consumes the merged set.
+ *
+ * @param mode  Conversation mode (defaults to `chat` when omitted).
+ * @param capabilities  Merged client capability set. The same set the
+ *   `shouldRejectAttachments` gate consumes for the same request.
+ * @param runtime  Optional client runtime descriptor (e.g. `"browser"`).
+ *   Currently only used to gate `live` and `vibecode` modes which require a
+ *   browser client. Sourced from `client.runtime` on the tool args.
+ */
 export function getZaruInit(
   mode?: string,
-  client?: { runtime?: string; capabilities?: string[] },
+  capabilities: ReadonlySet<string> = new Set(),
+  runtime?: string,
 ): ZaruInitResponse | null {
   const effectiveMode = mode ?? "chat";
 
   // Live mode requires a browser client with the "live" capability
   if (effectiveMode === "live") {
-    if (
-      client?.runtime !== "browser" ||
-      !client?.capabilities?.includes("live")
-    ) {
+    if (runtime !== "browser" || !capabilities.has("live")) {
       return null;
     }
   }
 
   // VibeCode mode requires a browser client with the "vibecode" capability
   if (effectiveMode === "vibecode") {
-    if (
-      client?.runtime !== "browser" ||
-      !client?.capabilities?.includes("vibecode")
-    ) {
+    if (runtime !== "browser" || !capabilities.has("vibecode")) {
       return null;
     }
   }
@@ -572,8 +584,7 @@ export function getZaruInit(
   // attachment-aware mode, augment the system prompt with pass-through
   // teaching for the `attachments` field on tool call inputs.
   const augmentedPrompt =
-    client?.capabilities?.includes("chat-uploads") &&
-    CHAT_UPLOADS_MODES.has(effectiveMode)
+    capabilities.has("chat-uploads") && CHAT_UPLOADS_MODES.has(effectiveMode)
       ? prompt + CHAT_UPLOADS_TEACHING
       : prompt;
 

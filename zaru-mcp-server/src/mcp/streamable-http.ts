@@ -240,6 +240,46 @@ export function shouldRejectAttachments(
 }
 
 /**
+ * Resolve the canonical capability set for a tool call.
+ *
+ * Per the ADR-110 amendment / ADR-113 correction wave, `X-Zaru-Capabilities`
+ * is the canonical capability transport. The `client.capabilities` array on
+ * `zaru.init` / `zaru.mode` tool args remains for backward compatibility with
+ * external MCP clients (Claude Code, Windsurf, etc.) that may not send the
+ * header. Merge policy:
+ *
+ *   1. Header present and non-empty   → use header, ignore tool args.
+ *   2. Header empty + args present    → use tool args (legacy fallback).
+ *   3. Both empty                     → empty set (base prompts; gate rejects
+ *                                        attachment-bearing requests).
+ *
+ * The header always wins when both are populated, so a future Zaru-internal
+ * capability change only needs to update the header — `client.capabilities`
+ * cannot drift it back into a degraded state.
+ *
+ * Exported for unit testing.
+ */
+export function resolveCapabilities(
+  headerCapabilities: ReadonlySet<string>,
+  argClientCapabilities: unknown,
+): Set<string> {
+  if (headerCapabilities.size > 0) {
+    return new Set(headerCapabilities);
+  }
+  if (Array.isArray(argClientCapabilities)) {
+    const out = new Set<string>();
+    for (const c of argClientCapabilities) {
+      if (typeof c === "string") {
+        const t = c.trim().toLowerCase();
+        if (t.length > 0) out.add(t);
+      }
+    }
+    return out;
+  }
+  return new Set();
+}
+
+/**
  * Parse the `X-Zaru-Capabilities` HTTP header into a normalized capability
  * Set. The header is a comma-separated list (e.g. `chat-uploads,live,vibecode`).
  * Each token is trimmed and lowercased so that the canonical lowercase form
@@ -447,9 +487,10 @@ Available modes:
         | string
         | undefined;
       const client = (args as Record<string, unknown>)?.client as
-        | { runtime?: string; capabilities?: string[] }
+        | { runtime?: string; capabilities?: unknown }
         | undefined;
-      const result = getZaruInit(mode, client);
+      const merged = resolveCapabilities(capabilities, client?.capabilities);
+      const result = getZaruInit(mode, merged, client?.runtime);
       if (!result) {
         return {
           content: [
@@ -500,9 +541,10 @@ Available modes:
         | string
         | undefined;
       const client = (args as Record<string, unknown>)?.client as
-        | { runtime?: string; capabilities?: string[] }
+        | { runtime?: string; capabilities?: unknown }
         | undefined;
-      const result = getZaruInit(targetMode, client);
+      const merged = resolveCapabilities(capabilities, client?.capabilities);
+      const result = getZaruInit(targetMode, merged, client?.runtime);
       if (!result) {
         return {
           content: [

@@ -8,10 +8,7 @@ import { getZaruInit, ZARU_VERSION } from "../src/prompts/index.js";
 // ---------------------------------------------------------------------------
 
 test("getZaruInit('vibecode') returns a full response for a browser client with the 'vibecode' capability", () => {
-  const result = getZaruInit("vibecode", {
-    runtime: "browser",
-    capabilities: ["vibecode"],
-  });
+  const result = getZaruInit("vibecode", new Set(["vibecode"]), "browser");
 
   assert.notEqual(result, null, "expected a non-null response");
   assert.equal(result!.mode, "vibecode");
@@ -36,26 +33,17 @@ test("getZaruInit('vibecode') returns null when no client is supplied", () => {
 });
 
 test("getZaruInit('vibecode') returns null for a browser client without the 'vibecode' capability", () => {
-  const result = getZaruInit("vibecode", {
-    runtime: "browser",
-    capabilities: [],
-  });
+  const result = getZaruInit("vibecode", new Set(), "browser");
   assert.equal(result, null);
 });
 
 test("getZaruInit('vibecode') returns null for a non-browser client even with the 'vibecode' capability", () => {
-  const result = getZaruInit("vibecode", {
-    runtime: "cli",
-    capabilities: ["vibecode"],
-  });
+  const result = getZaruInit("vibecode", new Set(["vibecode"]), "cli");
   assert.equal(result, null);
 });
 
 test("getZaruInit('vibecode') returns null when a browser client only advertises the 'live' capability", () => {
-  const result = getZaruInit("vibecode", {
-    runtime: "browser",
-    capabilities: ["live"],
-  });
+  const result = getZaruInit("vibecode", new Set(["live"]), "browser");
   assert.equal(result, null);
 });
 
@@ -64,10 +52,7 @@ test("getZaruInit('vibecode') returns null when a browser client only advertises
 // ---------------------------------------------------------------------------
 
 test("getZaruInit('live') returns a full response for a browser client with the 'live' capability", () => {
-  const result = getZaruInit("live", {
-    runtime: "browser",
-    capabilities: ["live"],
-  });
+  const result = getZaruInit("live", new Set(["live"]), "browser");
 
   assert.notEqual(result, null);
   assert.equal(result!.mode, "live");
@@ -84,14 +69,8 @@ test("getZaruInit('live') returns a full response for a browser client with the 
 
 test("getZaruInit('live') returns null when the 'live' capability is missing", () => {
   assert.equal(getZaruInit("live"), null);
-  assert.equal(
-    getZaruInit("live", { runtime: "browser", capabilities: [] }),
-    null,
-  );
-  assert.equal(
-    getZaruInit("live", { runtime: "cli", capabilities: ["live"] }),
-    null,
-  );
+  assert.equal(getZaruInit("live", new Set(), "browser"), null);
+  assert.equal(getZaruInit("live", new Set(["live"]), "cli"), null);
 });
 
 // ---------------------------------------------------------------------------
@@ -118,9 +97,7 @@ test("getZaruInit('nonexistent') returns null", () => {
 const CHAT_UPLOADS_MARKER = "CHAT ATTACHMENTS — PASS-THROUGH RULE";
 
 test("getZaruInit('agentic') with the 'chat-uploads' capability augments the system prompt with attachment teaching", () => {
-  const withCap = getZaruInit("agentic", {
-    capabilities: ["chat-uploads"],
-  });
+  const withCap = getZaruInit("agentic", new Set(["chat-uploads"]));
   assert.notEqual(withCap, null);
   assert.ok(
     withCap!.system_prompt.includes(CHAT_UPLOADS_MARKER),
@@ -140,19 +117,17 @@ test("getZaruInit('agentic') WITHOUT the 'chat-uploads' capability returns the b
     "expected base agentic prompt to omit attachment teaching",
   );
 
-  const emptyCaps = getZaruInit("agentic", { capabilities: [] });
+  const emptyCaps = getZaruInit("agentic", new Set());
   assert.notEqual(emptyCaps, null);
   assert.ok(!emptyCaps!.system_prompt.includes(CHAT_UPLOADS_MARKER));
 
-  const otherCap = getZaruInit("agentic", { capabilities: ["live"] });
+  const otherCap = getZaruInit("agentic", new Set(["live"]));
   assert.notEqual(otherCap, null);
   assert.ok(!otherCap!.system_prompt.includes(CHAT_UPLOADS_MARKER));
 });
 
 test("getZaruInit('workflow') with the 'chat-uploads' capability augments the system prompt", () => {
-  const withCap = getZaruInit("workflow", {
-    capabilities: ["chat-uploads"],
-  });
+  const withCap = getZaruInit("workflow", new Set(["chat-uploads"]));
   assert.notEqual(withCap, null);
   assert.ok(withCap!.system_prompt.includes(CHAT_UPLOADS_MARKER));
 });
@@ -164,39 +139,39 @@ test("getZaruInit('workflow') WITHOUT the 'chat-uploads' capability returns the 
 });
 
 test("getZaruInit('chat') with 'chat-uploads' does NOT inject attachment teaching (chat is non-dispatching)", () => {
-  const result = getZaruInit("chat", { capabilities: ["chat-uploads"] });
+  const result = getZaruInit("chat", new Set(["chat-uploads"]));
   assert.notEqual(result, null);
   assert.ok(!result!.system_prompt.includes(CHAT_UPLOADS_MARKER));
 });
 
 test("getZaruInit('execute') with 'chat-uploads' does NOT inject attachment teaching", () => {
-  const result = getZaruInit("execute", { capabilities: ["chat-uploads"] });
+  const result = getZaruInit("execute", new Set(["chat-uploads"]));
   assert.notEqual(result, null);
   assert.ok(!result!.system_prompt.includes(CHAT_UPLOADS_MARKER));
 });
 
 test("getZaruInit('live') with 'chat-uploads' + 'live' does NOT inject attachment teaching", () => {
-  const result = getZaruInit("live", {
-    runtime: "browser",
-    capabilities: ["live", "chat-uploads"],
-  });
+  const result = getZaruInit(
+    "live",
+    new Set(["live", "chat-uploads"]),
+    "browser",
+  );
   assert.notEqual(result, null);
   assert.ok(!result!.system_prompt.includes(CHAT_UPLOADS_MARKER));
 });
 
 test("getZaruInit('vibecode') with 'chat-uploads' + 'vibecode' does NOT inject attachment teaching", () => {
-  const result = getZaruInit("vibecode", {
-    runtime: "browser",
-    capabilities: ["vibecode", "chat-uploads"],
-  });
+  const result = getZaruInit(
+    "vibecode",
+    new Set(["vibecode", "chat-uploads"]),
+    "browser",
+  );
   assert.notEqual(result, null);
   assert.ok(!result!.system_prompt.includes(CHAT_UPLOADS_MARKER));
 });
 
 test("getZaruInit('operator') with 'chat-uploads' does NOT inject attachment teaching", () => {
-  const result = getZaruInit("operator", {
-    capabilities: ["chat-uploads"],
-  });
+  const result = getZaruInit("operator", new Set(["chat-uploads"]));
   assert.notEqual(result, null);
   assert.ok(!result!.system_prompt.includes(CHAT_UPLOADS_MARKER));
 });

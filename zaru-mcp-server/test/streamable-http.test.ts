@@ -5,6 +5,7 @@ import {
   ATTACHMENT_CAPABLE_TOOLS,
   hasAttachments,
   parseCapabilitiesHeader,
+  resolveCapabilities,
   shouldRejectAttachments,
 } from "../src/mcp/streamable-http.js";
 
@@ -242,6 +243,93 @@ test("gate via header: mixed-case `Chat-Uploads` is normalized and PASSES", () =
     shouldRejectAttachments("aegis.task.execute", args, caps),
     false,
   );
+});
+
+// ─── resolveCapabilities four-quadrant matrix ────────────────────────────
+//
+// Per the ADR-110 amendment / ADR-113 correction wave, X-Zaru-Capabilities is
+// the canonical capability transport. `client.capabilities` on `zaru.init` /
+// `zaru.mode` tool args remains a backward-compatibility fallback for
+// external MCP clients that do not yet send the header. The merge policy is
+// "header wins when present" — when both are populated, the header
+// authoritatively replaces the args. This avoids drift between the gate
+// (header-driven) and the prompt-augmentation path (formerly args-driven).
+
+test("resolveCapabilities: header present + args absent → header wins", () => {
+  const headerCaps = new Set(["chat-uploads", "live"]);
+  const merged = resolveCapabilities(headerCaps, undefined);
+  assert.equal(merged.size, 2);
+  assert.ok(merged.has("chat-uploads"));
+  assert.ok(merged.has("live"));
+});
+
+test("resolveCapabilities: header absent + args present → args wins (legacy fallback)", () => {
+  const merged = resolveCapabilities(new Set(), ["chat-uploads", "vibecode"]);
+  assert.equal(merged.size, 2);
+  assert.ok(merged.has("chat-uploads"));
+  assert.ok(merged.has("vibecode"));
+});
+
+test("resolveCapabilities: header present + args present and DIFFERENT → header wins", () => {
+  // The drift scenario the merge policy exists to prevent: header says one
+  // thing, args say another. Header is authoritative.
+  const headerCaps = new Set(["chat-uploads"]);
+  const merged = resolveCapabilities(headerCaps, ["live", "vibecode"]);
+  assert.equal(merged.size, 1);
+  assert.ok(merged.has("chat-uploads"));
+  assert.ok(!merged.has("live"));
+  assert.ok(!merged.has("vibecode"));
+});
+
+test("resolveCapabilities: both absent → empty set", () => {
+  const merged = resolveCapabilities(new Set(), undefined);
+  assert.equal(merged.size, 0);
+});
+
+test("resolveCapabilities: both empty (header empty Set, args empty array) → empty set", () => {
+  const merged = resolveCapabilities(new Set(), []);
+  assert.equal(merged.size, 0);
+});
+
+test("resolveCapabilities: header wins even when args is a NON-empty mismatch", () => {
+  // A future Zaru-internal capability change should only need to update
+  // the header — the legacy `client.capabilities` array on tool args MUST
+  // NOT be able to drag the merged set back to a degraded state.
+  const headerCaps = new Set(["chat-uploads", "live", "vibecode"]);
+  const merged = resolveCapabilities(headerCaps, []); // empty array != absent
+  // Header has entries, so header wins regardless of args shape.
+  assert.equal(merged.size, 3);
+});
+
+test("resolveCapabilities: args path normalizes whitespace and case (matches header parsing)", () => {
+  const merged = resolveCapabilities(new Set(), [
+    " Chat-Uploads ",
+    "LIVE",
+    "",
+    "  ",
+  ]);
+  assert.equal(merged.size, 2);
+  assert.ok(merged.has("chat-uploads"));
+  assert.ok(merged.has("live"));
+});
+
+test("resolveCapabilities: args path tolerates non-string entries", () => {
+  // External MCP clients may pass garbage; we silently drop non-strings
+  // rather than throwing.
+  const merged = resolveCapabilities(new Set(), [
+    "chat-uploads",
+    42,
+    null,
+    undefined,
+    { not: "a string" },
+  ] as unknown[]);
+  assert.equal(merged.size, 1);
+  assert.ok(merged.has("chat-uploads"));
+});
+
+test("resolveCapabilities: args of wrong type (not array) → empty set", () => {
+  const merged = resolveCapabilities(new Set(), "chat-uploads" as unknown);
+  assert.equal(merged.size, 0);
 });
 
 test("regression for b2cf411: header is read on every request, never stored", () => {
