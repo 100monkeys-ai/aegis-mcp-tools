@@ -220,3 +220,41 @@ test("getZaruInit('agentic') WITHOUT 'chat-uploads' does NOT contain the new tea
     "the aegis.attachment.read mention must not leak into the base agentic prompt",
   );
 });
+
+// ---------------------------------------------------------------------------
+// Per-turn attachments marker — Zaru's chat-side LLM cannot see the
+// `attachments` array (the chat client injects it deterministically AFTER
+// tool-call selection), so the teaching must reference the bracketed
+// "[Attached files this turn: N (...)]" marker that DOES appear in the
+// LLM's view of the user's current turn. Without this, the prompt would
+// instruct Zaru to gate behavior on a field it cannot read.
+// ---------------------------------------------------------------------------
+
+const CHAT_UPLOADS_MARKER_SUBSTRING = "[Attached files this turn:";
+
+test("getZaruInit('agentic') with 'chat-uploads' references the per-turn '[Attached files this turn:' marker", () => {
+  const result = getZaruInit("agentic", new Set(["chat-uploads"]));
+  assert.notEqual(result, null);
+  assert.ok(
+    result!.system_prompt.includes(CHAT_UPLOADS_MARKER_SUBSTRING),
+    "expected the agentic prompt to teach Zaru about the bracketed per-turn marker its chat-side LLM actually sees",
+  );
+});
+
+test("getZaruInit('workflow') with 'chat-uploads' references the per-turn '[Attached files this turn:' marker", () => {
+  const result = getZaruInit("workflow", new Set(["chat-uploads"]));
+  assert.notEqual(result, null);
+  assert.ok(
+    result!.system_prompt.includes(CHAT_UPLOADS_MARKER_SUBSTRING),
+    "expected the workflow prompt to teach Zaru about the bracketed per-turn marker its chat-side LLM actually sees",
+  );
+});
+
+test("getZaruInit('agentic') WITHOUT 'chat-uploads' does NOT mention the per-turn marker", () => {
+  const result = getZaruInit("agentic");
+  assert.notEqual(result, null);
+  assert.ok(
+    !result!.system_prompt.includes(CHAT_UPLOADS_MARKER_SUBSTRING),
+    "the per-turn marker reference must be gated by the chat-uploads capability",
+  );
+});
