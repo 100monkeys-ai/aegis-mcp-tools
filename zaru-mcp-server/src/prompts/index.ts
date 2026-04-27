@@ -462,14 +462,21 @@ const PROMPTS: Record<string, string> = {
 
 const CHAT_UPLOADS_TEACHING = `
 
-# CHAT ATTACHMENTS — PASS-THROUGH RULE
+# CHAT ATTACHMENTS — UPLOADED FILES ARE HANDLED FOR YOU
 
-The user may attach files to their messages. When attachments are present, your tool call inputs will include an \`attachments\` field — an array of \`{volume_id, path, name, mime_type, size}\` references that point at files staged in a sandbox-readable volume. Zaru handles file references deterministically; you do not need to construct, paraphrase, rename, or modify them.
+The user can attach files (documents, images, etc.) directly to their messages via the chat UI. When they do, the platform stages those files server-side and surfaces them on every dispatch as an \`attachments\` field — an array of \`{volume_id, path, name, mime_type, size}\` references pointing at sandbox-readable volume entries. Zaru handles these references deterministically; you do not need to construct, paraphrase, rename, or modify them.
 
+CRITICAL — NEVER ask the user to "provide the document's content," "paste the text," or "share a URL" when their request implies a file was attached. Phrases that imply an attachment include "summarize this document," "what's in this file," "analyze the attached PDF," "translate this report," and similar. The user already attached the file; the platform already staged it; soliciting content or a URL is the wrong default for this UX.
+
+- If the dispatch's \`attachments\` array is non-empty, the file is already staged. Generate or dispatch an agent that reads the file via the \`aegis.attachment.read({volume_id, path})\` tool from inside its sandbox — do NOT route through web-fetch, fs.read, or asking the user to re-supply content.
+- If the user's intent implies a file but \`attachments\` is empty on your dispatch input, ask them whether they meant to attach a file. Do NOT default to soliciting a URL or pasted text — that's the wrong fallback.
+
+PASS-THROUGH RULES:
 - When dispatching an agent (\`aegis.task.execute\`, \`aegis.agent.generate\`) or running a workflow, pass the same \`attachments\` array through verbatim on the call. The downstream agent or workflow needs the references to read the files inside its sandbox.
-- Do NOT read, summarise, or describe the file contents yourself before dispatching — the 100monkeys read the files in their sandbox. You just hand off the references.
+- Do NOT read, summarise, or describe the file contents yourself before dispatching — the 100monkeys read the files in their sandbox via \`aegis.attachment.read\`. You just hand off the references.
 - Do NOT fabricate \`attachments\` entries. Only forward what the client supplied.
-- If the user's intent involves processing an attached file, ensure every agent or workflow you dispatch receives the same \`attachments\` array on its input.`;
+- If the user's intent involves processing an attached file, ensure every agent or workflow you dispatch receives the same \`attachments\` array on its input.
+- Do NOT paraphrase the user's intent in ways that lose the attachment signal. A request "summarize this document" with an attached PDF must reach \`aegis.agent.generate\` as something like "summarize the attached document" with the \`attachments\` array forwarded — NOT paraphrased into "create a generic text-input agent that summarizes documents."`;
 
 /** Modes that accept and forward `attachments` when the chat-uploads capability is active. */
 const CHAT_UPLOADS_MODES = new Set(["agentic", "workflow"]);

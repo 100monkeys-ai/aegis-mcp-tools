@@ -94,7 +94,10 @@ test("getZaruInit('nonexistent') returns null", () => {
 // workflow modes (ADR-113).
 // ---------------------------------------------------------------------------
 
-const CHAT_UPLOADS_MARKER = "CHAT ATTACHMENTS — PASS-THROUGH RULE";
+const CHAT_UPLOADS_MARKER =
+  "CHAT ATTACHMENTS — UPLOADED FILES ARE HANDLED FOR YOU";
+const CHAT_UPLOADS_NEVER_ASK_MARKER = "NEVER ask the user";
+const CHAT_UPLOADS_TOOL_MARKER = "aegis.attachment.read";
 
 test("getZaruInit('agentic') with the 'chat-uploads' capability augments the system prompt with attachment teaching", () => {
   const withCap = getZaruInit("agentic", new Set(["chat-uploads"]));
@@ -174,4 +177,46 @@ test("getZaruInit('operator') with 'chat-uploads' does NOT inject attachment tea
   const result = getZaruInit("operator", new Set(["chat-uploads"]));
   assert.notEqual(result, null);
   assert.ok(!result!.system_prompt.includes(CHAT_UPLOADS_MARKER));
+});
+
+// ---------------------------------------------------------------------------
+// chat-uploads teaching content — explicit "do not solicit" + tool-name rules
+// ---------------------------------------------------------------------------
+
+test("getZaruInit('agentic') with 'chat-uploads' forbids soliciting file content from the user", () => {
+  const result = getZaruInit("agentic", new Set(["chat-uploads"]));
+  assert.notEqual(result, null);
+  assert.ok(
+    result!.system_prompt.includes(CHAT_UPLOADS_NEVER_ASK_MARKER),
+    "expected the prompt to contain a 'NEVER ask the user' rule preventing solicitation of content / URLs when a file was attached",
+  );
+});
+
+test("getZaruInit('agentic') with 'chat-uploads' names aegis.attachment.read as the read tool", () => {
+  const result = getZaruInit("agentic", new Set(["chat-uploads"]));
+  assert.notEqual(result, null);
+  assert.ok(
+    result!.system_prompt.includes(CHAT_UPLOADS_TOOL_MARKER),
+    "expected the prompt to mention `aegis.attachment.read` so dispatched agents know which tool to use",
+  );
+});
+
+test("getZaruInit('workflow') with 'chat-uploads' includes both the 'never ask' rule and aegis.attachment.read", () => {
+  const result = getZaruInit("workflow", new Set(["chat-uploads"]));
+  assert.notEqual(result, null);
+  assert.ok(result!.system_prompt.includes(CHAT_UPLOADS_NEVER_ASK_MARKER));
+  assert.ok(result!.system_prompt.includes(CHAT_UPLOADS_TOOL_MARKER));
+});
+
+test("getZaruInit('agentic') WITHOUT 'chat-uploads' does NOT contain the new teaching phrases (capability still gates them)", () => {
+  const result = getZaruInit("agentic");
+  assert.notEqual(result, null);
+  assert.ok(
+    !result!.system_prompt.includes(CHAT_UPLOADS_NEVER_ASK_MARKER),
+    "the 'NEVER ask the user' phrase must not leak into the base agentic prompt",
+  );
+  assert.ok(
+    !result!.system_prompt.includes(CHAT_UPLOADS_TOOL_MARKER),
+    "the aegis.attachment.read mention must not leak into the base agentic prompt",
+  );
 });
