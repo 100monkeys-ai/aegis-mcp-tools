@@ -461,6 +461,120 @@ test("API key path stores identity.tenant_id on ZaruUser.tenantId", async () => 
   assert.equal(req.zaruUser?.tenantId, "t-api-tenant-123");
 });
 
+// ── team_memberships Claim End-to-End Tests ─────────────────────────────────
+//
+// These lock in the contract for the in-flight upstream changes: Keycloak
+// will mint `team_memberships` into the access token, and the orchestrator
+// will stamp matching membership rows. The middleware (commit ea607f5) is
+// already wired to enforce this — these tests guarantee the four paths a
+// caller can take through the JWT branch with the new claim are stable.
+
+test("team_memberships claim with t- tenant in header passes (200)", async () => {
+  const middleware = createZaruAuthMiddleware(async () => ({
+    sub: "user-alice",
+    zaru_tier: "pro",
+    tenant_id: "u-alice",
+    team_memberships: ["t-foo", "t-bar"],
+  }));
+
+  const req = {
+    headers: {
+      "x-zaru-user-token": "jwt-token",
+      "x-zaru-active-tenant": "t-foo",
+    },
+  } as any;
+  const res = createResponseRecorder();
+  let nextCalled = false;
+
+  await middleware(req, res, (() => {
+    nextCalled = true;
+  }) as NextFunction);
+
+  assert.equal(nextCalled, true);
+  assert.equal(res.statusCode, 200);
+  assert.equal(req.zaruUser?.tenantId, "t-foo");
+  assert.equal(req.zaruUser?.userId, "user-alice");
+});
+
+test("team_memberships claim absent and t- header set returns 403", async () => {
+  // Fail-closed: with no team_memberships claim, the only allowed tenant is
+  // the caller's personal u- tenant. A header asking for a t- tenant must
+  // be rejected — even if the orchestrator would in fact recognise it.
+  const middleware = createZaruAuthMiddleware(async () => ({
+    sub: "user-alice",
+    zaru_tier: "pro",
+    tenant_id: "u-alice",
+  }));
+
+  const req = {
+    headers: {
+      "x-zaru-user-token": "jwt-token",
+      "x-zaru-active-tenant": "t-foo",
+    },
+  } as any;
+  const res = createResponseRecorder();
+  let nextCalled = false;
+
+  await middleware(req, res, (() => {
+    nextCalled = true;
+  }) as NextFunction);
+
+  assert.equal(nextCalled, false);
+  assert.equal(res.statusCode, 403);
+  assert.equal(req.zaruUser, undefined);
+});
+
+test("team_memberships claim present but does not contain header tenant returns 403", async () => {
+  const middleware = createZaruAuthMiddleware(async () => ({
+    sub: "user-alice",
+    zaru_tier: "pro",
+    tenant_id: "u-alice",
+    team_memberships: ["t-foo"],
+  }));
+
+  const req = {
+    headers: {
+      "x-zaru-user-token": "jwt-token",
+      "x-zaru-active-tenant": "t-baz",
+    },
+  } as any;
+  const res = createResponseRecorder();
+  let nextCalled = false;
+
+  await middleware(req, res, (() => {
+    nextCalled = true;
+  }) as NextFunction);
+
+  assert.equal(nextCalled, false);
+  assert.equal(res.statusCode, 403);
+  assert.equal(req.zaruUser, undefined);
+});
+
+test("team_memberships claim with empty array and no header defaults to personal tenant", async () => {
+  const middleware = createZaruAuthMiddleware(async () => ({
+    sub: "user-alice",
+    zaru_tier: "pro",
+    tenant_id: "u-alice",
+    team_memberships: [],
+  }));
+
+  const req = {
+    headers: {
+      "x-zaru-user-token": "jwt-token",
+    },
+  } as any;
+  const res = createResponseRecorder();
+  let nextCalled = false;
+
+  await middleware(req, res, (() => {
+    nextCalled = true;
+  }) as NextFunction);
+
+  assert.equal(nextCalled, true);
+  assert.equal(res.statusCode, 200);
+  assert.equal(req.zaruUser?.tenantId, "u-alice");
+});
+
 test("API key path with null tenant_id results in undefined tenantId", async () => {
   const middleware = createZaruAuthMiddleware(
     async () => {
