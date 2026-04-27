@@ -464,19 +464,24 @@ const CHAT_UPLOADS_TEACHING = `
 
 # CHAT ATTACHMENTS — UPLOADED FILES ARE HANDLED FOR YOU
 
-The user can attach files (documents, images, etc.) directly to their messages via the chat UI. When they do, the platform stages those files server-side and surfaces them on every dispatch as an \`attachments\` field — an array of \`{volume_id, path, name, mime_type, size}\` references pointing at sandbox-readable volume entries. Zaru handles these references deterministically; you do not need to construct, paraphrase, rename, or modify them.
+The user can attach files (documents, images, etc.) directly to their messages via the chat UI. When they do, the platform stages those files server-side and the orchestrator deterministically forwards an \`attachments\` array — \`{volume_id, path, name, mime_type, size}\` references pointing at sandbox-readable volume entries — to every downstream dispatch. You never see the array directly; it is injected into outbound tool calls AFTER you decide what to dispatch.
 
 CRITICAL — NEVER ask the user to "provide the document's content," "paste the text," or "share a URL" when their request implies a file was attached. Phrases that imply an attachment include "summarize this document," "what's in this file," "analyze the attached PDF," "translate this report," and similar. The user already attached the file; the platform already staged it; soliciting content or a URL is the wrong default for this UX.
 
-- If the dispatch's \`attachments\` array is non-empty, the file is already staged. Generate or dispatch an agent that reads the file via the \`aegis.attachment.read({volume_id, path})\` tool from inside its sandbox — do NOT route through web-fetch, fs.read, or asking the user to re-supply content.
-- If the user's intent implies a file but \`attachments\` is empty on your dispatch input, ask them whether they meant to attach a file. Do NOT default to soliciting a URL or pasted text — that's the wrong fallback.
+DETECTING ATTACHMENTS IN YOUR CONTEXT — when the user has attached files this turn, their message will end with a bracketed marker like:
+
+  [Attached files this turn: 2 (application/pdf, image/png)]
+
+This is the platform's per-turn signal that files are staged server-side. The bracketed marker is structural (not part of the user's intent), and it carries ONLY a count and MIME types — never volume_ids, paths, names, or hashes. Treat it as routing metadata.
+
+- If the marker is present, the file is already staged. Dispatch an agent or run a workflow to process it. The downstream agent will receive the \`attachments\` array (server-injected, not visible to you here) and can read each entry via the \`aegis.attachment.read({volume_id, path})\` tool from inside its sandbox — do NOT route through web-fetch, fs.read, or asking the user to re-supply content.
+- If the user's intent implies a file but no \`[Attached files this turn: ...]\` marker is present in their message, ask them whether they meant to attach a file. Do NOT default to soliciting a URL or pasted text — that's the wrong fallback.
 
 PASS-THROUGH RULES:
-- When dispatching an agent (\`aegis.task.execute\`, \`aegis.agent.generate\`) or running a workflow, pass the same \`attachments\` array through verbatim on the call. The downstream agent or workflow needs the references to read the files inside its sandbox.
-- Do NOT read, summarise, or describe the file contents yourself before dispatching — the 100monkeys read the files in their sandbox via \`aegis.attachment.read\`. You just hand off the references.
-- Do NOT fabricate \`attachments\` entries. Only forward what the client supplied.
-- If the user's intent involves processing an attached file, ensure every agent or workflow you dispatch receives the same \`attachments\` array on its input.
-- Do NOT paraphrase the user's intent in ways that lose the attachment signal. A request "summarize this document" with an attached PDF must reach \`aegis.agent.generate\` as something like "summarize the attached document" with the \`attachments\` array forwarded — NOT paraphrased into "create a generic text-input agent that summarizes documents."`;
+- When dispatching an agent (\`aegis.task.execute\`, \`aegis.agent.generate\`) or running a workflow, DO NOT include the bracketed marker text in the \`intent\` or \`input\` you pass — that is UI metadata, not user intent. Just describe the task plainly; the platform injects the actual \`attachments\` array onto the wire deterministically.
+- Do NOT read, summarise, or describe the file contents yourself before dispatching — the 100monkeys read the files in their sandbox via \`aegis.attachment.read\`. You just dispatch the agent.
+- Do NOT fabricate or hallucinate \`attachments\` entries. You do not see the array; the platform handles it. If a downstream agent surfaces a "what file?" error, that means your dispatch was wrong — do not try to construct fake \`{volume_id, path}\` refs to satisfy it.
+- Do NOT paraphrase the user's intent in ways that lose the attachment signal. A request "summarize this document" with the marker present must reach \`aegis.agent.generate\` as something like "summarize the attached document" — NOT paraphrased into "create a generic text-input agent that summarizes documents."`;
 
 /** Modes that accept and forward `attachments` when the chat-uploads capability is active. */
 const CHAT_UPLOADS_MODES = new Set(["agentic", "workflow"]);
