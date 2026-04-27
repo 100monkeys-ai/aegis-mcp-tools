@@ -324,11 +324,12 @@ test("JWT with tenant_id claim populates req.zaruUser.tenantId", async () => {
   assert.equal(req.zaruUser?.tenantId, "t-personal-abc");
 });
 
-test("x-zaru-active-tenant header with t- prefix overrides JWT tenant_id", async () => {
+test("auth middleware accepts x-zaru-active-tenant listed in JWT team_memberships", async () => {
   const middleware = createZaruAuthMiddleware(async () => ({
     sub: "user-tenant-2",
     zaru_tier: "pro",
-    tenant_id: "t-personal-abc",
+    tenant_id: "u-personal-abc",
+    team_memberships: ["t-team-xyz", "t-team-other"],
   }));
 
   const req = {
@@ -345,20 +346,22 @@ test("x-zaru-active-tenant header with t- prefix overrides JWT tenant_id", async
   }) as NextFunction);
 
   assert.equal(nextCalled, true);
+  assert.equal(res.statusCode, 200);
   assert.equal(req.zaruUser?.tenantId, "t-team-xyz");
 });
 
-test("x-zaru-active-tenant without t- prefix is ignored; JWT tenant_id used instead", async () => {
+test("auth middleware rejects x-zaru-active-tenant not in JWT memberships", async () => {
   const middleware = createZaruAuthMiddleware(async () => ({
     sub: "user-tenant-3",
     zaru_tier: "pro",
-    tenant_id: "t-personal-abc",
+    tenant_id: "u-personal-abc",
+    team_memberships: ["t-team-allowed"],
   }));
 
   const req = {
     headers: {
       "x-zaru-user-token": "jwt-token",
-      "x-zaru-active-tenant": "invalid-header",
+      "x-zaru-active-tenant": "t-team-forged",
     },
   } as any;
   const res = createResponseRecorder();
@@ -368,21 +371,22 @@ test("x-zaru-active-tenant without t- prefix is ignored; JWT tenant_id used inst
     nextCalled = true;
   }) as NextFunction);
 
-  assert.equal(nextCalled, true);
-  assert.equal(req.zaruUser?.tenantId, "t-personal-abc");
+  assert.equal(nextCalled, false);
+  assert.equal(res.statusCode, 403);
+  assert.equal(req.zaruUser, undefined);
 });
 
-test("x-zaru-active-tenant value 't-' alone (length <= 2) is ignored", async () => {
+test("auth middleware defaults to JWT tenant_id when header absent", async () => {
   const middleware = createZaruAuthMiddleware(async () => ({
     sub: "user-tenant-4",
     zaru_tier: "free",
-    tenant_id: "t-personal-def",
+    tenant_id: "u-personal-def",
+    team_memberships: ["t-team-xyz"],
   }));
 
   const req = {
     headers: {
       "x-zaru-user-token": "jwt-token",
-      "x-zaru-active-tenant": "t-",
     },
   } as any;
   const res = createResponseRecorder();
@@ -393,7 +397,37 @@ test("x-zaru-active-tenant value 't-' alone (length <= 2) is ignored", async () 
   }) as NextFunction);
 
   assert.equal(nextCalled, true);
-  assert.equal(req.zaruUser?.tenantId, "t-personal-def");
+  assert.equal(res.statusCode, 200);
+  assert.equal(req.zaruUser?.tenantId, "u-personal-def");
+});
+
+test("auth middleware rejects header equal to another user's u- tenant", async () => {
+  // Caller has personal tenant u-alice and no team memberships. A forged
+  // header pointing at another user's personal u- tenant must be rejected
+  // — the deleted prefix-based heuristic only checked for `t-`, so this
+  // case explicitly guards against the inverse leak as well.
+  const middleware = createZaruAuthMiddleware(async () => ({
+    sub: "user-alice",
+    zaru_tier: "pro",
+    tenant_id: "u-alice-123",
+  }));
+
+  const req = {
+    headers: {
+      "x-zaru-user-token": "jwt-token",
+      "x-zaru-active-tenant": "u-bob-456",
+    },
+  } as any;
+  const res = createResponseRecorder();
+  let nextCalled = false;
+
+  await middleware(req, res, (() => {
+    nextCalled = true;
+  }) as NextFunction);
+
+  assert.equal(nextCalled, false);
+  assert.equal(res.statusCode, 403);
+  assert.equal(req.zaruUser, undefined);
 });
 
 test("API key path stores identity.tenant_id on ZaruUser.tenantId", async () => {

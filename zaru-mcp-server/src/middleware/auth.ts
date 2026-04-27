@@ -26,6 +26,14 @@ export type VerifiedClaims = JWTPayload & {
   zaru_tier?: string;
   aegis_role?: AegisRole;
   tenant_id?: string;
+  /**
+   * List of team tenant ids the user is a member of. Mirrors the
+   * `team_memberships` table populated by the orchestrator's team
+   * service. Validated against the `x-zaru-active-tenant` header so
+   * a forged cookie cannot elevate a caller into a team they do not
+   * belong to.
+   */
+  team_memberships?: string[];
 };
 
 export type JwtVerifier = (token: string) => Promise<VerifiedClaims>;
@@ -255,16 +263,40 @@ export function createZaruAuthMiddleware(
       const claims = await verifier(rawToken);
 
       const jwtTenantId = claims.tenant_id ?? undefined;
-      const teamTenantHeader = req.headers["x-zaru-active-tenant"] as
+      const activeTenantHeader = req.headers["x-zaru-active-tenant"] as
         | string
         | undefined;
-      const teamTenantId =
-        teamTenantHeader &&
-        teamTenantHeader.startsWith("t-") &&
-        teamTenantHeader.length > 2
-          ? teamTenantHeader
-          : undefined;
-      const tenantId = teamTenantId ?? jwtTenantId;
+
+      // Build the caller's allowed-tenant set from the verified JWT:
+      //   { personal tenant } ∪ team_memberships[]
+      // The active-tenant cookie is user-writable, so we must validate
+      // any value it carries against this server-trusted set. A missing
+      // header means "use my personal tenant" and is always permitted.
+      const allowedTenants = new Set<string>();
+      if (jwtTenantId) {
+        allowedTenants.add(jwtTenantId);
+      }
+      if (Array.isArray(claims.team_memberships)) {
+        for (const t of claims.team_memberships) {
+          if (typeof t === "string" && t.length > 0) {
+            allowedTenants.add(t);
+          }
+        }
+      }
+
+      let tenantId: string | undefined;
+      if (activeTenantHeader && activeTenantHeader.length > 0) {
+        if (!allowedTenants.has(activeTenantHeader)) {
+          res.status(403).json({
+            error:
+              "Forbidden: x-zaru-active-tenant is not a tenant the caller is a member of",
+          });
+          return;
+        }
+        tenantId = activeTenantHeader;
+      } else {
+        tenantId = jwtTenantId;
+      }
 
       if (isValidAegisRole(claims.aegis_role)) {
         req.zaruUser = {
