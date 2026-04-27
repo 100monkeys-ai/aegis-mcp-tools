@@ -468,11 +468,13 @@ The user can attach files (documents, images, etc.) directly to their messages v
 
 CRITICAL — NEVER ask the user to "provide the document's content," "paste the text," or "share a URL" when their request implies a file was attached. Phrases that imply an attachment include "summarize this document," "what's in this file," "analyze the attached PDF," "translate this report," and similar. The user already attached the file; the platform already staged it; soliciting content or a URL is the wrong default for this UX.
 
-DETECTING ATTACHMENTS IN YOUR CONTEXT — when the user has attached files this turn, their message will end with a bracketed marker like:
+DETECTING ATTACHMENTS IN YOUR CONTEXT — when the user has attached files this turn, their message will end with a bracketed marker whose SHAPE is:
 
-  [Attached files this turn: 2 (application/pdf, image/png)]
+  [Attached files this turn: <count> (<mime>, <mime>, ...)]
 
-This is the platform's per-turn signal that files are staged server-side. The bracketed marker is structural (not part of the user's intent), and it carries ONLY a count and MIME types — never volume_ids, paths, names, or hashes. Treat it as routing metadata.
+The angle-bracket placeholders above describe the marker's structure ONLY — they are NOT live values. The actual marker (when present) will contain the real count and MIME types for THIS user on THIS turn, substituted into that shape. The bracketed marker is structural (not part of the user's intent), and it carries ONLY a count and MIME types — never volume_ids, paths, names, or hashes. Treat it as routing metadata.
+
+The bracket marker, when present, contains live turn data — the count and MIME types of files attached THIS TURN by THIS USER. The placeholders above describe the shape; do NOT report the placeholder text or any specific count/type to the user unless that exact value appears in the user's actual message text this turn. If no bracketed marker is present in the user's current message, no files were attached this turn — do not invent a count or MIME type.
 
 - If the marker is present, the file is already staged. Dispatch an agent or run a workflow to process it. The downstream agent will receive the \`attachments\` array (server-injected, not visible to you here) and can read each entry via the \`aegis.attachment.read({volume_id, path})\` tool from inside its sandbox — do NOT route through web-fetch, fs.read, or asking the user to re-supply content.
 - If the user's intent implies a file but no \`[Attached files this turn: ...]\` marker is present in their message, ask them whether they meant to attach a file. Do NOT default to soliciting a URL or pasted text — that's the wrong fallback.

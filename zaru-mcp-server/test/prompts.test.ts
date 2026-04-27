@@ -258,3 +258,64 @@ test("getZaruInit('agentic') WITHOUT 'chat-uploads' does NOT mention the per-tur
     "the per-turn marker reference must be gated by the chat-uploads capability",
   );
 });
+
+// ---------------------------------------------------------------------------
+// Regression — the marker teaching MUST NOT contain any concrete example
+// values. The previous teaching had a literal example
+// "[Attached files this turn: 2 (application/pdf, image/png)]" which the
+// LLM was treating as actual turn data, leading it to hallucinate "you have
+// 2 PDFs and an image attached" on turns with no attachments at all.
+//
+// The teaching must describe the marker's SHAPE abstractly via placeholder
+// syntax (<count>, <mime>) — never via literal MIME strings or counts that
+// the LLM can confuse with live turn data.
+// ---------------------------------------------------------------------------
+
+test("chat-uploads teaching contains NO concrete MIME strings or example counts that an LLM could mistake for live turn data", () => {
+  for (const mode of ["agentic", "workflow"] as const) {
+    const result = getZaruInit(mode, new Set(["chat-uploads"]));
+    assert.notEqual(result, null);
+    const prompt = result!.system_prompt;
+
+    // Extract just the augmented teaching segment so we don't accidentally
+    // false-positive on substrings elsewhere in the base prompt.
+    const teachingStart = prompt.indexOf(CHAT_UPLOADS_MARKER);
+    assert.ok(
+      teachingStart >= 0,
+      `expected chat-uploads teaching to be present in '${mode}'`,
+    );
+    const teaching = prompt.slice(teachingStart);
+
+    const forbiddenLiterals = [
+      "application/pdf",
+      "image/png",
+      "image/jpeg",
+      "application/json",
+      "text/plain",
+      "text/html",
+      "application/octet-stream",
+    ];
+    for (const literal of forbiddenLiterals) {
+      assert.ok(
+        !teaching.includes(literal),
+        `chat-uploads teaching for '${mode}' must NOT contain the concrete MIME string "${literal}" — describe the marker shape via placeholders only`,
+      );
+    }
+
+    // No concrete numeric count inside the marker shape, e.g. `[Attached files this turn: 2`.
+    assert.ok(
+      !/\[Attached files this turn:\s*\d/.test(teaching),
+      `chat-uploads teaching for '${mode}' must NOT contain a concrete numeric count inside the bracketed marker — use a <count> placeholder`,
+    );
+
+    // The placeholder shape MUST be present so the LLM knows the marker's structure.
+    assert.ok(
+      teaching.includes("<count>"),
+      `chat-uploads teaching for '${mode}' must use a <count> placeholder for the marker shape`,
+    );
+    assert.ok(
+      teaching.includes("<mime>"),
+      `chat-uploads teaching for '${mode}' must use a <mime> placeholder for the marker shape`,
+    );
+  }
+});
