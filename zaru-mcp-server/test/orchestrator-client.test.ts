@@ -357,9 +357,57 @@ test("invokeTool does NOT retry when 400 body contains 'session' in an unrelated
   );
 });
 
-// ── Tenant ID in SEAL Attestation Tests ────────────────────────────────────
+// ── SEAL Attestation: tenant derivation via JWT (cross-tenant leak fix) ───
 
-test("createSession includes tenant_id in attest body when user.tenantId is set", async () => {
+// Regression: pre-fix, /v1/seal/attest was exempt from the orchestrator's
+// auth middleware and the handler defaulted to TenantId::consumer() (a
+// global singleton) when no explicit tenant_id was supplied. Every consumer
+// MCP session received that singleton tenant, so subsequent
+// enforce_tenant_arg comparisons leaked across users. The fix forwards the
+// consumer user's Bearer token so the orchestrator can derive the tenant
+// from the authenticated UserIdentity.
+
+test("createSession forwards user.token as Authorization Bearer on /v1/seal/attest", async () => {
+  const attestHeaders: Array<Record<string, string>> = [];
+  const client = new OrchestratorClient({
+    baseUrl: "http://aegis.test",
+    fetchImpl: async (input, init) => {
+      const url = String(input);
+      if (url.endsWith("/v1/seal/attest")) {
+        attestHeaders.push((init?.headers ?? {}) as Record<string, string>);
+        return jsonResponse({ security_token: "tok" });
+      }
+      if (url.endsWith("/v1/seal/invoke")) {
+        return jsonResponse({
+          jsonrpc: "2.0",
+          id: "r-auth",
+          result: { content: [], isError: false },
+        });
+      }
+      return jsonResponse({}, 404);
+    },
+  });
+
+  const user = {
+    userId: "u-auth",
+    tier: "pro",
+    securityContext: "zaru-pro",
+    token: "keycloak-jwt-xyz",
+    isOperator: false,
+    tenantId: "t-team-abc",
+  };
+
+  await client.invokeTool(user, "aegis.agent.list", {}, "r-auth");
+
+  assert.equal(attestHeaders.length, 1);
+  assert.equal(
+    attestHeaders[0]?.["Authorization"],
+    "Bearer keycloak-jwt-xyz",
+    "createSession must forward the user's Bearer token so the orchestrator can derive tenant from the authenticated identity",
+  );
+});
+
+test("createSession omits tenant_id from attest body — orchestrator derives it from JWT", async () => {
   const attestBodies: Array<Record<string, unknown>> = [];
   const client = new OrchestratorClient({
     baseUrl: "http://aegis.test",
@@ -374,7 +422,7 @@ test("createSession includes tenant_id in attest body when user.tenantId is set"
       if (url.endsWith("/v1/seal/invoke")) {
         return jsonResponse({
           jsonrpc: "2.0",
-          id: "r1",
+          id: "r-no-tid",
           result: { content: [], isError: false },
         });
       }
@@ -382,8 +430,13 @@ test("createSession includes tenant_id in attest body when user.tenantId is set"
     },
   });
 
+  // Even when the MCP server has resolved a tenantId locally (e.g. team
+  // tenant from x-zaru-active-tenant), it MUST NOT be sent in the attest
+  // body — the orchestrator authoritatively derives it from the JWT to
+  // prevent the singleton-fallback leak. The team-context flow is carried
+  // through other channels (the JWT itself + tenant middleware).
   const user = {
-    userId: "u-tenant",
+    userId: "u-no-tid",
     tier: "pro",
     securityContext: "zaru-pro",
     token: "jwt",
@@ -391,50 +444,43 @@ test("createSession includes tenant_id in attest body when user.tenantId is set"
     tenantId: "t-team-abc",
   };
 
-  await client.invokeTool(user, "aegis.agent.list", {}, "r1");
-
-  assert.equal(attestBodies.length, 1);
-  assert.equal(attestBodies[0]?.tenant_id, "t-team-abc");
-});
-
-test("createSession omits tenant_id from attest body when user.tenantId is absent", async () => {
-  const attestBodies: Array<Record<string, unknown>> = [];
-  const client = new OrchestratorClient({
-    baseUrl: "http://aegis.test",
-    fetchImpl: async (input, init) => {
-      const url = String(input);
-      if (url.endsWith("/v1/seal/attest")) {
-        attestBodies.push(
-          JSON.parse(String(init?.body)) as Record<string, unknown>,
-        );
-        return jsonResponse({ security_token: "tok" });
-      }
-      if (url.endsWith("/v1/seal/invoke")) {
-        return jsonResponse({
-          jsonrpc: "2.0",
-          id: "r2",
-          result: { content: [], isError: false },
-        });
-      }
-      return jsonResponse({}, 404);
-    },
-  });
-
-  const user = {
-    userId: "u-no-tenant",
-    tier: "free",
-    securityContext: "zaru-free",
-    token: "jwt",
-    isOperator: false,
-  };
-
-  await client.invokeTool(user, "aegis.agent.list", {}, "r2");
+  await client.invokeTool(user, "aegis.agent.list", {}, "r-no-tid");
 
   assert.equal(attestBodies.length, 1);
   assert.equal(
     Object.prototype.hasOwnProperty.call(attestBodies[0], "tenant_id"),
     false,
-    "tenant_id must not be present in attest body when tenantId is absent",
+    "tenant_id must not be present in attest body — orchestrator derives it from JWT",
+  );
+});
+
+test("createSession throws when user.token is missing (cannot attest without identity)", async () => {
+  const client = new OrchestratorClient({
+    baseUrl: "http://aegis.test",
+    fetchImpl: async () => {
+      // Should never be called — must fail before fetch.
+      throw new Error("fetch must not be invoked when token is missing");
+    },
+  });
+
+  const user = {
+    userId: "u-broken",
+    tier: "free",
+    securityContext: "zaru-free",
+    // token intentionally absent — represents a misconfigured caller.
+    token: "",
+    isOperator: false,
+  };
+
+  await assert.rejects(
+    () => client.invokeTool(user, "aegis.agent.list", {}, "r-broken"),
+    (err: Error) => {
+      assert.match(
+        err.message,
+        /cannot attest SEAL session without user Bearer token/,
+      );
+      return true;
+    },
   );
 });
 

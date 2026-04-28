@@ -287,6 +287,17 @@ export class OrchestratorClient {
   }
 
   private async createSession(user: ZaruUser): Promise<ZaruSealSession> {
+    if (!user.token) {
+      // Hard requirement: /v1/seal/attest now authenticates the caller via
+      // the orchestrator's JWT/API-key middleware and derives the SEAL
+      // session tenant from the resolved UserIdentity (ADR-097). Without a
+      // forwarded Bearer token the orchestrator cannot identify the user
+      // and would fall back to a global tenant — which is the cross-tenant
+      // leak this change closes. Refuse to attest rather than leak.
+      throw new Error(
+        "zaru-mcp-server: cannot attest SEAL session without user Bearer token",
+      );
+    }
     const sessionId = createSessionId();
     const keyPair = createSessionKeyPair();
     const response = await this.fetchImpl(
@@ -295,6 +306,12 @@ export class OrchestratorClient {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          // Forward the consumer user's own Bearer token (Keycloak JWT or
+          // aegis_* API key) so the orchestrator's auth middleware can
+          // resolve the authenticated UserIdentity and derive the canonical
+          // tenant from its claims rather than defaulting to a global
+          // singleton.
+          Authorization: `Bearer ${user.token}`,
         },
         body: JSON.stringify({
           workload_id: `zaru:${user.userId}:${sessionId}`,
@@ -302,7 +319,11 @@ export class OrchestratorClient {
           ...(user.isOperator
             ? { aegis_role: user.tier }
             : { zaru_tier: user.tier }),
-          ...(user.tenantId ? { tenant_id: user.tenantId } : {}),
+          // tenant_id is intentionally omitted: the orchestrator derives
+          // the canonical tenant from the authenticated identity now. A
+          // body-supplied tenant_id is tolerated-but-ignored by the
+          // orchestrator for non-delegating callers (so deploy ordering of
+          // the two repos does not matter).
           public_key: keyPair.publicKeyRaw.toString("base64"),
           container_id:
             process.env.CONTAINER_ID ??
