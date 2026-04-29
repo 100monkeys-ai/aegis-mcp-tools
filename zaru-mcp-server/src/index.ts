@@ -2,6 +2,11 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import { zaruAuthMiddleware, type ZaruRequest } from "./middleware/auth.js";
+import {
+  requestIdMiddleware,
+  accessLogMiddleware,
+  type RequestWithId,
+} from "./middleware/request-logging.js";
 import { handleSseConnection, handleSseMessage } from "./mcp/sse.js";
 import {
   handleStreamableHttp,
@@ -9,15 +14,19 @@ import {
   handleStreamableHttpDelete,
 } from "./mcp/streamable-http.js";
 import { OrchestratorClient } from "./mcp/orchestrator-client.js";
+import { logError, logInfo } from "./logging.js";
 
 dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const orchestratorClient = new OrchestratorClient();
+const startedAt = Date.now();
 
 app.use(cors());
 app.use(express.json());
+app.use(requestIdMiddleware);
+app.use(accessLogMiddleware);
 
 // SSE proxy for execution event streaming (Glass Laboratory)
 app.get(
@@ -107,5 +116,38 @@ app.get("/health", (_req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`Zaru MCP Server running on port ${PORT}`);
+  logInfo("server.startup", {
+    port: Number(PORT),
+    upstream_url: process.env.AEGIS_ORCHESTRATOR_URL ?? "http://localhost:8088",
+    auth_mode: process.env.AEGIS_API_KEY_VALIDATION_URL ? "jwt+api_key" : "jwt",
+    log_level: process.env.LOG_LEVEL ?? "info",
+    node_version: process.version,
+    pid: process.pid,
+  });
 });
+
+function gracefulShutdown(signal: string): void {
+  logInfo("server.shutdown", {
+    signal,
+    uptime_s: Math.round((Date.now() - startedAt) / 1000),
+  });
+  process.exit(0);
+}
+
+process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+process.on("SIGINT", () => gracefulShutdown("SIGINT"));
+
+process.on("uncaughtException", (err) => {
+  logError("server.crash", { reason: "uncaughtException", error: err });
+  process.exit(1);
+});
+
+process.on("unhandledRejection", (reason) => {
+  logError("server.crash", {
+    reason: "unhandledRejection",
+    error: reason instanceof Error ? reason : { message: String(reason) },
+  });
+  process.exit(1);
+});
+
+export { app };

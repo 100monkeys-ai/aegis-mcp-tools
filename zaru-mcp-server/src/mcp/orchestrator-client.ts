@@ -6,6 +6,9 @@ import {
   type ZaruSealSession,
 } from "./seal.js";
 import type { AegisToolDefinition, JsonRpcRequest } from "./types.js";
+import { log, logInfo } from "../logging.js";
+
+const LOG_TOOL_ARGS = process.env.LOG_TOOL_ARGS === "true";
 
 type FetchLike = typeof fetch;
 
@@ -58,6 +61,33 @@ function normalizeToolList(payload: unknown): AegisToolDefinition[] {
   }
 
   throw new Error("Tool discovery response did not contain a tools array");
+}
+
+/**
+ * Thrown by `invokeJsonRpc` when the orchestrator returns a non-success
+ * response that is not a recoverable session-expiry. Carries the raw
+ * upstream `status` and (parsed when JSON, otherwise raw) `body` so the
+ * caller can classify the failure (policy_denied vs upstream_error vs
+ * timeout) and emit a structured log without re-parsing the error
+ * message string.
+ */
+export class OrchestratorInvokeError extends Error {
+  readonly status: number;
+  readonly body: unknown;
+  constructor(status: number, body: unknown) {
+    super(`AEGIS invoke failed: ${status}`);
+    this.name = "OrchestratorInvokeError";
+    this.status = status;
+    this.body = body;
+  }
+}
+
+function tryParseJson(s: string): unknown {
+  try {
+    return JSON.parse(s);
+  } catch {
+    return s;
+  }
 }
 
 function normalizeToolCallResult(payload: unknown): unknown {
@@ -166,16 +196,79 @@ export class OrchestratorClient {
     name: string,
     args: Record<string, unknown>,
     id: string | number | null,
+    context: { requestId?: string } = {},
   ): Promise<unknown> {
-    return this.invokeJsonRpc(user, {
-      jsonrpc: "2.0",
-      id,
-      method: "tools/call",
-      params: {
-        name,
-        arguments: args,
-      },
-    });
+    const start = process.hrtime.bigint();
+    const baseFields: Record<string, unknown> = {
+      request_id: context.requestId,
+      tool_name: name,
+      tenant_id: user.tenantId,
+    };
+    if (LOG_TOOL_ARGS) {
+      // `log()` redacts sensitive fields automatically; this opt-in
+      // exists for local debugging only.
+      baseFields.args = args;
+    }
+    logInfo("tool.invoke.start", baseFields);
+
+    try {
+      const result = await this.invokeJsonRpc(user, {
+        jsonrpc: "2.0",
+        id,
+        method: "tools/call",
+        params: {
+          name,
+          arguments: args,
+        },
+      });
+      const duration_ms = Number(
+        (process.hrtime.bigint() - start) / 1_000_000n,
+      );
+      logInfo("tool.invoke.end", {
+        request_id: context.requestId,
+        tool_name: name,
+        tenant_id: user.tenantId,
+        status: "ok",
+        duration_ms,
+      });
+      return result;
+    } catch (error) {
+      const duration_ms = Number(
+        (process.hrtime.bigint() - start) / 1_000_000n,
+      );
+      let status: "policy_denied" | "upstream_error" | "timeout" =
+        "upstream_error";
+      let upstreamStatus: number | undefined;
+      let upstreamBody: unknown;
+      if (error instanceof OrchestratorInvokeError) {
+        upstreamStatus = error.status;
+        upstreamBody = error.body;
+        if (error.status === 400) {
+          // The SEAL gateway returns 400 with a structured policy
+          // violation when a tool call is denied by the security
+          // policy layer. Treat any non-session-expiry 400 as a
+          // policy_denied; session-expiry 400s are retried inside
+          // `invokeJsonRpc` and never surface here.
+          status = "policy_denied";
+        }
+      } else if (
+        error instanceof Error &&
+        (error.name === "TimeoutError" || error.name === "AbortError")
+      ) {
+        status = "timeout";
+      }
+      log(status === "policy_denied" ? "warn" : "error", "tool.invoke.end", {
+        request_id: context.requestId,
+        tool_name: name,
+        tenant_id: user.tenantId,
+        status,
+        duration_ms,
+        upstream_status: upstreamStatus,
+        upstream_body: upstreamBody,
+        error: error instanceof Error ? error : { message: String(error) },
+      });
+      throw error;
+    }
   }
 
   private async invokeJsonRpc(
@@ -218,17 +311,12 @@ export class OrchestratorClient {
         this.sessionCache.delete(cacheKey);
         return this.invokeJsonRpcWithFreshSession(user, payload);
       }
-      console.error(
-        `[mcp:orchestrator] SEAL invoke failed: ${response.status}`,
-        body,
-      );
-      throw new Error(`AEGIS invoke failed: ${response.status} ${body}`);
+      throw new OrchestratorInvokeError(response.status, tryParseJson(body));
     }
 
     if (!response.ok) {
-      throw new Error(
-        `AEGIS invoke failed: ${response.status} ${await response.text()}`,
-      );
+      const body = await response.text();
+      throw new OrchestratorInvokeError(response.status, tryParseJson(body));
     }
 
     return normalizeToolCallResult(await response.json());
@@ -262,9 +350,8 @@ export class OrchestratorClient {
     );
 
     if (!response.ok) {
-      throw new Error(
-        `AEGIS invoke failed after re-attestation: ${response.status} ${await response.text()}`,
-      );
+      const body = await response.text();
+      throw new OrchestratorInvokeError(response.status, tryParseJson(body));
     }
 
     return normalizeToolCallResult(await response.json());
