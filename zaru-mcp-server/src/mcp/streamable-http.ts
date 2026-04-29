@@ -197,23 +197,128 @@ function normalizeToolResult(result: unknown): {
  * fetch fails (network / zaru-client unreachable) the prompt is
  * returned unchanged and a warning is logged — memory injection
  * MUST NOT block session init.
+ *
+ * Exported for unit testing. The `client` parameter accepts any object
+ * with a `getMemory(user)` method so tests can inject a fake without
+ * standing up a real `ZaruClient`. The `logger` parameter defaults to
+ * `console` and exists so tests can capture warnings.
  */
-async function injectMemoryIntoInit<T extends { system_prompt: string }>(
+export async function injectMemoryIntoInit<T extends { system_prompt: string }>(
+  client: Pick<ZaruClient, "getMemory">,
   user: ZaruUser,
   init: T,
+  logger: Pick<Console, "warn"> = console,
 ): Promise<T> {
   try {
-    const memory = await zaruClient.getMemory(user);
+    const memory = await client.getMemory(user);
     return {
       ...init,
       system_prompt: appendMemoryToSystemPrompt(init.system_prompt, memory),
     };
   } catch (error) {
-    console.warn(
+    logger.warn(
       "[zaru-mcp-server] failed to fetch Zaru User Memory — proceeding without injection:",
       error instanceof Error ? error.message : error,
     );
     return init;
+  }
+}
+
+/**
+ * Dispatch `zaru.memory.get` — fetch the user's Zaru User Memory record
+ * (ADR-118) and wrap it in the standard MCP tool-call envelope. Errors
+ * are surfaced as structured tool errors rather than thrown so the LLM
+ * can react.
+ *
+ * Exported for unit testing.
+ */
+export async function handleZaruMemoryGet(
+  client: Pick<ZaruClient, "getMemory">,
+  user: ZaruUser,
+  logger: Pick<Console, "error"> = console,
+): Promise<{
+  content: Array<{ type: string; text: string }>;
+  isError: boolean;
+}> {
+  try {
+    const memory = await client.getMemory(user);
+    return normalizeToolResult(memory);
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "zaru.memory.get failed";
+    logger.error("[zaru.memory.get] failed:", message);
+    return {
+      content: [{ type: "text", text: JSON.stringify({ error: message }) }],
+      isError: true,
+    };
+  }
+}
+
+/**
+ * Dispatch `zaru.memory.set` — replace the user's Zaru User Memory
+ * (ADR-118) with optimistic concurrency on `version`. On
+ * `VersionConflictError` we return a structured tool error containing
+ * the server's current `{ content, version, updated_at }` so the LLM
+ * can re-read, merge, and retry. All other failure modes (missing
+ * args, network error, generic upstream error) produce structured
+ * tool errors rather than throwing.
+ *
+ * Exported for unit testing.
+ */
+export async function handleZaruMemorySet(
+  client: Pick<ZaruClient, "setMemory">,
+  user: ZaruUser,
+  args: unknown,
+  logger: Pick<Console, "error"> = console,
+): Promise<{
+  content: Array<{ type: string; text: string }>;
+  isError: boolean;
+}> {
+  const a = (args as Record<string, unknown>) ?? {};
+  const content = typeof a.content === "string" ? a.content : undefined;
+  const version = typeof a.version === "number" ? a.version : undefined;
+  if (content === undefined || version === undefined) {
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            error:
+              "zaru.memory.set requires both 'content' (string) and 'version' (number from the latest zaru.memory.get).",
+          }),
+        },
+      ],
+      isError: true,
+    };
+  }
+  try {
+    const updated = await client.setMemory(user, content, version);
+    return normalizeToolResult(updated);
+  } catch (error) {
+    if (error instanceof VersionConflictError) {
+      // Structured conflict so the LLM can re-read, merge, retry.
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              error: "version_conflict",
+              message:
+                "Memory was updated by another writer. Re-read, merge your update into the new content, and retry with the new version.",
+              current: error.current,
+            }),
+          },
+        ],
+        isError: true,
+      };
+    }
+    const message =
+      error instanceof Error ? error.message : "zaru.memory.set failed";
+    logger.error("[zaru.memory.set] failed:", message);
+    return {
+      content: [{ type: "text", text: JSON.stringify({ error: message }) }],
+      isError: true,
+    };
   }
 }
 
@@ -568,7 +673,7 @@ Available modes:
           isError: true,
         };
       }
-      const withMemory = await injectMemoryIntoInit(user, result);
+      const withMemory = await injectMemoryIntoInit(zaruClient, user, result);
       return normalizeToolResult(withMemory);
     }
 
@@ -623,7 +728,7 @@ Available modes:
           isError: true,
         };
       }
-      const withMemory = await injectMemoryIntoInit(user, result);
+      const withMemory = await injectMemoryIntoInit(zaruClient, user, result);
       return normalizeToolResult({
         ...withMemory,
         reason,
@@ -651,67 +756,11 @@ Available modes:
     }
 
     if (name === "zaru.memory.get") {
-      try {
-        const memory = await zaruClient.getMemory(user);
-        return normalizeToolResult(memory);
-      } catch (error) {
-        const message =
-          error instanceof Error ? error.message : "zaru.memory.get failed";
-        console.error("[zaru.memory.get] failed:", message);
-        return {
-          content: [{ type: "text", text: JSON.stringify({ error: message }) }],
-          isError: true,
-        };
-      }
+      return handleZaruMemoryGet(zaruClient, user);
     }
 
     if (name === "zaru.memory.set") {
-      const a = (args as Record<string, unknown>) ?? {};
-      const content = typeof a.content === "string" ? a.content : undefined;
-      const version = typeof a.version === "number" ? a.version : undefined;
-      if (content === undefined || version === undefined) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: JSON.stringify({
-                error:
-                  "zaru.memory.set requires both 'content' (string) and 'version' (number from the latest zaru.memory.get).",
-              }),
-            },
-          ],
-          isError: true,
-        };
-      }
-      try {
-        const updated = await zaruClient.setMemory(user, content, version);
-        return normalizeToolResult(updated);
-      } catch (error) {
-        if (error instanceof VersionConflictError) {
-          // Structured conflict so the LLM can re-read, merge, retry.
-          return {
-            content: [
-              {
-                type: "text",
-                text: JSON.stringify({
-                  error: "version_conflict",
-                  message:
-                    "Memory was updated by another writer. Re-read, merge your update into the new content, and retry with the new version.",
-                  current: error.current,
-                }),
-              },
-            ],
-            isError: true,
-          };
-        }
-        const message =
-          error instanceof Error ? error.message : "zaru.memory.set failed";
-        console.error("[zaru.memory.set] failed:", message);
-        return {
-          content: [{ type: "text", text: JSON.stringify({ error: message }) }],
-          isError: true,
-        };
-      }
+      return handleZaruMemorySet(zaruClient, user, args);
     }
 
     // ADR-113 defence-in-depth: reject `attachments` from any client that has
