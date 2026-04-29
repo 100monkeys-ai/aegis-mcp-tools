@@ -10,6 +10,7 @@ import { OrchestratorClient } from "./orchestrator-client.js";
 import { ZaruClient, VersionConflictError } from "../clients/zaru-client.js";
 import { getZaruInit, appendMemoryToSystemPrompt } from "../prompts/index.js";
 import { searchDocs } from "../docs/index.js";
+import { logError, logWarn } from "../logging.js";
 
 const orchestratorClient = new OrchestratorClient();
 
@@ -19,9 +20,11 @@ const orchestratorClient = new OrchestratorClient();
 // fallback — the per-call HTTP errors will then localize the failure rather
 // than blocking module import on a config drift.
 if (!process.env.ZARU_CLIENT_URL) {
-  console.error(
-    "[zaru-mcp-server] ZARU_CLIENT_URL is not set — Zaru User Memory (zaru.memory.get/set, system-prompt injection) will fail until it is configured.",
-  );
+  logWarn("config.missing_env", {
+    var: "ZARU_CLIENT_URL",
+    impact:
+      "Zaru User Memory (zaru.memory.get/set, system-prompt injection) will fail until configured",
+  });
 }
 const zaruClient = new ZaruClient();
 
@@ -83,6 +86,7 @@ export async function handleZaruScriptTool(
   user: ZaruUser,
   name: "zaru.script.save" | "zaru.script.run",
   args: unknown,
+  requestId?: string,
 ): Promise<{
   content: Array<{ type: string; text: string }>;
   isError: boolean;
@@ -93,6 +97,7 @@ export async function handleZaruScriptTool(
       "aegis.script.save",
       (args as Record<string, unknown>) ?? {},
       null,
+      { requestId },
     );
     return normalizeToolResult(result);
   }
@@ -121,6 +126,7 @@ export async function handleZaruScriptTool(
       "aegis.script.list",
       { q: scriptName },
       null,
+      { requestId },
     );
     const scripts = extractScriptsArray(listResult);
     const matches = scripts.filter(
@@ -158,6 +164,7 @@ export async function handleZaruScriptTool(
     "aegis.script.get",
     { id: resolvedId },
     null,
+    { requestId },
   );
   return normalizeToolResult(scriptResult);
 }
@@ -451,6 +458,7 @@ export function parseCapabilitiesHeader(
 function createMcpServerForUser(
   user: ZaruUser,
   capabilities: ReadonlySet<string>,
+  requestId?: string,
 ): McpServer {
   const mcpServer = new McpServer(
     {
@@ -694,10 +702,9 @@ Available modes:
         const result = await searchDocs(query);
         return normalizeToolResult(result);
       } catch (err) {
-        console.error(
-          "zaru.docs search failed:",
-          err instanceof Error ? err.message : err,
-        );
+        logError("zaru.docs.failed", {
+          error: err instanceof Error ? err : { message: String(err) },
+        });
         return {
           content: [
             {
@@ -752,7 +759,13 @@ Available modes:
     }
 
     if (name === "zaru.script.save" || name === "zaru.script.run") {
-      return handleZaruScriptTool(orchestratorClient, user, name, args);
+      return handleZaruScriptTool(
+        orchestratorClient,
+        user,
+        name,
+        args,
+        requestId,
+      );
     }
 
     if (name === "zaru.memory.get") {
@@ -787,15 +800,16 @@ Available modes:
       const result = await orchestratorClient.invokeTool(
         user,
         name,
-        args ?? {},
+        (args as Record<string, unknown>) ?? {},
         null,
+        { requestId },
       );
       return normalizeToolResult(result);
     } catch (error) {
-      console.error(
-        `Tool invocation failed: ${name}`,
-        error instanceof Error ? error.message : error,
-      );
+      logError("tool.dispatch.failed", {
+        tool_name: name,
+        error: error instanceof Error ? error : { message: String(error) },
+      });
       throw error;
     }
   });
@@ -831,7 +845,7 @@ export async function handleStreamableHttp(
     enableJsonResponse: true,
   });
 
-  const server = createMcpServerForUser(user, capabilities);
+  const server = createMcpServerForUser(user, capabilities, req.requestId);
   await server.connect(transport);
 
   res.on("close", () => {

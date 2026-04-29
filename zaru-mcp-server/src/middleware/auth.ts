@@ -17,6 +17,12 @@ export interface ZaruUser {
 
 export interface ZaruRequest extends Request {
   zaruUser?: ZaruUser;
+  /**
+   * Correlation id populated by `requestIdMiddleware`. Optional in the
+   * type because the middleware runs before route handlers but after
+   * any pre-app pipeline that might construct a `ZaruRequest`.
+   */
+  requestId?: string;
 }
 
 export type AegisRole = "admin" | "operator" | "readonly";

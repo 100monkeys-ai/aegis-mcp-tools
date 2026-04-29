@@ -7,12 +7,15 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import type { ZaruRequest, ZaruUser } from "../middleware/auth.js";
 import { OrchestratorClient } from "./orchestrator-client.js";
+import { logInfo } from "../logging.js";
 
 const orchestratorClient = new OrchestratorClient();
 
 interface SseSession {
   transport: SSEServerTransport;
   user: ZaruUser;
+  openedAt: bigint;
+  requestId?: string;
 }
 
 /** Active SSE sessions keyed by transport sessionId */
@@ -21,7 +24,7 @@ const sessions = new Map<string, SseSession>();
 /**
  * Creates an MCP Server instance wired to the orchestrator for a given user.
  */
-function createMcpServerForUser(user: ZaruUser): McpServer {
+function createMcpServerForUser(user: ZaruUser, requestId?: string): McpServer {
   const mcpServer = new McpServer(
     {
       name: "zaru-mcp-server",
@@ -47,8 +50,9 @@ function createMcpServerForUser(user: ZaruUser): McpServer {
     const result = await orchestratorClient.invokeTool(
       user,
       name,
-      args ?? {},
+      (args as Record<string, unknown>) ?? {},
       null,
+      { requestId },
     );
     return normalizeToolResult(result);
   });
@@ -107,21 +111,37 @@ export async function handleSseConnection(
   // The SSEServerTransport will append ?sessionId=<id> automatically.
   const transport = new SSEServerTransport("/mcp/v1/messages", res);
 
-  const session: SseSession = { transport, user };
+  const openedAt = process.hrtime.bigint();
+  const session: SseSession = {
+    transport,
+    user,
+    openedAt,
+    requestId: req.requestId,
+  };
   sessions.set(transport.sessionId, session);
 
-  console.log(
-    `SSE session established: ${transport.sessionId} for user ${user.userId}`,
-  );
+  logInfo("sse.session.open", {
+    request_id: req.requestId,
+    session_id: transport.sessionId,
+    authenticated_subject: user.userId,
+    tenant_id: user.tenantId,
+  });
 
   // Clean up on disconnect
   res.on("close", () => {
-    console.log(`SSE session closed: ${transport.sessionId}`);
+    const duration_ms = Number(
+      (process.hrtime.bigint() - openedAt) / 1_000_000n,
+    );
+    logInfo("sse.session.close", {
+      request_id: session.requestId,
+      session_id: transport.sessionId,
+      duration_ms,
+    });
     sessions.delete(transport.sessionId);
   });
 
   // Create an MCP Server instance for this user and connect it to the transport
-  const mcpServer = createMcpServerForUser(user);
+  const mcpServer = createMcpServerForUser(user, req.requestId);
   await mcpServer.connect(transport);
 }
 
