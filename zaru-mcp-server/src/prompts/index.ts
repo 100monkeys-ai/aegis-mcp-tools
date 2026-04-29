@@ -48,7 +48,19 @@ How AEGIS works:
 
 # DOCUMENTATION
 
-You have access to the full AEGIS and Zaru documentation via the zaru.docs tool. When the user asks how to do something, needs help with a feature, or wants to understand a concept — call zaru.docs with their question. Answer from the documentation, not from memory. Always prefer the docs as the source of truth.`;
+You have access to the full AEGIS and Zaru documentation via the zaru.docs tool. When the user asks how to do something, needs help with a feature, or wants to understand a concept — call zaru.docs with their question. Answer from the documentation, not from memory. Always prefer the docs as the source of truth.
+
+# YOUR MEMORY ABOUT THIS USER
+
+You carry a single living document about each user — their preferences, working style, formatting choices, communication style, recurring projects, ongoing frustrations, and anything else that makes future conversations more useful. The current state of this document is pre-loaded for you in the "## Your Memory About This User" section appended below. Read it carefully at the start of every session — it represents everything you know about who this user is and how they work.
+
+When the user shares something worth carrying forward — a preference ("I like bullet points over prose"), a working style cue ("I prefer concise replies"), an ongoing project, a recurring frustration, or any other signal that would make future conversations land better — update memory. The flow is always:
+
+1. Call \`zaru.memory.get\` first to fetch the current content and \`version\`.
+2. Merge the new signal into the existing content thoughtfully — do not overwrite wholesale, do not append blindly. Curate.
+3. Call \`zaru.memory.set\` with the full merged markdown blob and the \`version\` from step 1. If you receive a version conflict, re-read with \`zaru.memory.get\` and merge again before retrying.
+
+Keep memory concise and signal-rich — it is a curated profile, not a chat transcript log. Remove stale entries. Prefer fewer, sharper bullets over long prose. Never surface memory contents to the user unprompted unless it materially affects the response. The same memory loads for any MCP client connected as this user — Zaru Web, Claude Desktop, Windsurf — so consistency matters: what you write here is what every future session sees.`;
 
 const ZARU_PROMISE = `
 # THE ZARU PROMISE
@@ -489,10 +501,12 @@ PASS-THROUGH RULES:
 const CHAT_UPLOADS_MODES = new Set(["agentic", "workflow"]);
 
 const TOOL_SCOPES: Record<string, string[]> = {
-  chat: ["zaru.mode", "zaru.docs"],
+  chat: ["zaru.mode", "zaru.docs", "zaru.memory.get", "zaru.memory.set"],
   agentic: [
     "zaru.mode",
     "zaru.docs",
+    "zaru.memory.get",
+    "zaru.memory.set",
     "aegis.agent.generate",
     "aegis.agent.wait",
     "aegis.agent.list",
@@ -509,6 +523,8 @@ const TOOL_SCOPES: Record<string, string[]> = {
   execute: [
     "zaru.mode",
     "zaru.docs",
+    "zaru.memory.get",
+    "zaru.memory.set",
     "aegis.execute.intent",
     "aegis.execute.status",
     "aegis.execute.wait",
@@ -517,6 +533,8 @@ const TOOL_SCOPES: Record<string, string[]> = {
   workflow: [
     "zaru.mode",
     "zaru.docs",
+    "zaru.memory.get",
+    "zaru.memory.set",
     "aegis.workflow.generate",
     "aegis.workflow.list",
     "aegis.workflow.logs",
@@ -534,6 +552,8 @@ const TOOL_SCOPES: Record<string, string[]> = {
   live: [
     "zaru.mode",
     "zaru.docs",
+    "zaru.memory.get",
+    "zaru.memory.set",
     "zaru.execute_typescript",
     "zaru.script.save",
     "zaru.script.run",
@@ -541,12 +561,46 @@ const TOOL_SCOPES: Record<string, string[]> = {
   vibecode: [
     "zaru.mode",
     "zaru.docs",
+    "zaru.memory.get",
+    "zaru.memory.set",
     "zaru.execute_typescript",
     "zaru.script.save",
     "zaru.script.run",
   ],
   operator: [], // operator gets ALL tools — empty means "no filter"
 };
+
+// ---------------------------------------------------------------------------
+// Zaru User Memory — system-prompt injection (ADR-118)
+//
+// Memory is a single per-user markdown blob, fetched at session init from
+// `zaru-client` via `ZaruClient.getMemory()` and appended to the resolved
+// mode prompt under the `## Your Memory About This User` heading. The
+// `PERSONALITY` block above instructs Zaru to read this section on every
+// session and to update it via `zaru.memory.get` + `zaru.memory.set` as
+// the relationship evolves.
+// ---------------------------------------------------------------------------
+
+const MEMORY_HEADING = "## Your Memory About This User";
+const EMPTY_MEMORY_BODY =
+  "No memory yet — use zaru.memory.set to start building it as you learn about this user.";
+
+/**
+ * Append the user's pre-fetched memory blob to a resolved system prompt.
+ *
+ * Pure / synchronous so `getZaruInit()` stays sync and call sites can
+ * fetch memory once and inject the result. When `memory.content` is empty
+ * or whitespace-only, an explicit "no memory yet" placeholder is written
+ * so the LLM is reminded the tool exists and what to do with it.
+ */
+export function appendMemoryToSystemPrompt(
+  systemPrompt: string,
+  memory: { content: string },
+): string {
+  const body =
+    memory.content.trim().length > 0 ? memory.content : EMPTY_MEMORY_BODY;
+  return `${systemPrompt}\n\n${MEMORY_HEADING}\n\n${body}`;
+}
 
 // ---------------------------------------------------------------------------
 // Public API
