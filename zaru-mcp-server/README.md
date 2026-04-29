@@ -76,6 +76,9 @@ and hosts the canonical Zaru system prompts.
   Cache TTL for tool discovery responses (ms)
 - **`BYPASS_AUTH`** (default `false`) --
   Skip JWT/API-key verification (local testing only)
+- **`ZARU_CLIENT_URL`** (default `http://zaru-client:3000`) --
+  URL by which zaru-mcp-server reaches zaru-client over the in-pod
+  network for Zaru User Memory read/write
 
 ## Authentication
 

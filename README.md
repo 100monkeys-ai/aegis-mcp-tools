@@ -97,6 +97,7 @@ npm test        # run test suite
 | `AEGIS_TOOL_CACHE_TTL_MS` | `5000` | Tool list cache TTL (ms) |
 | `BYPASS_AUTH` | _(unset)_ | `true` to skip auth (dev) |
 | `CONTAINER_ID` | `$HOSTNAME` | SEAL attestation identifier |
+| `ZARU_CLIENT_URL` | `http://zaru-client:3000` | URL by which zaru-mcp-server reaches zaru-client over the in-pod network for Zaru User Memory read/write |
 
 `JWKS_URI` defaults to
 `http://localhost:8180/realms/zaru-consumer/protocol/openid-connect/certs`.
