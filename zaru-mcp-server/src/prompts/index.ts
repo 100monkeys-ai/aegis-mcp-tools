@@ -567,7 +567,43 @@ const TOOL_SCOPES: Record<string, string[]> = {
     "zaru.script.save",
     "zaru.script.run",
   ],
-  operator: [], // operator gets ALL tools — empty means "no filter"
+  // operator: superset of all consumer tools plus destructive admin operations.
+  // Every aegis.* tool referenced in OPERATOR_PROMPT must appear here so the
+  // wire response actually advertises them to the operator client.
+  operator: [
+    "zaru.mode",
+    "zaru.docs",
+    "zaru.memory.get",
+    "zaru.memory.set",
+    // Consumer-mode surface (chat + agentic + workflow + execute, deduped)
+    "aegis.agent.generate",
+    "aegis.agent.wait",
+    "aegis.agent.list",
+    "aegis.agent.logs",
+    "aegis.task.execute",
+    "aegis.task.wait",
+    "aegis.task.list",
+    "aegis.task.logs",
+    "aegis.task.cancel",
+    "aegis.tools.list",
+    "aegis.tools.search",
+    "aegis.execution.file",
+    "aegis.workflow.generate",
+    "aegis.workflow.list",
+    "aegis.workflow.logs",
+    "aegis.workflow.wait",
+    "aegis.schema.get",
+    "aegis.schema.validate",
+    "aegis.execute.intent",
+    "aegis.execute.status",
+    "aegis.execute.wait",
+    // Destructive / admin-only operations referenced in OPERATOR_PROMPT
+    "aegis.agent.create",
+    "aegis.agent.delete",
+    "aegis.workflow.create",
+    "aegis.workflow.delete",
+    "aegis.task.remove",
+  ],
 };
 
 // ---------------------------------------------------------------------------
@@ -623,10 +659,40 @@ export function appendMemoryToSystemPrompt(
  *   Currently only used to gate `live` and `vibecode` modes which require a
  *   browser client. Sourced from `client.runtime` on the tool args.
  */
+/**
+ * Compute the set of modes a given caller can actually use, based on the
+ * authenticated subject and the declared capability set.
+ *
+ * Used at MCP `list_tools` time to filter the advertised `mode` enum on
+ * `zaru.init` and `zaru.mode`, and (in spirit) mirrored by the dispatch-time
+ * gates in `getZaruInit`.
+ *
+ * - `chat`/`agentic`/`workflow`/`execute` are always allowed.
+ * - `live`/`vibecode` are experimental, capability-gated. At list_tools time
+ *   we only have `capabilities`, not `runtime` — declaring the capability is
+ *   presumed to imply a browser client (no other transport advertises them).
+ *   The dispatch site additionally enforces `runtime === "browser"`.
+ * - `operator` is gated on BOTH `isOperator` and a tier in `{operator, admin}`
+ *   — belt-and-suspenders so a misconfig that toggles only one cannot leak.
+ */
+export function allowedModesFor(
+  user: { isOperator: boolean; tier: string },
+  capabilities: ReadonlySet<string>,
+): string[] {
+  const modes = ["chat", "agentic", "workflow", "execute"];
+  if (capabilities.has("live")) modes.push("live");
+  if (capabilities.has("vibecode")) modes.push("vibecode");
+  if (user.isOperator && (user.tier === "operator" || user.tier === "admin")) {
+    modes.push("operator");
+  }
+  return modes;
+}
+
 export function getZaruInit(
   mode?: string,
   capabilities: ReadonlySet<string> = new Set(),
   runtime?: string,
+  user?: { isOperator: boolean; tier: string },
 ): ZaruInitResponse | null {
   const effectiveMode = mode ?? "chat";
 
@@ -640,6 +706,18 @@ export function getZaruInit(
   // VibeCode mode requires a browser client with the "vibecode" capability
   if (effectiveMode === "vibecode") {
     if (runtime !== "browser" || !capabilities.has("vibecode")) {
+      return null;
+    }
+  }
+
+  // Operator mode requires both the operator flag AND an operator/admin tier.
+  // Mirrors `allowedModesFor` so the advertised enum and the dispatch gate
+  // stay in lockstep. When `user` is omitted (e.g. legacy callers / tests
+  // not exercising operator), default to a non-operator stub so operator
+  // dispatch is rejected unless the caller explicitly proves they qualify.
+  if (effectiveMode === "operator") {
+    const u = user ?? { isOperator: false, tier: "free" };
+    if (!u.isOperator || (u.tier !== "operator" && u.tier !== "admin")) {
       return null;
     }
   }
