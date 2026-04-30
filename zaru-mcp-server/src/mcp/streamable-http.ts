@@ -8,7 +8,11 @@ import {
 import type { ZaruRequest, ZaruUser } from "../middleware/auth.js";
 import { OrchestratorClient } from "./orchestrator-client.js";
 import { ZaruClient, VersionConflictError } from "../clients/zaru-client.js";
-import { getZaruInit, appendMemoryToSystemPrompt } from "../prompts/index.js";
+import {
+  getZaruInit,
+  appendMemoryToSystemPrompt,
+  allowedModesFor,
+} from "../prompts/index.js";
 import { searchDocs } from "../docs/index.js";
 import { logError, logWarn } from "../logging.js";
 
@@ -477,6 +481,10 @@ function createMcpServerForUser(
 
   mcpServer.server.setRequestHandler(ListToolsRequestSchema, async () => {
     const tools = await orchestratorClient.listTools(user);
+    // Per-caller mode enum: filter the advertised modes so the schema only
+    // exposes options the caller can actually invoke. The same set is
+    // mirrored by the dispatch-time gate in `getZaruInit`.
+    const modeEnum = allowedModesFor(user, capabilities);
     return {
       tools: [
         ...tools,
@@ -496,14 +504,7 @@ Available modes:
             properties: {
               mode: {
                 type: "string",
-                enum: [
-                  "chat",
-                  "agentic",
-                  "workflow",
-                  "execute",
-                  "live",
-                  "operator",
-                ],
+                enum: modeEnum,
                 description:
                   "Conversation mode. Defaults to chat if not specified.",
               },
@@ -545,14 +546,7 @@ Available modes:
             properties: {
               mode: {
                 type: "string",
-                enum: [
-                  "chat",
-                  "agentic",
-                  "workflow",
-                  "execute",
-                  "live",
-                  "operator",
-                ],
+                enum: modeEnum,
                 description: "Target conversation mode",
               },
               reason: {
@@ -672,7 +666,7 @@ Available modes:
         | { runtime?: string; capabilities?: unknown }
         | undefined;
       const merged = resolveCapabilities(capabilities, client?.capabilities);
-      const result = getZaruInit(mode, merged, client?.runtime);
+      const result = getZaruInit(mode, merged, client?.runtime, user);
       if (!result) {
         return {
           content: [
@@ -726,7 +720,7 @@ Available modes:
         | { runtime?: string; capabilities?: unknown }
         | undefined;
       const merged = resolveCapabilities(capabilities, client?.capabilities);
-      const result = getZaruInit(targetMode, merged, client?.runtime);
+      const result = getZaruInit(targetMode, merged, client?.runtime, user);
       if (!result) {
         return {
           content: [
