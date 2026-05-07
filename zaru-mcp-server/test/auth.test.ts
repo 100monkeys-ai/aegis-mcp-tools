@@ -108,6 +108,7 @@ test("auth middleware normalizes unknown tier to free", async () => {
 test("auth middleware maps aegis_role operator to operator identity", async () => {
   const middleware = createZaruAuthMiddleware(async () => ({
     sub: "operator-1",
+    iss: "http://localhost:8180/realms/aegis-system",
     aegis_role: "admin" as const,
   }));
 
@@ -131,6 +132,103 @@ test("auth middleware maps aegis_role operator to operator identity", async () =
     token: "jwt-token",
     isOperator: true,
   });
+});
+
+// ── System-Realm Gating for aegis_role (ADR-073) ────────────────────────────
+//
+// Per ADR-041 / ADR-073, operator privilege lives exclusively in the
+// aegis-system realm. The orchestrator's
+// resolve_role_rejects_consumer_identity_even_with_aegis_role_claim test
+// (keycloak_iam_service.rs) enforces the same invariant on the Rust side.
+// A consumer-realm JWT with a forged aegis_role claim must NOT be promoted
+// to operator — it must silently fall through to the normal tier path.
+
+test("consumer_realm_jwt_with_aegis_role_falls_back_to_tier_context", async () => {
+  // Privilege-escalation attempt: a consumer-realm JWT carrying a forged
+  // aegis_role=operator claim. The middleware MUST drop the role and
+  // treat the caller as a normal tier user, mirroring the orchestrator.
+  const middleware = createZaruAuthMiddleware(async () => ({
+    sub: "consumer-user-1",
+    iss: "http://localhost:8180/realms/zaru-consumer",
+    aegis_role: "operator" as const,
+    zaru_tier: "pro",
+  }));
+
+  const req = {
+    headers: {
+      "x-zaru-user-token": "jwt-token",
+    },
+  } as any;
+  const res = createResponseRecorder();
+  let nextCalled = false;
+
+  await middleware(req, res, (() => {
+    nextCalled = true;
+  }) as NextFunction);
+
+  assert.equal(nextCalled, true);
+  assert.equal(res.statusCode, 200);
+  assert.equal(req.zaruUser?.isOperator, false);
+  assert.notEqual(req.zaruUser?.securityContext, "aegis-system-operator");
+  assert.equal(req.zaruUser?.securityContext, "zaru-pro");
+  assert.equal(req.zaruUser?.tier, "pro");
+});
+
+test("system_realm_jwt_with_aegis_role_assigns_operator_context", async () => {
+  // Positive case: a JWT issued by the aegis-system realm with a valid
+  // aegis_role claim is honored and the caller is mapped to the operator
+  // security context.
+  const middleware = createZaruAuthMiddleware(async () => ({
+    sub: "operator-real-1",
+    iss: "http://localhost:8180/realms/aegis-system",
+    aegis_role: "operator" as const,
+  }));
+
+  const req = {
+    headers: {
+      "x-zaru-user-token": "jwt-token",
+    },
+  } as any;
+  const res = createResponseRecorder();
+  let nextCalled = false;
+
+  await middleware(req, res, (() => {
+    nextCalled = true;
+  }) as NextFunction);
+
+  assert.equal(nextCalled, true);
+  assert.equal(res.statusCode, 200);
+  assert.equal(req.zaruUser?.isOperator, true);
+  assert.equal(req.zaruUser?.securityContext, "aegis-system-operator");
+  assert.equal(req.zaruUser?.tier, "operator");
+});
+
+test("system_realm_jwt_without_aegis_role_falls_back_to_tier_context", async () => {
+  // A system-realm JWT that lacks aegis_role (e.g., a service-account token
+  // that has no operator claim) must NOT be promoted to operator. The
+  // caller falls through to the normal tier path.
+  const middleware = createZaruAuthMiddleware(async () => ({
+    sub: "system-svc-1",
+    iss: "http://localhost:8180/realms/aegis-system",
+    zaru_tier: "free",
+  }));
+
+  const req = {
+    headers: {
+      "x-zaru-user-token": "jwt-token",
+    },
+  } as any;
+  const res = createResponseRecorder();
+  let nextCalled = false;
+
+  await middleware(req, res, (() => {
+    nextCalled = true;
+  }) as NextFunction);
+
+  assert.equal(nextCalled, true);
+  assert.equal(res.statusCode, 200);
+  assert.equal(req.zaruUser?.isOperator, false);
+  assert.equal(req.zaruUser?.securityContext, "zaru-free");
 });
 
 test("auth middleware rejects request with no token", async () => {
