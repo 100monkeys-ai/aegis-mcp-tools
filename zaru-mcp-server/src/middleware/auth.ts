@@ -117,6 +117,21 @@ const jwksUri =
   "http://localhost:8180/realms/zaru-consumer/protocol/openid-connect/certs";
 const keycloakHost = jwksUri.replace(/\/realms\/.*$/, "");
 
+// Issuer URL of the aegis-system Keycloak realm. Per ADR-041 and ADR-073,
+// operator privilege is system-realm-only — the orchestrator's
+// `resolve_role_rejects_consumer_identity_even_with_aegis_role_claim` test
+// (keycloak_iam_service.rs) enforces this invariant on the Rust side.
+// Honoring `aegis_role` from any other issuer would be a privilege-
+// escalation surface: a consumer-realm JWT must NEVER be able to elevate
+// the caller, even with a forged claim. Default mirrors the pod-network
+// deployment shape; override via KEYCLOAK_SYSTEM_ISSUER in production.
+const SYSTEM_REALM_ISSUER =
+  process.env.KEYCLOAK_SYSTEM_ISSUER ?? `${keycloakHost}/realms/aegis-system`;
+
+function isSystemRealmIssuer(issuer: unknown): boolean {
+  return typeof issuer === "string" && issuer === SYSTEM_REALM_ISSUER;
+}
+
 // Per-issuer JWKS verifier cache — one instance per realm, each handles key rotation internally
 const jwksCache = new Map<string, ReturnType<typeof createRemoteJWKSet>>();
 
@@ -304,7 +319,16 @@ export function createZaruAuthMiddleware(
         tenantId = jwtTenantId;
       }
 
-      if (isValidAegisRole(claims.aegis_role)) {
+      // Per ADR-073, operator privilege lives exclusively in the
+      // aegis-system realm. A consumer-realm JWT carrying `aegis_role` is
+      // either misconfigured Keycloak or a forgery attempt — drop the
+      // claim and treat the caller as a normal tier user. The orchestrator
+      // (keycloak_iam_service.rs) enforces the same invariant on the
+      // Rust side; this keeps the MCP middleware in line.
+      if (
+        isValidAegisRole(claims.aegis_role) &&
+        isSystemRealmIssuer(claims.iss)
+      ) {
         req.zaruUser = {
           userId: claims.sub,
           tier: claims.aegis_role,
