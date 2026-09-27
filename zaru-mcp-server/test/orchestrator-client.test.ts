@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  InvalidExecutionIdError,
   OrchestratorClient,
   OrchestratorInvokeError,
 } from "../src/mcp/orchestrator-client.js";
@@ -102,18 +103,52 @@ test("streamExecution sends Keycloak JWT as Authorization Bearer and omits token
     isOperator: false,
   };
 
-  await client.streamExecution(user, "exec-abc");
+  await client.streamExecution(user, "3f2b8c1e-9d4a-4e6b-8a7f-0c1d2e3f4a5b");
 
   assert.equal(calls.length, 1);
   assert.equal(
     calls[0]?.url,
-    "http://aegis.test/v1/executions/exec-abc/events",
+    "http://aegis.test/v1/executions/3f2b8c1e-9d4a-4e6b-8a7f-0c1d2e3f4a5b/events",
   );
   assert.ok(
     !calls[0]?.url.includes("?token="),
     "URL must not contain ?token= query param",
   );
   assert.equal(calls[0]?.headers["Authorization"], "Bearer keycloak-jwt-xyz");
+});
+
+test("streamExecution refuses a non-UUID execution id without calling fetch", async () => {
+  let fetchCalls = 0;
+  const client = new OrchestratorClient({
+    baseUrl: "http://aegis.test",
+    fetchImpl: async () => {
+      fetchCalls++;
+      return new Response(null, { status: 200 });
+    },
+  });
+  const user = {
+    userId: "user-3",
+    tier: "pro",
+    securityContext: "zaru-pro",
+    token: "keycloak-jwt-xyz",
+    isOperator: false,
+  };
+
+  for (const id of [
+    "exec-abc",
+    "../../v1/credentials?",
+    "..\\..\\v1\\credentials",
+    "3f2b8c1e-9d4a-4e6b-8a7f-0c1d2e3f4a5b/../x",
+    "3f2b8c1e-9d4a-4e6b-8a7f-0c1d2e3f4a5b#",
+    "",
+  ]) {
+    await assert.rejects(
+      () => client.streamExecution(user, id),
+      InvalidExecutionIdError,
+      `expected InvalidExecutionIdError for ${JSON.stringify(id)}`,
+    );
+  }
+  assert.equal(fetchCalls, 0);
 });
 
 test("invokeTool attests and sends a spec-shaped SEAL envelope", async () => {

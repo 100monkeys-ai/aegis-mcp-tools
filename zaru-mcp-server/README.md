@@ -54,7 +54,8 @@ and hosts the canonical Zaru system prompts.
 
 - `GET /proxy/v1/executions/:executionId/stream` --
   Proxy SSE execution events from the orchestrator
-  (Glass Laboratory)
+  (Glass Laboratory). `executionId` must be a UUID; any other value
+  returns 400 and is not forwarded
 
 ### Health
 

@@ -103,6 +103,24 @@ function normalizeToolCallResult(payload: unknown): unknown {
   return payload;
 }
 
+/**
+ * The orchestrator issues execution ids as UUIDs and its execution routes
+ * parse the path segment as `Uuid`. An id in any other shape can never
+ * name an execution. Refusing it here keeps a caller-supplied string from
+ * becoming part of the upstream URL's structure. Express decodes the route
+ * param, so a slash, backslash, `?` or `#` in it would otherwise re-route
+ * the proxied request.
+ */
+const EXECUTION_ID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export class InvalidExecutionIdError extends Error {
+  constructor() {
+    super("executionId must be a UUID");
+    this.name = "InvalidExecutionIdError";
+  }
+}
+
 export class OrchestratorClient {
   private readonly baseUrl: string;
   private readonly toolDiscoveryUrl: string;
@@ -176,9 +194,12 @@ export class OrchestratorClient {
     user: ZaruUser,
     executionId: string,
   ): Promise<globalThis.Response> {
+    if (!EXECUTION_ID_PATTERN.test(executionId)) {
+      throw new InvalidExecutionIdError();
+    }
     const url = resolveUrl(
       this.baseUrl,
-      `/v1/executions/${executionId}/events`,
+      `/v1/executions/${encodeURIComponent(executionId)}/events`,
     );
 
     return this.fetchImpl(url, {

@@ -11,7 +11,10 @@ import {
   handleStreamableHttpGet,
   handleStreamableHttpDelete,
 } from "./mcp/streamable-http.js";
-import { OrchestratorClient } from "./mcp/orchestrator-client.js";
+import {
+  InvalidExecutionIdError,
+  OrchestratorClient,
+} from "./mcp/orchestrator-client.js";
 
 // The HTTP application, with every route and middleware, and no listener.
 // `index.ts` starts it; tests drive it on an ephemeral loopback port.
@@ -90,6 +93,10 @@ app.get(
 
       pump();
     } catch (error) {
+      if (error instanceof InvalidExecutionIdError) {
+        res.status(400).json({ error: error.message });
+        return;
+      }
       if (!res.headersSent) {
         res.status(502).json({ error: "Failed to connect to orchestrator" });
       }
