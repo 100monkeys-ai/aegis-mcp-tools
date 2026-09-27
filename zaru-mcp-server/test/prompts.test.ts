@@ -21,6 +21,8 @@ test("getZaruInit('vibecode') returns a full response for a browser client with 
   assert.deepEqual(result!.available_tools, [
     "zaru.mode",
     "zaru.docs",
+    "zaru.memory.get",
+    "zaru.memory.set",
     "zaru.execute_typescript",
     "zaru.script.save",
     "zaru.script.run",
@@ -61,6 +63,8 @@ test("getZaruInit('live') returns a full response for a browser client with the 
   assert.deepEqual(result!.available_tools, [
     "zaru.mode",
     "zaru.docs",
+    "zaru.memory.get",
+    "zaru.memory.set",
     "zaru.execute_typescript",
     "zaru.script.save",
     "zaru.script.run",
@@ -174,7 +178,12 @@ test("getZaruInit('vibecode') with 'chat-uploads' + 'vibecode' does NOT inject a
 });
 
 test("getZaruInit('operator') with 'chat-uploads' does NOT inject attachment teaching", () => {
-  const result = getZaruInit("operator", new Set(["chat-uploads"]));
+  const result = getZaruInit(
+    "operator",
+    new Set(["chat-uploads"]),
+    undefined,
+    { isOperator: true, tier: "operator" },
+  );
   assert.notEqual(result, null);
   assert.ok(!result!.system_prompt.includes(CHAT_UPLOADS_MARKER));
 });

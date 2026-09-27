@@ -1,6 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { OrchestratorClient } from "../src/mcp/orchestrator-client.js";
+import {
+  OrchestratorClient,
+  OrchestratorInvokeError,
+} from "../src/mcp/orchestrator-client.js";
 
 function jsonResponse(payload: unknown, status = 200): Response {
   return new Response(JSON.stringify(payload), {
@@ -57,6 +60,7 @@ test("listTools uses orchestrator discovery and caches by security context", asy
     tier: "free",
     securityContext: "zaru-free",
     token: "jwt",
+    isOperator: false,
   };
 
   const first = await client.listTools(user);
@@ -147,6 +151,7 @@ test("invokeTool attests and sends a spec-shaped SEAL envelope", async () => {
     tier: "enterprise",
     securityContext: "zaru-enterprise",
     token: "jwt",
+    isOperator: false,
   };
 
   const result = await client.invokeTool(
@@ -220,6 +225,7 @@ test("invokeJsonRpc passes an AbortSignal with 330s timeout to fetchImpl for /v1
     tier: "free",
     securityContext: "zaru-free",
     token: "jwt",
+    isOperator: false,
   };
 
   await client.invokeTool(
@@ -280,6 +286,7 @@ test("invokeJsonRpcWithFreshSession (re-attestation path) also passes AbortSigna
     tier: "free",
     securityContext: "zaru-free",
     token: "jwt",
+    isOperator: false,
   };
 
   await client.invokeTool(
@@ -337,14 +344,19 @@ test("invokeTool does NOT retry when 400 body contains 'session' in an unrelated
     tier: "free",
     securityContext: "zaru-free",
     token: "jwt",
+    isOperator: false,
   };
 
   await assert.rejects(
     () =>
       client.invokeTool(user, "fs.read", { path: "/tmp/test" }, "req-retry"),
     (err: Error) => {
-      assert.match(err.message, /AEGIS invoke failed: 400/);
-      assert.match(err.message, /storage error/);
+      // Since 829f829 the upstream body travels on the typed error rather
+      // than in the message, so the structured logger can record it.
+      assert.ok(err instanceof OrchestratorInvokeError);
+      assert.equal(err.message, "AEGIS invoke failed: 400");
+      assert.equal(err.status, 400);
+      assert.match(String(err.body), /storage error/);
       return true;
     },
   );

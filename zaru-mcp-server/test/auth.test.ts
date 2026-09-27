@@ -45,6 +45,7 @@ test("auth middleware validates JWT claims and maps tier to security context", a
     securityContext: "zaru-pro",
     token: "jwt-token",
     isOperator: false,
+    tenantId: undefined,
   });
 });
 
@@ -74,6 +75,7 @@ test("auth middleware accepts Authorization: Bearer header as fallback", async (
     securityContext: "zaru-free",
     token: "my-bearer-token",
     isOperator: false,
+    tenantId: undefined,
   });
 });
 
@@ -102,6 +104,7 @@ test("auth middleware normalizes unknown tier to free", async () => {
     securityContext: "zaru-free",
     token: "jwt-token",
     isOperator: false,
+    tenantId: undefined,
   });
 });
 
@@ -131,6 +134,7 @@ test("auth middleware maps aegis_role operator to operator identity", async () =
     securityContext: "aegis-system-operator",
     token: "jwt-token",
     isOperator: true,
+    tenantId: undefined,
   });
 });
 
@@ -274,6 +278,8 @@ test("auth middleware validates aegis_ API key via apiKeyValidator", async () =>
     assert.equal(token, "aegis_test_key_12345");
     return {
       user_id: "api-user-789",
+      tenant_id: null,
+      zaru_tier: null,
       aegis_role: "operator" as const,
       scopes: ["agent:read", "agent:execute"],
     };
@@ -301,6 +307,7 @@ test("auth middleware validates aegis_ API key via apiKeyValidator", async () =>
     securityContext: "aegis-system-operator",
     token: "aegis_test_key_12345",
     isOperator: true,
+    tenantId: undefined,
   });
 });
 
@@ -337,6 +344,8 @@ test("auth middleware routes aegis_ token from x-zaru-user-token header to API k
     assert.equal(token, "aegis_header_key");
     return {
       user_id: "header-user",
+      tenant_id: null,
+      zaru_tier: null,
       aegis_role: "admin" as const,
       scopes: ["key:list"],
     };
@@ -365,6 +374,7 @@ test("auth middleware routes aegis_ token from x-zaru-user-token header to API k
     securityContext: "aegis-system-operator",
     token: "aegis_header_key",
     isOperator: true,
+    tenantId: undefined,
   });
 });
 
@@ -374,6 +384,8 @@ test("auth middleware does not call API key validator for non-aegis_ tokens", as
     apiKeyValidatorCalled = true;
     return {
       user_id: "should-not-happen",
+      tenant_id: null,
+      zaru_tier: null,
       aegis_role: "admin" as const,
       scopes: [],
     };
