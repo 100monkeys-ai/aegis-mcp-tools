@@ -132,21 +132,57 @@ function isSystemRealmIssuer(issuer: unknown): boolean {
   return typeof issuer === "string" && issuer === SYSTEM_REALM_ISSUER;
 }
 
-// Per-issuer JWKS verifier cache — one instance per realm, each handles key rotation internally
-const jwksCache = new Map<string, ReturnType<typeof createRemoteJWKSet>>();
+const JWKS_PATH_SUFFIX = "/protocol/openid-connect/certs";
 
-function getJwksForIssuer(
-  issuer: string,
-): ReturnType<typeof createRemoteJWKSet> {
-  const realmPrefix = keycloakHost + "/realms/";
-  if (!issuer.startsWith(realmPrefix)) {
-    throw new Error(`Untrusted issuer: ${issuer}`);
+/**
+ * The exact set of issuers whose tokens this server verifies, fixed at
+ * startup. It mirrors the orchestrator's configured issuer-to-realm map:
+ *   - the realm JWKS_URI points at (the consumer realm in production),
+ *   - the aegis-system realm (SYSTEM_REALM_ISSUER), and
+ *   - each exact issuer URL in KEYCLOAK_TRUSTED_ISSUERS (comma-separated),
+ *     which is how an enterprise `tenant-{slug}` realm is added.
+ * A token whose unverified `iss` is not in this set is refused before any
+ * key set is allocated or any request is made. Previously a prefix check
+ * let an unauthenticated caller grow an unbounded cache and choose the
+ * path of an outbound request to the Keycloak host.
+ */
+function buildTrustedIssuers(): Map<
+  string,
+  ReturnType<typeof createRemoteJWKSet>
+> {
+  if (!jwksUri.endsWith(JWKS_PATH_SUFFIX)) {
+    throw new Error(
+      `JWKS_URI must end with ${JWKS_PATH_SUFFIX} so its issuer can be derived; got ${jwksUri}`,
+    );
   }
-  if (!jwksCache.has(issuer)) {
-    const jwksEndpoint = `${issuer}/protocol/openid-connect/certs`;
-    jwksCache.set(issuer, createRemoteJWKSet(new URL(jwksEndpoint)));
+  const jwksEndpoints = new Map<string, string>();
+  jwksEndpoints.set(jwksUri.slice(0, -JWKS_PATH_SUFFIX.length), jwksUri);
+  const extraIssuers = [
+    SYSTEM_REALM_ISSUER,
+    ...(process.env.KEYCLOAK_TRUSTED_ISSUERS ?? "")
+      .split(",")
+      .map((issuer) => issuer.trim())
+      .filter((issuer) => issuer.length > 0),
+  ];
+  for (const issuer of extraIssuers) {
+    if (!jwksEndpoints.has(issuer)) {
+      jwksEndpoints.set(issuer, `${issuer}${JWKS_PATH_SUFFIX}`);
+    }
   }
-  return jwksCache.get(issuer)!;
+
+  const keySets = new Map<string, ReturnType<typeof createRemoteJWKSet>>();
+  for (const [issuer, endpoint] of jwksEndpoints) {
+    // createRemoteJWKSet makes no request until the first verification.
+    keySets.set(issuer, createRemoteJWKSet(new URL(endpoint)));
+  }
+  return keySets;
+}
+
+const jwksByIssuer = buildTrustedIssuers();
+
+/** Number of remote JWKS key sets this process holds. */
+export function jwksKeySetCount(): number {
+  return jwksByIssuer.size;
 }
 
 export function normalizeTier(rawTier?: string): string {
@@ -184,7 +220,10 @@ export async function verifyJwtWithJwks(
     throw new Error("Token missing iss claim");
   }
 
-  const jwks = getJwksForIssuer(unverified.iss);
+  const jwks = jwksByIssuer.get(unverified.iss);
+  if (!jwks) {
+    throw new Error("Untrusted issuer");
+  }
   const { payload } = await jwtVerify(token, jwks, {
     algorithms: ["RS256"],
     issuer: unverified.iss,

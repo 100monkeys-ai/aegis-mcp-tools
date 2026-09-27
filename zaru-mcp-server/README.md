@@ -69,7 +69,17 @@ and hosts the canonical Zaru system prompts.
   -- Base URL of the AEGIS orchestrator
 - **`JWKS_URI`** (default
   `http://localhost:8180/realms/zaru-consumer/protocol/openid-connect/certs`)
-  -- Keycloak JWKS endpoint for JWT verification
+  -- Keycloak JWKS endpoint for JWT verification. Must end in
+  `/protocol/openid-connect/certs`; the issuer it serves is derived by
+  removing that suffix and is always trusted
+- **`KEYCLOAK_SYSTEM_ISSUER`** (default
+  `<JWKS_URI host>/realms/aegis-system`) -- Issuer of the aegis-system
+  realm. Always trusted; the only issuer whose `aegis_role` claim grants
+  operator identity
+- **`KEYCLOAK_TRUSTED_ISSUERS`** (default empty) -- Comma-separated
+  list of further exact issuer URLs to trust, for example an enterprise
+  realm `https://auth.example.com/realms/tenant-acme`. Each is verified
+  against `<issuer>/protocol/openid-connect/certs`
 - **`AEGIS_TOOL_DISCOVERY_URL`** (default
   `${AEGIS_ORCHESTRATOR_URL}/v1/seal/tools`) --
   Override tool discovery endpoint
@@ -90,8 +100,12 @@ The server accepts tokens via three mechanisms
 2. `Authorization: Bearer <token>` header
 3. `token` query parameter (for SSE GET requests)
 
-**Keycloak JWT** -- verified against JWKS_URI with per-issuer
-key rotation caching. The `sub` claim becomes the user identity;
+**Keycloak JWT** -- the token's `iss` must exactly match one of the
+trusted issuers fixed at startup (the `JWKS_URI` realm,
+`KEYCLOAK_SYSTEM_ISSUER`, and `KEYCLOAK_TRUSTED_ISSUERS`). A token from
+any other issuer is refused before any key set is fetched. The
+signature is verified against that issuer's JWKS, with key rotation
+handled per issuer. The `sub` claim becomes the user identity;
 `zaru_tier` resolves to a `SecurityContext` (`zaru-free`,
 `zaru-pro`, `zaru-business`, `zaru-enterprise`). Tokens with an
 `aegis_role` claim (`admin`, `operator`, `readonly`) are treated
