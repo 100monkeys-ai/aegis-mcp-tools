@@ -15,6 +15,14 @@ updates:
       - javascript
     commit-message:
       prefix: "chore(deps)"
+    ignore:
+      # Node is 24. Its types follow it.
+      - dependency-name: "@types/node"
+        versions: [">=25"]
+      # TypeScript 7 breaks the ts-node/esm test loader (it no longer ships
+      # the compiler API ts-node uses). Comes off when the loader is replaced.
+      - dependency-name: typescript
+        versions: [">=7"]
     groups:
       production-dependencies:
         dependency-type: production
