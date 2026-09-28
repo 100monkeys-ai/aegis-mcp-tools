@@ -1,4 +1,9 @@
-FROM node:22-alpine
+# Node 24, the long-term-support line. The version is declared once, in
+# .nvmrc; test/node-version.test.ts fails if this line disagrees with it,
+# and CI's Image job fails if the built image runs another Node. The digest
+# is the multi-platform index of node:24-alpine as read from Docker Hub on
+# 2026-09-28: Node 24.21.0.
+FROM node:24-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1
 
 WORKDIR /app
 
