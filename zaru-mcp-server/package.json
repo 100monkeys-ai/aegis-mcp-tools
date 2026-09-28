@@ -7,7 +7,7 @@
   "scripts": {
     "build": "tsc",
     "prepare": "npm run build",
-    "test": "node --test --loader ts-node/esm test/*.test.ts"
+    "test": "node --test --import ./test/register-ts-node.mjs test/*.test.ts"
   },
   "publishConfig": {
     "registry": "https://npm.pkg.github.com"
