@@ -1,0 +1,221 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright 2026 100monkeys.ai
+
+name: deploy
+
+# Deploy the Zaru MCP server's Worker (zaru-mcp-server/wrangler.jsonc) once
+# CI has passed on a push to main: staging, then production, both on
+# workers.dev (AEGIS ADR-123, plan step S5; the shape of Nuclear Notes'
+# deploy.yml Cloudflare jobs at a9acc59, without its container steps). No
+# route is deployed: the myzaru.com zone is not in this Cloudflare account
+# (ADR-123's gate G2). The container image is published by docker-publish.yml
+# and deployed from aegis-platform-deployment, not here.
+#
+# The trigger is CI completing on a push to main, not the push itself, so a
+# commit deploys only once its tests have passed. A CI run for a pull request
+# or another repository's head never deploys. CI runs only when a path under
+# zaru-mcp-server/ changes, so only such a commit deploys.
+#
+# workflow_dispatch deploys a ref on demand:
+# `gh workflow run deploy.yml --ref main -f ref=<sha>`. The same jobs run on
+# the ref's commit, and each refuses at its first step unless the latest CI
+# run on a push to main at that commit completed with success.
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: The branch, tag or commit to deploy; CI must have passed on a push to main at its commit
+        required: true
+        default: main
+        type: string
+
+# One deploy at a time, in order; a queued one waits rather than cancelling a
+# deploy halfway.
+concurrency:
+  group: deploy-main
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  cloudflare-staging:
+    name: Cloudflare (staging)
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      ENVIRONMENT: staging
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      # The 100monkeys AI, Inc. account, set so wrangler never has to choose one.
+      CLOUDFLARE_ACCOUNT_ID: 7f696bea9939feff1d6d2d902be9bc3c
+    defaults:
+      run:
+        shell: bash
+        working-directory: zaru-mcp-server
+    steps:
+      # The commit this job deploys, exported as SHA. For workflow_run it is
+      # the head_sha of the CI run, whose success the job's `if` requires. For
+      # a dispatch it is inputs.ref's commit, and only when the latest CI run
+      # on a push to main at that commit completed with success.
+      - name: The commit to deploy, and CI passed on it
+        working-directory: ${{ github.workspace }}
+        env:
+          EVENT: ${{ github.event_name }}
+          RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+          REF: ${{ inputs.ref }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "$EVENT" = workflow_run ]; then
+            sha="$RUN_SHA"
+          else
+            if ! [[ "$REF" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ ]] || [[ "$REF" == *..* ]]; then
+              echo "::error::the ref '${REF}' is not a branch, tag or commit name"
+              exit 1
+            fi
+            sha="$(gh api -H 'Accept: application/vnd.github.sha' "repos/${GITHUB_REPOSITORY}/commits/${REF}")"
+            if ! [[ "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+              echo "::error::the ref '${REF}' did not resolve to a commit"
+              exit 1
+            fi
+            run="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${sha}&event=push&branch=main&per_page=1" \
+              --jq '.workflow_runs[0] // empty | "\(.id) \(.status) \(.conclusion)"')"
+            if [ -z "$run" ]; then
+              echo "::error::refusing to deploy ${sha}: no CI run on a push to main at it"
+              exit 1
+            fi
+            read -r id status conclusion <<<"$run"
+            if [ "$status" != completed ] || [ "$conclusion" != success ]; then
+              echo "::error::refusing to deploy ${sha}: the latest CI run on a push to main at it is ${id}, ${status} ${conclusion}"
+              exit 1
+            fi
+            echo "CI run ${id} passed on ${sha} (${REF})"
+          fi
+          if ! [[ "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::no commit to deploy"
+            exit 1
+          fi
+          echo "deploying ${sha}"
+          echo "SHA=${sha}" >>"$GITHUB_ENV"
+      - name: The Cloudflare API token is set
+        working-directory: ${{ github.workspace }}
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "::error::the repository secret CLOUDFLARE_API_TOKEN is not set"
+            exit 1
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.SHA }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: zaru-mcp-server/.nvmrc
+          cache: "npm"
+          cache-dependency-path: zaru-mcp-server/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - name: wrangler deploy --env staging
+        run: npx wrangler deploy --env "$ENVIRONMENT"
+      - name: Health
+        run: |
+          url="https://zaru-mcp-server-${ENVIRONMENT}.100monkeys-ai-inc.workers.dev/health"
+          code=000
+          for _ in $(seq 1 30); do
+            code="$(curl -s -o /dev/null -w '%{http_code}' "$url" || true)"
+            [ "$code" = 200 ] && break
+            sleep 5
+          done
+          echo "${url}: HTTP ${code}"
+          [ "$code" = 200 ]
+
+  cloudflare-production:
+    name: Cloudflare (production)
+    needs: [cloudflare-staging]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      ENVIRONMENT: production
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: 7f696bea9939feff1d6d2d902be9bc3c
+    defaults:
+      run:
+        shell: bash
+        working-directory: zaru-mcp-server
+    steps:
+      # The same commit as staging: re-derived and re-checked the same way.
+      - name: The commit to deploy, and CI passed on it
+        working-directory: ${{ github.workspace }}
+        env:
+          EVENT: ${{ github.event_name }}
+          RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+          REF: ${{ inputs.ref }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "$EVENT" = workflow_run ]; then
+            sha="$RUN_SHA"
+          else
+            if ! [[ "$REF" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ ]] || [[ "$REF" == *..* ]]; then
+              echo "::error::the ref '${REF}' is not a branch, tag or commit name"
+              exit 1
+            fi
+            sha="$(gh api -H 'Accept: application/vnd.github.sha' "repos/${GITHUB_REPOSITORY}/commits/${REF}")"
+            if ! [[ "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+              echo "::error::the ref '${REF}' did not resolve to a commit"
+              exit 1
+            fi
+            run="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${sha}&event=push&branch=main&per_page=1" \
+              --jq '.workflow_runs[0] // empty | "\(.id) \(.status) \(.conclusion)"')"
+            if [ -z "$run" ]; then
+              echo "::error::refusing to deploy ${sha}: no CI run on a push to main at it"
+              exit 1
+            fi
+            read -r id status conclusion <<<"$run"
+            if [ "$status" != completed ] || [ "$conclusion" != success ]; then
+              echo "::error::refusing to deploy ${sha}: the latest CI run on a push to main at it is ${id}, ${status} ${conclusion}"
+              exit 1
+            fi
+            echo "CI run ${id} passed on ${sha} (${REF})"
+          fi
+          if ! [[ "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::no commit to deploy"
+            exit 1
+          fi
+          echo "deploying ${sha}"
+          echo "SHA=${sha}" >>"$GITHUB_ENV"
+      - name: The Cloudflare API token is set
+        working-directory: ${{ github.workspace }}
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "::error::the repository secret CLOUDFLARE_API_TOKEN is not set"
+            exit 1
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.SHA }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: zaru-mcp-server/.nvmrc
+          cache: "npm"
+          cache-dependency-path: zaru-mcp-server/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - name: wrangler deploy --env production
+        run: npx wrangler deploy --env "$ENVIRONMENT"
+      - name: Health
+        run: |
+          url="https://zaru-mcp-server-${ENVIRONMENT}.100monkeys-ai-inc.workers.dev/health"
+          code=000
+          for _ in $(seq 1 30); do
+            code="$(curl -s -o /dev/null -w '%{http_code}' "$url" || true)"
+            [ "$code" = 200 ] && break
+            sleep 5
+          done
+          echo "${url}: HTTP ${code}"
+          [ "$code" = 200 ]

@@ -459,7 +459,7 @@ export function parseCapabilitiesHeader(
   return out;
 }
 
-function createMcpServerForUser(
+export function createMcpServerForUser(
   user: ZaruUser,
   capabilities: ReadonlySet<string>,
   requestId?: string,

@@ -60,8 +60,8 @@ test("every setup-node step in every workflow reads .nvmrc", () => {
       [],
     );
   }
-  // ci.yml sets up Node once, npm-publish.yml twice, security.yml once.
-  assert.equal(steps, 4);
+  // ci.yml sets up Node twice, deploy.yml twice, npm-publish.yml twice, security.yml once.
+  assert.equal(steps, 7);
 });
 
 test("engines.node allows this major and no other", () => {

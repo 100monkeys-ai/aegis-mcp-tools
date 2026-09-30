@@ -104,6 +104,57 @@ npm test        # run test suite
 `AEGIS_TOOL_DISCOVERY_URL` defaults to
 `<AEGIS_ORCHESTRATOR_URL>/v1/seal/tools`.
 
+## Running on Cloudflare Workers
+
+Beside the Express server the container runs (`src/index.ts`), the server has a
+Cloudflare Workers entrypoint, `zaru-mcp-server/src/worker.ts`, a fetch handler
+built from the same modules: the same authentication
+(`authenticateZaruRequest`), the same tool wiring (`createMcpServerForUser`)
+and the same route constants (`src/http/routes.ts`). It serves:
+
+| Route | On the Worker |
+| --- | --- |
+| `GET /health` | `{"status":"ok"}` |
+| `POST /mcp/v1` | Streamable HTTP, stateless, through the SDK's Web-standard transport |
+| `GET`, `DELETE /mcp/v1` | 405 and a no-op, as the container answers |
+| `GET /proxy/v1/executions/:executionId/stream` | The orchestrator's event stream, passed through as the response body |
+
+The legacy SSE transport (`/mcp/v1/sse`, `/mcp/v1/messages`) is not served on
+Workers: its sessions live in one process's memory, and a Worker's requests can
+land in different isolates.
+
+`wrangler.jsonc` declares two environments on workers.dev, `staging` and
+`production` (Workers `zaru-mcp-server-staging` and
+`zaru-mcp-server-production`), with `nodejs_compat` (SEAL signs with
+`node:crypto` Ed25519), observability on and placement in `gcp:us-central1`.
+There is no route yet. The vars are the container's environment names,
+unchanged; each pod-local URL is the service's public URL instead, since a
+Worker cannot resolve pod names:
+
+| Var | Value on Workers |
+| --- | --- |
+| `AEGIS_ORCHESTRATOR_URL` | `https://api.myzaru.com` |
+| `ZARU_CLIENT_URL` | `https://ask.myzaru.com` |
+| `JWKS_URI` | `https://auth.myzaru.com/realms/zaru-consumer/protocol/openid-connect/certs` |
+| `EXPECTED_AUDIENCE` | `zaru-client` |
+| `LOG_LEVEL` | `info` |
+| `CONTAINER_ID` | `zaru-mcp-server-<environment>` |
+
+The server reads no secret. A secret added later is put with
+`npx wrangler secret put <NAME> --env <environment>` and never committed.
+
+```bash
+cd zaru-mcp-server
+npm run worker:typecheck   # the runtime types from `wrangler types`, then tsc
+npm run worker:test        # the Worker in workerd (wrangler's local dev server), upstreams stubbed
+npm run worker:dry-run     # bundle both environments; needs no Cloudflare token
+```
+
+CI runs all three (`.github/workflows/ci.yml`, job `Worker`). After CI passes
+on a push to `main`, `.github/workflows/deploy.yml` deploys staging, checks its
+`/health`, then deploys production, with the repository secret
+`CLOUDFLARE_API_TOKEN`.
+
 ## Repository Structure
 
 ```text

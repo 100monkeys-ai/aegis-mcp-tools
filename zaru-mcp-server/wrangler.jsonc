@@ -1,0 +1,62 @@
+// The Zaru MCP server on Cloudflare Workers (AEGIS ADR-123, plan step S5), in
+// two environments on workers.dev:
+//
+//   wrangler deploy --env staging      -> Worker zaru-mcp-server-staging
+//   wrangler deploy --env production   -> Worker zaru-mcp-server-production
+//
+// CI deploys both from main after CI passes (.github/workflows/deploy.yml).
+// No route: the myzaru.com zone is not in this Cloudflare account (ADR-123's
+// gate G2), so `mcp.myzaru.com` stays on the container until it is.
+//
+// The vars are the container's environment names (aegis-platform-deployment
+// podman/pods/zaru/pod-zaru.yaml), unchanged; the pod-local URLs become the
+// services' public URLs, since a Worker cannot resolve `aegis-core` or
+// `zaru-client`. src/env.ts is the contract. The server reads no secret
+// today; one added later is put with `wrangler secret put <NAME> --env <env>`
+// and never written here.
+//
+// Every key below the top level is repeated per environment on purpose: `vars`
+// are not inherited by a Wrangler environment.
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "zaru-mcp-server",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-09-29",
+  // nodejs_compat: `node:crypto` Ed25519 for SEAL (src/mcp/seal.ts) and
+  // `process.env` filled from the vars below.
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "observability": { "enabled": true },
+  // Beside the AEGIS services it calls, as Nuclear Notes places its Workers.
+  "placement": { "region": "gcp:us-central1" },
+
+  "env": {
+    "staging": {
+      "workers_dev": true,
+      "observability": { "enabled": true },
+      "placement": { "region": "gcp:us-central1" },
+      "vars": {
+        // There is one AEGIS today, production's: staging proxies to it.
+        "AEGIS_ORCHESTRATOR_URL": "https://api.myzaru.com",
+        "ZARU_CLIENT_URL": "https://ask.myzaru.com",
+        "JWKS_URI": "https://auth.myzaru.com/realms/zaru-consumer/protocol/openid-connect/certs",
+        "EXPECTED_AUDIENCE": "zaru-client",
+        "LOG_LEVEL": "info",
+        "CONTAINER_ID": "zaru-mcp-server-staging"
+      }
+    },
+    "production": {
+      "workers_dev": true,
+      "observability": { "enabled": true },
+      "placement": { "region": "gcp:us-central1" },
+      "vars": {
+        "AEGIS_ORCHESTRATOR_URL": "https://api.myzaru.com",
+        "ZARU_CLIENT_URL": "https://ask.myzaru.com",
+        "JWKS_URI": "https://auth.myzaru.com/realms/zaru-consumer/protocol/openid-connect/certs",
+        "EXPECTED_AUDIENCE": "zaru-client",
+        "LOG_LEVEL": "info",
+        "CONTAINER_ID": "zaru-mcp-server-production"
+      }
+    }
+  }
+}

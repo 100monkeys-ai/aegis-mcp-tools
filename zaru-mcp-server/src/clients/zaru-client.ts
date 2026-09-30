@@ -54,7 +54,7 @@ export class ZaruClient {
     const url =
       options.baseUrl ?? process.env.ZARU_CLIENT_URL ?? "http://localhost:3000";
     this.baseUrl = normalizeBaseUrl(url);
-    this.fetchImpl = options.fetchImpl ?? fetch;
+    this.fetchImpl = options.fetchImpl ?? ((input, init) => fetch(input, init));
   }
 
   async getMemory(user: ZaruUser): Promise<ZaruMemoryRecord> {

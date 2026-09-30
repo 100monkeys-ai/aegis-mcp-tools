@@ -43,6 +43,36 @@ jobs:
       - name: Test
         run: npm test
 
+  # The Cloudflare Workers entrypoint (src/worker.ts, AEGIS ADR-123 step S5):
+  # its typecheck against the runtime types wrangler generates, its tests in
+  # the Workers runtime (wrangler's local workerd), and a dry-run deploy of
+  # both environments, which needs no Cloudflare token.
+  worker:
+    name: Worker
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: zaru-mcp-server/.nvmrc
+          cache: "npm"
+          cache-dependency-path: zaru-mcp-server/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck (Workers)
+        run: npm run worker:typecheck
+
+      - name: Test in the Workers runtime
+        run: npm run worker:test
+
+      - name: wrangler deploy --dry-run (staging and production)
+        run: npm run worker:dry-run
+
   image:
     name: Image
     runs-on: ubuntu-latest

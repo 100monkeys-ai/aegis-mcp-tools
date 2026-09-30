@@ -1,0 +1,23 @@
+{
+  // The Workers entrypoint (src/worker.ts) and everything it imports, checked
+  // against the Workers runtime's types plus Node's, which nodejs_compat
+  // provides. The runtime types are generated from wrangler.jsonc by
+  // `wrangler types` into .wrangler/types/ (`npm run worker:typecheck` does
+  // both); @cloudflare/workers-types is not used, because its global
+  // `declare const Buffer: any` breaks @types/node's Buffer (TS2554 on
+  // `Buffer#toString("base64")` in src/mcp/seal.ts). Wrangler bundles, so
+  // nothing is emitted.
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ES2022",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022"],
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "types": ["node"]
+  },
+  "include": [".wrangler/types/runtime.d.ts", "src/worker.ts", "src/env.ts"]
+}

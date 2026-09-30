@@ -242,158 +242,192 @@ function extractBearerToken(header?: string): string | undefined {
   return match?.[1];
 }
 
+/** The request's headers, as Node and Express present them (lowercased names). */
+export type ZaruRequestHeaders = Record<string, string | string[] | undefined>;
+
+/** The outcome of authenticating one request: a caller, or the refusal to send. */
+export type ZaruAuthResult =
+  | { user: ZaruUser }
+  | { status: number; error: string };
+
+/**
+ * Resolve the caller of one request from its headers and query string:
+ * the `x-zaru-user-token` header, else `Authorization: Bearer`, else the
+ * `token` query parameter (SSE GET requests). Shared by the Express
+ * middleware below and the Workers fetch handler (`src/worker.ts`), so both
+ * entrypoints authenticate identically.
+ */
+export async function authenticateZaruRequest(
+  headers: ZaruRequestHeaders,
+  query: Record<string, unknown>,
+  verifier: JwtVerifier = verifyJwtWithJwks,
+  apiKeyValidator: ApiKeyValidator = validateApiKeyWithOrchestrator,
+): Promise<ZaruAuthResult> {
+  let user: ZaruUser;
+  // Support token from header (normal requests) or query parameter (SSE GET requests)
+  const rawToken =
+    (headers[TOKEN_HEADER] as string | undefined) ??
+    extractBearerToken(headers.authorization as string | undefined) ??
+    (query[TOKEN_QUERY_PARAM] as string | undefined);
+
+  if (!rawToken) {
+    return {
+      status: 401,
+      error: `Unauthorized: Missing ${TOKEN_HEADER} header or ${TOKEN_QUERY_PARAM} query parameter`,
+    };
+  }
+
+  if (process.env.BYPASS_AUTH === "true") {
+    const bypassRole = headers["x-aegis-role"] as string | undefined;
+    if (isValidAegisRole(bypassRole)) {
+      user = {
+        userId:
+          (headers["x-zaru-user-id"] as string | undefined) ??
+          "bypass-user",
+        tier: bypassRole,
+        securityContext: OPERATOR_SECURITY_CONTEXT,
+        token: rawToken,
+        isOperator: true,
+      };
+    } else {
+      const tier = normalizeTier(
+        (headers["x-zaru-tier"] as string | undefined) ?? "free",
+      );
+      user = {
+        userId:
+          (headers["x-zaru-user-id"] as string | undefined) ??
+          "bypass-user",
+        tier,
+        securityContext: mapTierToSecurityContext(tier),
+        token: rawToken,
+        isOperator: false,
+      };
+    }
+    return { user };
+  }
+
+  // API key authentication: tokens with `aegis_` prefix are API keys,
+  // validated against the orchestrator instead of Keycloak JWKS.
+  if (isApiKey(rawToken)) {
+    try {
+      const identity = await apiKeyValidator(rawToken);
+      const isOp =
+        identity.aegis_role === "admin" || identity.aegis_role === "operator";
+      const tier = identity.aegis_role ?? identity.zaru_tier ?? "free";
+      const secCtx = isOp
+        ? OPERATOR_SECURITY_CONTEXT
+        : `zaru-${identity.zaru_tier ?? "free"}`;
+      user = {
+        userId: identity.user_id,
+        tier,
+        securityContext: secCtx,
+        token: rawToken,
+        isOperator: isOp,
+        tenantId: identity.tenant_id ?? undefined,
+      };
+      return { user };
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Invalid API key";
+      return { status: 401, error: message };
+    }
+  }
+
+  // JWT authentication: validate via Keycloak JWKS
+  try {
+    const claims = await verifier(rawToken);
+
+    const jwtTenantId = claims.tenant_id ?? undefined;
+    const activeTenantHeader = headers["x-zaru-active-tenant"] as
+      | string
+      | undefined;
+
+    // Build the caller's allowed-tenant set from the verified JWT:
+    //   { personal tenant } ∪ team_memberships[]
+    // The active-tenant cookie is user-writable, so we must validate
+    // any value it carries against this server-trusted set. A missing
+    // header means "use my personal tenant" and is always permitted.
+    const allowedTenants = new Set<string>();
+    if (jwtTenantId) {
+      allowedTenants.add(jwtTenantId);
+    }
+    if (Array.isArray(claims.team_memberships)) {
+      for (const t of claims.team_memberships) {
+        if (typeof t === "string" && t.length > 0) {
+          allowedTenants.add(t);
+        }
+      }
+    }
+
+    let tenantId: string | undefined;
+    if (activeTenantHeader && activeTenantHeader.length > 0) {
+      if (!allowedTenants.has(activeTenantHeader)) {
+        return {
+          status: 403,
+          error:
+            "Forbidden: x-zaru-active-tenant is not a tenant the caller is a member of",
+        };
+      }
+      tenantId = activeTenantHeader;
+    } else {
+      tenantId = jwtTenantId;
+    }
+
+    // Per ADR-073, operator privilege lives exclusively in the
+    // aegis-system realm. A consumer-realm JWT carrying `aegis_role` is
+    // either misconfigured Keycloak or a forgery attempt — drop the
+    // claim and treat the caller as a normal tier user. The orchestrator
+    // (keycloak_iam_service.rs) enforces the same invariant on the
+    // Rust side; this keeps the MCP middleware in line.
+    if (
+      isValidAegisRole(claims.aegis_role) &&
+      isSystemRealmIssuer(claims.iss)
+    ) {
+      user = {
+        userId: claims.sub,
+        tier: claims.aegis_role,
+        securityContext: OPERATOR_SECURITY_CONTEXT,
+        token: rawToken,
+        isOperator: true,
+        tenantId,
+      };
+    } else {
+      const tier = normalizeTier(claims.zaru_tier);
+      user = {
+        userId: claims.sub,
+        tier,
+        securityContext: mapTierToSecurityContext(tier),
+        token: rawToken,
+        isOperator: false,
+        tenantId,
+      };
+    }
+
+    return { user };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Invalid token";
+    const status = message.startsWith("Unsupported zaru_tier") ? 403 : 401;
+    return { status, error: message };
+  }
+}
+
 export function createZaruAuthMiddleware(
   verifier: JwtVerifier = verifyJwtWithJwks,
   apiKeyValidator: ApiKeyValidator = validateApiKeyWithOrchestrator,
 ) {
   return async (req: ZaruRequest, res: Response, next: NextFunction) => {
-    // Support token from header (normal requests) or query parameter (SSE GET requests)
-    const rawToken =
-      (req.headers[TOKEN_HEADER] as string | undefined) ??
-      extractBearerToken(req.headers.authorization as string | undefined) ??
-      (req.query[TOKEN_QUERY_PARAM] as string | undefined);
-
-    if (!rawToken) {
-      res.status(401).json({
-        error: `Unauthorized: Missing ${TOKEN_HEADER} header or ${TOKEN_QUERY_PARAM} query parameter`,
-      });
-      return;
-    }
-
-    if (process.env.BYPASS_AUTH === "true") {
-      const bypassRole = req.headers["x-aegis-role"] as string | undefined;
-      if (isValidAegisRole(bypassRole)) {
-        req.zaruUser = {
-          userId:
-            (req.headers["x-zaru-user-id"] as string | undefined) ??
-            "bypass-user",
-          tier: bypassRole,
-          securityContext: OPERATOR_SECURITY_CONTEXT,
-          token: rawToken,
-          isOperator: true,
-        };
-      } else {
-        const tier = normalizeTier(
-          (req.headers["x-zaru-tier"] as string | undefined) ?? "free",
-        );
-        req.zaruUser = {
-          userId:
-            (req.headers["x-zaru-user-id"] as string | undefined) ??
-            "bypass-user",
-          tier,
-          securityContext: mapTierToSecurityContext(tier),
-          token: rawToken,
-          isOperator: false,
-        };
-      }
+    const result = await authenticateZaruRequest(
+      req.headers,
+      req.query,
+      verifier,
+      apiKeyValidator,
+    );
+    if ("user" in result) {
+      req.zaruUser = result.user;
       next();
       return;
     }
-
-    // API key authentication: tokens with `aegis_` prefix are API keys,
-    // validated against the orchestrator instead of Keycloak JWKS.
-    if (isApiKey(rawToken)) {
-      try {
-        const identity = await apiKeyValidator(rawToken);
-        const isOp =
-          identity.aegis_role === "admin" || identity.aegis_role === "operator";
-        const tier = identity.aegis_role ?? identity.zaru_tier ?? "free";
-        const secCtx = isOp
-          ? OPERATOR_SECURITY_CONTEXT
-          : `zaru-${identity.zaru_tier ?? "free"}`;
-        req.zaruUser = {
-          userId: identity.user_id,
-          tier,
-          securityContext: secCtx,
-          token: rawToken,
-          isOperator: isOp,
-          tenantId: identity.tenant_id ?? undefined,
-        };
-        next();
-      } catch (error) {
-        const message =
-          error instanceof Error ? error.message : "Invalid API key";
-        res.status(401).json({ error: message });
-      }
-      return;
-    }
-
-    // JWT authentication: validate via Keycloak JWKS
-    try {
-      const claims = await verifier(rawToken);
-
-      const jwtTenantId = claims.tenant_id ?? undefined;
-      const activeTenantHeader = req.headers["x-zaru-active-tenant"] as
-        | string
-        | undefined;
-
-      // Build the caller's allowed-tenant set from the verified JWT:
-      //   { personal tenant } ∪ team_memberships[]
-      // The active-tenant cookie is user-writable, so we must validate
-      // any value it carries against this server-trusted set. A missing
-      // header means "use my personal tenant" and is always permitted.
-      const allowedTenants = new Set<string>();
-      if (jwtTenantId) {
-        allowedTenants.add(jwtTenantId);
-      }
-      if (Array.isArray(claims.team_memberships)) {
-        for (const t of claims.team_memberships) {
-          if (typeof t === "string" && t.length > 0) {
-            allowedTenants.add(t);
-          }
-        }
-      }
-
-      let tenantId: string | undefined;
-      if (activeTenantHeader && activeTenantHeader.length > 0) {
-        if (!allowedTenants.has(activeTenantHeader)) {
-          res.status(403).json({
-            error:
-              "Forbidden: x-zaru-active-tenant is not a tenant the caller is a member of",
-          });
-          return;
-        }
-        tenantId = activeTenantHeader;
-      } else {
-        tenantId = jwtTenantId;
-      }
-
-      // Per ADR-073, operator privilege lives exclusively in the
-      // aegis-system realm. A consumer-realm JWT carrying `aegis_role` is
-      // either misconfigured Keycloak or a forgery attempt — drop the
-      // claim and treat the caller as a normal tier user. The orchestrator
-      // (keycloak_iam_service.rs) enforces the same invariant on the
-      // Rust side; this keeps the MCP middleware in line.
-      if (
-        isValidAegisRole(claims.aegis_role) &&
-        isSystemRealmIssuer(claims.iss)
-      ) {
-        req.zaruUser = {
-          userId: claims.sub,
-          tier: claims.aegis_role,
-          securityContext: OPERATOR_SECURITY_CONTEXT,
-          token: rawToken,
-          isOperator: true,
-          tenantId,
-        };
-      } else {
-        const tier = normalizeTier(claims.zaru_tier);
-        req.zaruUser = {
-          userId: claims.sub,
-          tier,
-          securityContext: mapTierToSecurityContext(tier),
-          token: rawToken,
-          isOperator: false,
-          tenantId,
-        };
-      }
-
-      next();
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Invalid token";
-      const status = message.startsWith("Unsupported zaru_tier") ? 403 : 401;
-      res.status(status).json({ error: message });
-    }
+    res.status(result.status).json({ error: result.error });
   };
 }
 

@@ -139,7 +139,7 @@ export class OrchestratorClient {
       options.toolDiscoveryUrl ??
       process.env.AEGIS_TOOL_DISCOVERY_URL ??
       resolveUrl(this.baseUrl, "/v1/seal/tools");
-    this.fetchImpl = options.fetchImpl ?? fetch;
+    this.fetchImpl = options.fetchImpl ?? ((input, init) => fetch(input, init));
     this.cacheTtlMs =
       options.cacheTtlMs ?? Number(process.env.AEGIS_TOOL_CACHE_TTL_MS ?? 5000);
   }

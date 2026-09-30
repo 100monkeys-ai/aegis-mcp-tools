@@ -11,10 +11,18 @@ import {
   handleStreamableHttpGet,
   handleStreamableHttpDelete,
 } from "./mcp/streamable-http.js";
+import { OrchestratorClient } from "./mcp/orchestrator-client.js";
 import {
-  InvalidExecutionIdError,
-  OrchestratorClient,
-} from "./mcp/orchestrator-client.js";
+  EXECUTION_STREAM_HEADERS,
+  EXECUTION_STREAM_ROUTE,
+  HEALTH_BODY,
+  HEALTH_PATH,
+  MCP_PATH,
+  NO_UPSTREAM_BODY_ERROR,
+  STREAM_TERMINATED_FRAME,
+  executionStreamFailure,
+  upstreamStatusFailure,
+} from "./http/routes.js";
 
 // The HTTP application, with every route and middleware, and no listener.
 // `index.ts` starts it; tests drive it on an ephemeral loopback port.
@@ -28,7 +36,7 @@ app.use(accessLogMiddleware);
 
 // SSE proxy for execution event streaming (Glass Laboratory)
 app.get(
-  "/proxy/v1/executions/:executionId/stream",
+  EXECUTION_STREAM_ROUTE,
   zaruAuthMiddleware,
   async (req: ZaruRequest, res) => {
     const { executionId } = req.params;
@@ -46,23 +54,21 @@ app.get(
       );
 
       if (!response.ok) {
-        res
-          .status(response.status)
-          .json({ error: `Orchestrator returned ${response.status}` });
+        const failure = upstreamStatusFailure(response.status);
+        res.status(failure.status).json({ error: failure.error });
         return;
       }
 
       // Set SSE headers
-      res.setHeader("Content-Type", "text/event-stream");
-      res.setHeader("Cache-Control", "no-cache, no-transform");
-      res.setHeader("Connection", "keep-alive");
-      res.setHeader("X-Accel-Buffering", "no");
+      for (const [name, value] of Object.entries(EXECUTION_STREAM_HEADERS)) {
+        res.setHeader(name, value);
+      }
       res.flushHeaders();
 
       // Pipe the response body from orchestrator to client
       const reader = response.body?.getReader();
       if (!reader) {
-        res.status(502).json({ error: "No response body from orchestrator" });
+        res.status(502).json({ error: NO_UPSTREAM_BODY_ERROR });
         return;
       }
 
@@ -82,9 +88,7 @@ app.get(
           }
         } catch {
           if (!clientDisconnected && !res.writableEnded) {
-            res.write(
-              `event: error\ndata: ${JSON.stringify({ message: "stream terminated" })}\n\n`,
-            );
+            res.write(STREAM_TERMINATED_FRAME);
           }
         } finally {
           if (!res.writableEnded) res.end();
@@ -93,26 +97,25 @@ app.get(
 
       pump();
     } catch (error) {
-      if (error instanceof InvalidExecutionIdError) {
-        res.status(400).json({ error: error.message });
-        return;
-      }
+      // An invalid id throws before any header is sent, so this answers
+      // 400 for it and 502 for a failed connection, as before.
       if (!res.headersSent) {
-        res.status(502).json({ error: "Failed to connect to orchestrator" });
+        const failure = executionStreamFailure(error);
+        res.status(failure.status).json({ error: failure.error });
       }
     }
   },
 );
 
 // StreamableHTTP transport (ADR-071 recommended)
-app.post("/mcp/v1", zaruAuthMiddleware, handleStreamableHttp);
-app.get("/mcp/v1", zaruAuthMiddleware, handleStreamableHttpGet);
-app.delete("/mcp/v1", zaruAuthMiddleware, handleStreamableHttpDelete);
+app.post(MCP_PATH, zaruAuthMiddleware, handleStreamableHttp);
+app.get(MCP_PATH, zaruAuthMiddleware, handleStreamableHttpGet);
+app.delete(MCP_PATH, zaruAuthMiddleware, handleStreamableHttpDelete);
 
 // Legacy SSE transport (backward compatibility)
 app.get("/mcp/v1/sse", zaruAuthMiddleware, handleSseConnection);
 app.post("/mcp/v1/messages", handleSseMessage);
 
-app.get("/health", (_req, res) => {
-  res.json({ status: "ok" });
+app.get(HEALTH_PATH, (_req, res) => {
+  res.json(HEALTH_BODY);
 });
