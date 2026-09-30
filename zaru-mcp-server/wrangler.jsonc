@@ -23,8 +23,10 @@
   "main": "src/worker.ts",
   "compatibility_date": "2026-09-29",
   // nodejs_compat: `node:crypto` Ed25519 for SEAL (src/mcp/seal.ts) and
-  // `process.env` filled from the vars below.
-  "compatibility_flags": ["nodejs_compat"],
+  // `process.env` filled from the vars below. global_fetch_strictly_public: a
+  // fetch() to another Worker (Zaru Web at ZARU_CLIENT_URL) reaches that Worker,
+  // not the zone's origin, as the Cloudflare compatibility-flags page documents.
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
   "workers_dev": true,
   "observability": { "enabled": true },
   // Beside the AEGIS services it calls, as Nuclear Notes places its Workers.
