@@ -334,6 +334,147 @@ export async function handleZaruMemorySet(
 }
 
 /**
+ * The header Zaru Web's MCP connection sends on every request it makes for
+ * a turn of the companion (`zaru-client` 60db5a3). A request carrying it is
+ * part of a turn, and `zaru.chat` is refused on it, so a turn can never start
+ * another turn (Zaru ADR-0049 D6).
+ */
+export const ZARU_TURN_HEADER = "x-zaru-turn";
+
+/**
+ * Whether a request carries `x-zaru-turn`, from the header's value as the
+ * entrypoint reads it: Express's `req.headers[...]` (absent is `undefined`)
+ * or the Fetch API's `headers.get(...)` (absent is `null`). Presence is what
+ * counts, whatever the value.
+ */
+export function carriesZaruTurn(
+  headerValue: string | string[] | null | undefined,
+): boolean {
+  return headerValue !== undefined && headerValue !== null;
+}
+
+/** The modes a turn may run in through `zaru.chat` (Zaru ADR-0049 D6). */
+export const ZARU_CHAT_MODES = ["chat", "agentic", "workflow", "execute"];
+
+/** The most characters `message` may hold (Zaru ADR-0049 D7). */
+export const ZARU_CHAT_MAX_MESSAGE_CHARS = 32768;
+
+/** The listing of `zaru.chat`, D1's input schema (Zaru ADR-0049). */
+export const ZARU_CHAT_TOOL = {
+  name: "zaru.chat",
+  description: `Run one turn of the Zaru companion on Zaru's own model, in one of your stored Zaru Web conversations, and return its answer. The turn is the same one the chat page at ask.myzaru.com runs: the companion's prompt, your memory, and the tools of the mode; the conversation is stored with your others, listed on the page and continued there or here.
+
+Send \`message\`. Pass \`conversation_id\` to continue a conversation begun on the page or by an earlier call; without it a new conversation is started and its id returned. Pass \`mode\` (chat, agentic, workflow or execute) to run the turn in that mode; without it the conversation's stored mode is used, or chat for a new one.
+
+One call runs one turn of at most five model calls, bounded so the call answers within the minute an MCP client waits: Zaru Web starts no model call after 40 seconds and ends the turn at 50 seconds with status "incomplete", everything done so far stored; send your next message in the same conversation to continue. A tool call that needs approval comes back with outcome "approval_pending" and its approval_id, for the person to answer on Zaru Web. A mode switch the companion asks for is returned as mode_switch_requested and not applied.
+
+Returns { conversation_id, status, answer, tool_calls, model, mode, mode_switch_requested?, usage? }. A refusal is an error whose text is { error, message }, the error one of unauthorized, conversation_not_found, conversation_archived, active_execution_exists, mode_not_available, inference_unavailable, turn_failed.`,
+  inputSchema: {
+    type: "object",
+    properties: {
+      message: {
+        type: "string",
+        minLength: 1,
+        maxLength: ZARU_CHAT_MAX_MESSAGE_CHARS,
+        description: "Your message for this turn.",
+      },
+      conversation_id: {
+        type: "string",
+        format: "uuid",
+        description:
+          "A conversation of yours to continue, begun on the page or through this tool. Absent: a new conversation is started.",
+      },
+      mode: {
+        type: "string",
+        enum: ZARU_CHAT_MODES,
+        description:
+          "The conversation mode of this turn. Absent: the conversation's stored mode, or chat for a new conversation. A different mode changes the conversation's mode.",
+      },
+    },
+    required: ["message"],
+  },
+};
+
+type ZaruChatResult = {
+  content: Array<{ type: string; text: string }>;
+  structuredContent?: Record<string, unknown>;
+  isError: boolean;
+};
+
+function zaruChatRefusal(refusal: {
+  error: string;
+  message: string;
+}): ZaruChatResult {
+  return {
+    content: [{ type: "text", text: JSON.stringify(refusal) }],
+    isError: true,
+  };
+}
+
+/**
+ * Dispatch `zaru.chat` (Zaru ADR-0049): one turn of the companion, run by
+ * Zaru Web's `POST /api/chat/turn` with the caller's own token. Answered
+ * here and never forwarded to the orchestrator.
+ *
+ * - On a request carrying `x-zaru-turn` (`inTurn`) the call is refused with
+ *   `mode_not_available` before any fetch: `zaru.chat` is in no mode's tools
+ *   (D6), and a turn must not start another.
+ * - Zaru Web's 2xx answer, D1's output object, is returned as one text item
+ *   and as `structuredContent`.
+ * - A refusal is returned as a tool error whose text is its `{ error,
+ *   message }`.
+ * - Zaru Web unreachable, or answering a 2xx that is not a JSON object, is a
+ *   tool error with `turn_failed`.
+ *
+ * Exported for unit testing.
+ */
+export async function handleZaruChat(
+  client: Pick<ZaruClient, "chat">,
+  user: ZaruUser,
+  args: unknown,
+  inTurn: boolean,
+): Promise<ZaruChatResult> {
+  if (inTurn) {
+    return zaruChatRefusal({
+      error: "mode_not_available",
+      message:
+        "zaru.chat is in no mode's tools: a turn of the companion cannot start another turn (the request carries x-zaru-turn).",
+    });
+  }
+
+  const a = (args as Record<string, unknown>) ?? {};
+  try {
+    const answer = await client.chat(user, {
+      message: a.message,
+      conversationId: a.conversation_id,
+      mode: a.mode,
+    });
+    if (!answer.ok) {
+      logWarn("zaru.chat.refused", {
+        upstream_status: answer.status,
+        code: answer.refusal.error,
+      });
+      return zaruChatRefusal(answer.refusal);
+    }
+    return {
+      content: [{ type: "text", text: JSON.stringify(answer.output) }],
+      structuredContent: answer.output,
+      isError: false,
+    };
+  } catch (error) {
+    logError("zaru.chat.failed", {
+      error: error instanceof Error ? error : { message: String(error) },
+    });
+    return zaruChatRefusal({
+      error: "turn_failed",
+      message: `Zaru Web could not run the turn: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    });
+  }
+}
+
+/**
  * Tool calls that may carry an `attachments` array per ADR-113. Only clients
  * that declare the "chat-uploads" capability are permitted to forward
  * attachments to these tools — defence-in-depth on top of the orchestrator and
@@ -459,16 +600,24 @@ export function parseCapabilitiesHeader(
   return out;
 }
 
+/** What a server learns from its request beyond the user and capabilities. */
+export interface McpRequestContext {
+  /** The request carries `x-zaru-turn` (see `carriesZaruTurn`). */
+  zaruTurn?: boolean;
+}
+
 /**
  * `client` is the orchestrator client the server's tools go through. The
  * Worker's entrypoint passes its own, built with the wait ceiling; the
- * container's Express routes use this module's, which has none.
+ * container's Express routes use this module's, which has none. `context`
+ * carries what each entrypoint reads from the request's headers.
  */
 export function createMcpServerForUser(
   user: ZaruUser,
   capabilities: ReadonlySet<string>,
   requestId?: string,
   client: OrchestratorClient = orchestratorClient,
+  context: McpRequestContext = {},
 ): McpServer {
   const mcpServer = new McpServer(
     {
@@ -647,6 +796,7 @@ Available modes:
             required: ["content", "version"],
           },
         },
+        ZARU_CHAT_TOOL,
       ],
     };
   });
@@ -776,6 +926,10 @@ Available modes:
       return handleZaruMemorySet(zaruClient, user, args);
     }
 
+    if (name === ZARU_CHAT_TOOL.name) {
+      return handleZaruChat(zaruClient, user, args, context.zaruTurn === true);
+    }
+
     // ADR-113 defence-in-depth: reject `attachments` from any client that has
     // not declared the "chat-uploads" capability via the X-Zaru-Capabilities
     // request header. The orchestrator and the Zaru web client also gate
@@ -845,7 +999,13 @@ export async function handleStreamableHttp(
     enableJsonResponse: true,
   });
 
-  const server = createMcpServerForUser(user, capabilities, req.requestId);
+  const server = createMcpServerForUser(
+    user,
+    capabilities,
+    req.requestId,
+    orchestratorClient,
+    { zaruTurn: carriesZaruTurn(req.headers[ZARU_TURN_HEADER]) },
+  );
   await server.connect(transport);
 
   res.on("close", () => {

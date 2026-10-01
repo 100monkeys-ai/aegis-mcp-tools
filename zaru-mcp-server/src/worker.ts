@@ -32,6 +32,8 @@ import {
   WAIT_CEILING_SECONDS,
 } from "./mcp/orchestrator-client.js";
 import {
+  ZARU_TURN_HEADER,
+  carriesZaruTurn,
   createMcpServerForUser,
   parseCapabilitiesHeader,
 } from "./mcp/streamable-http.js";
@@ -92,6 +94,7 @@ async function handleMcpPost(
     capabilities,
     requestId,
     orchestratorClient,
+    { zaruTurn: carriesZaruTurn(request.headers.get(ZARU_TURN_HEADER)) },
   );
   await server.connect(transport);
   try {
