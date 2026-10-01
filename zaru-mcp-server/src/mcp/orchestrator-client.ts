@@ -432,11 +432,12 @@ export class OrchestratorClient {
           // body-supplied tenant_id is tolerated-but-ignored by the
           // orchestrator for non-delegating callers (so deploy ordering of
           // the two repos does not matter).
+          // No container_id: the server is not a container on the
+          // orchestrator's runtime (it runs as a Cloudflare Worker, Zaru
+          // ADR-0045), and a container_id makes the orchestrator inspect that
+          // name and refuse. The caller's Bearer is the identity;
+          // workload_id carries the audit correlation.
           public_key: keyPair.publicKeyRaw.toString("base64"),
-          container_id:
-            process.env.CONTAINER_ID ??
-            process.env.HOSTNAME ??
-            "zaru-mcp-server",
         }),
       },
     );

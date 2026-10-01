@@ -22,8 +22,6 @@ export interface Env {
   JWKS_URI: string;
   EXPECTED_AUDIENCE: string;
   LOG_LEVEL: string;
-  /** Sent to the orchestrator as the SEAL attestation's `container_id`. */
-  CONTAINER_ID: string;
 
   // Optional, read when set; none is set by the pod today.
   KEYCLOAK_SYSTEM_ISSUER?: string;

@@ -43,8 +43,7 @@
         "ZARU_CLIENT_URL": "https://ask.myzaru.com",
         "JWKS_URI": "https://auth.myzaru.com/realms/zaru-consumer/protocol/openid-connect/certs",
         "EXPECTED_AUDIENCE": "zaru-client",
-        "LOG_LEVEL": "info",
-        "CONTAINER_ID": "zaru-mcp-server-staging"
+        "LOG_LEVEL": "info"
       }
     },
     "production": {
@@ -56,8 +55,7 @@
         "ZARU_CLIENT_URL": "https://ask.myzaru.com",
         "JWKS_URI": "https://auth.myzaru.com/realms/zaru-consumer/protocol/openid-connect/certs",
         "EXPECTED_AUDIENCE": "zaru-client",
-        "LOG_LEVEL": "info",
-        "CONTAINER_ID": "zaru-mcp-server-production"
+        "LOG_LEVEL": "info"
       }
     }
   }

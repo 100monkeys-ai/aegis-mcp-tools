@@ -211,6 +211,9 @@ test("invokeTool attests and sends a spec-shaped SEAL envelope", async () => {
   assert.equal(calls[0]?.body?.zaru_tier, "enterprise");
   assert.equal(calls[0]?.body?.agent_id, undefined);
   assert.equal(calls[0]?.body?.execution_id, undefined);
+  // A Worker has no container on the orchestrator's runtime: sending a
+  // container_id makes the orchestrator inspect it and refuse (401).
+  assert.equal(calls[0]?.body?.container_id, undefined);
   assert.equal(typeof calls[0]?.body?.public_key, "string");
   assert.equal(calls[1]?.url, "http://aegis.test/v1/seal/invoke");
   assert.equal(calls[1]?.body?.protocol, "seal/v1");

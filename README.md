@@ -96,7 +96,6 @@ npm test        # run test suite
 | `AEGIS_TOOL_DISCOVERY_URL` | _(auto)_ | Tool discovery override |
 | `AEGIS_TOOL_CACHE_TTL_MS` | `5000` | Tool list cache TTL (ms) |
 | `BYPASS_AUTH` | _(unset)_ | `true` to skip auth (dev) |
-| `CONTAINER_ID` | `$HOSTNAME` | SEAL attestation identifier |
 | `ZARU_CLIENT_URL` | `http://zaru-client:3000` | URL by which zaru-mcp-server reaches zaru-client over the in-pod network for Zaru User Memory read/write |
 
 `JWKS_URI` defaults to
@@ -138,7 +137,6 @@ Worker cannot resolve pod names:
 | `JWKS_URI` | `https://auth.myzaru.com/realms/zaru-consumer/protocol/openid-connect/certs` |
 | `EXPECTED_AUDIENCE` | `zaru-client` |
 | `LOG_LEVEL` | `info` |
-| `CONTAINER_ID` | `zaru-mcp-server-<environment>` |
 
 The server reads no secret. A secret added later is put with
 `npx wrangler secret put <NAME> --env <environment>` and never committed.
