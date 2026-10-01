@@ -583,8 +583,9 @@ test("session cache uses separate entries for same userId with different tenantI
 });
 
 // The wait ceiling (Zaru ADR-0045; AEGIS known-defects-4). The Worker's
-// behaviour in the Workers runtime is test/wait-ceiling.worker.test.ts; these
-// pin the client's rule and that it is off outside that runtime.
+// entrypoint passes it (src/worker.ts), proved in the Workers runtime by
+// test/wait-ceiling.worker.test.ts; these pin the client's rule and that a
+// client built without the option applies none.
 
 const waitUser = {
   userId: "user-wait",
@@ -657,7 +658,7 @@ test("wait ceiling: the Worker's ceiling is 45 seconds", () => {
   assert.equal(WAIT_CEILING_SECONDS, 45);
 });
 
-test("wait ceiling: outside the Workers runtime no ceiling applies, so the container's entrypoints keep the orchestrator's wait", async () => {
+test("wait ceiling: a client built without waitCeilingSeconds applies none, so the container's entrypoints keep the orchestrator's wait", async () => {
   const { client, forwarded } = waitClient(stillRunning);
   const result = await client.invokeTool(
     waitUser,

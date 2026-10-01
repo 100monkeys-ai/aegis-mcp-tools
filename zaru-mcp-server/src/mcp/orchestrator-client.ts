@@ -29,10 +29,10 @@ export interface OrchestratorClientOptions {
   cacheTtlMs?: number;
   /**
    * The longest, in seconds, one call of a wait tool (a name ending in
-   * ".wait") asks the orchestrator to block. `null` sets no ceiling. Left
-   * out, it is WAIT_CEILING_SECONDS on the Workers runtime and none
-   * elsewhere, so the container's Express and SSE entrypoints keep the
-   * orchestrator's own wait.
+   * ".wait") asks the orchestrator to block. Left out, there is no ceiling.
+   * The Worker's entrypoint (src/worker.ts) passes WAIT_CEILING_SECONDS and
+   * nothing else does, so the container's Express and SSE entrypoints keep
+   * the orchestrator's own wait.
    */
   waitCeilingSeconds?: number | null;
 }
@@ -49,13 +49,6 @@ export const WAIT_CEILING_SECONDS = 45;
 
 export function isWaitTool(name: string): boolean {
   return name.endsWith(".wait");
-}
-
-/** True in the Cloudflare Workers runtime, by its documented user agent. */
-function onWorkersRuntime(): boolean {
-  const nav = (globalThis as { navigator?: { userAgent?: unknown } })
-    .navigator;
-  return nav?.userAgent === "Cloudflare-Workers";
 }
 
 /**
@@ -253,12 +246,7 @@ export class OrchestratorClient {
   private readonly waitCeilingSeconds: number | null;
 
   constructor(options: OrchestratorClientOptions = {}) {
-    this.waitCeilingSeconds =
-      options.waitCeilingSeconds !== undefined
-        ? options.waitCeilingSeconds
-        : onWorkersRuntime()
-          ? WAIT_CEILING_SECONDS
-          : null;
+    this.waitCeilingSeconds = options.waitCeilingSeconds ?? null;
     this.baseUrl = normalizeBaseUrl(
       options.baseUrl ??
         process.env.AEGIS_ORCHESTRATOR_URL ??

@@ -27,15 +27,23 @@ import {
   type ZaruRequestHeaders,
   type ZaruUser,
 } from "./middleware/auth.js";
-import { OrchestratorClient } from "./mcp/orchestrator-client.js";
+import {
+  OrchestratorClient,
+  WAIT_CEILING_SECONDS,
+} from "./mcp/orchestrator-client.js";
 import {
   createMcpServerForUser,
   parseCapabilitiesHeader,
 } from "./mcp/streamable-http.js";
 
 // Per isolate, as the container's is per process: its caches are the SEAL
-// sessions and a tool list with a 5 s time to live.
-const orchestratorClient = new OrchestratorClient();
+// sessions and a tool list with a 5 s time to live. The wait ceiling is set
+// here and nowhere else: an MCP client gives up on a tool call after about a
+// minute, so a tool whose name ends in ".wait" waits at most
+// WAIT_CEILING_SECONDS per call on the Worker (AEGIS known-defects-4).
+const orchestratorClient = new OrchestratorClient({
+  waitCeilingSeconds: WAIT_CEILING_SECONDS,
+});
 
 const CORS_ALLOW_METHODS = "GET,HEAD,PUT,PATCH,POST,DELETE";
 
@@ -79,7 +87,12 @@ async function handleMcpPost(
     sessionIdGenerator: undefined,
     enableJsonResponse: true,
   });
-  const server = createMcpServerForUser(user, capabilities, requestId);
+  const server = createMcpServerForUser(
+    user,
+    capabilities,
+    requestId,
+    orchestratorClient,
+  );
   await server.connect(transport);
   try {
     return await transport.handleRequest(request);

@@ -459,10 +459,16 @@ export function parseCapabilitiesHeader(
   return out;
 }
 
+/**
+ * `client` is the orchestrator client the server's tools go through. The
+ * Worker's entrypoint passes its own, built with the wait ceiling; the
+ * container's Express routes use this module's, which has none.
+ */
 export function createMcpServerForUser(
   user: ZaruUser,
   capabilities: ReadonlySet<string>,
   requestId?: string,
+  client: OrchestratorClient = orchestratorClient,
 ): McpServer {
   const mcpServer = new McpServer(
     {
@@ -480,7 +486,7 @@ export function createMcpServerForUser(
   );
 
   mcpServer.server.setRequestHandler(ListToolsRequestSchema, async () => {
-    const tools = await orchestratorClient.listTools(user);
+    const tools = await client.listTools(user);
     // Per-caller mode enum: filter the advertised modes so the schema only
     // exposes options the caller can actually invoke. The same set is
     // mirrored by the dispatch-time gate in `getZaruInit`.
@@ -754,7 +760,7 @@ Available modes:
 
     if (name === "zaru.script.save" || name === "zaru.script.run") {
       return handleZaruScriptTool(
-        orchestratorClient,
+        client,
         user,
         name,
         args,
@@ -791,7 +797,7 @@ Available modes:
     }
 
     try {
-      const result = await orchestratorClient.invokeTool(
+      const result = await client.invokeTool(
         user,
         name,
         (args as Record<string, unknown>) ?? {},
