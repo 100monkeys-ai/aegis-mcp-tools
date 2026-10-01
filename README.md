@@ -122,6 +122,15 @@ The legacy SSE transport (`/mcp/v1/sse`, `/mcp/v1/messages`) is not served on
 Workers: its sessions live in one process's memory, and a Worker's requests can
 land in different isolates.
 
+The waiting tools (every tool whose name ends in `.wait`, such as
+`aegis.task.wait` and `aegis.workflow.wait`) wait at most 45 seconds per call
+on the Worker, whatever `timeout_seconds` asks, because an MCP client gives up
+on a tool call after about a minute; a smaller `timeout_seconds` is honoured.
+An execution still running at that bound comes back as an ordinary tool result
+with `still_running: true`, its status, its iteration count or state, the
+seconds waited, and the sentence that repeating the same call continues the
+wait. The container's entrypoints keep the orchestrator's own wait.
+
 `wrangler.jsonc` declares two environments on workers.dev, `staging` and
 `production` (Workers `zaru-mcp-server-staging` and
 `zaru-mcp-server-production`), with `nodejs_compat` (SEAL signs with

@@ -27,6 +27,128 @@ export interface OrchestratorClientOptions {
   toolDiscoveryUrl?: string;
   fetchImpl?: FetchLike;
   cacheTtlMs?: number;
+  /**
+   * The longest, in seconds, one call of a wait tool (a name ending in
+   * ".wait") asks the orchestrator to block. `null` sets no ceiling. Left
+   * out, it is WAIT_CEILING_SECONDS on the Workers runtime and none
+   * elsewhere, so the container's Express and SSE entrypoints keep the
+   * orchestrator's own wait.
+   */
+  waitCeilingSeconds?: number | null;
+}
+
+/**
+ * The wait ceiling on the Worker. An MCP client gives up on a tool call after
+ * about a minute (Claude Code's ended a 240-second `aegis.task.wait` as "The
+ * operation timed out" in under 75 seconds while 40-, 45- and 50-second calls
+ * answered; AEGIS known-defects-4), and the orchestrator's waits block for up
+ * to their own defaults of 300 seconds or more. 45 seconds answers inside
+ * that limit; a caller continues by repeating the call.
+ */
+export const WAIT_CEILING_SECONDS = 45;
+
+export function isWaitTool(name: string): boolean {
+  return name.endsWith(".wait");
+}
+
+/** True in the Cloudflare Workers runtime, by its documented user agent. */
+function onWorkersRuntime(): boolean {
+  const nav = (globalThis as { navigator?: { userAgent?: unknown } })
+    .navigator;
+  return nav?.userAgent === "Cloudflare-Workers";
+}
+
+/**
+ * The arguments a wait tool's call is forwarded with under `ceiling`, and the
+ * seconds the orchestrator is asked to wait. A `timeout_seconds` the
+ * orchestrator would read (a whole number, `as_u64`) at or under the ceiling
+ * is honoured; anything else, absent included, becomes the ceiling, since the
+ * orchestrator would otherwise wait its own default.
+ */
+export function boundWaitArguments(
+  args: Record<string, unknown>,
+  ceiling: number,
+): { args: Record<string, unknown>; waitSeconds: number } {
+  const requested = args.timeout_seconds;
+  if (
+    typeof requested === "number" &&
+    Number.isInteger(requested) &&
+    requested >= 0 &&
+    requested <= ceiling
+  ) {
+    return { args, waitSeconds: requested };
+  }
+  return { args: { ...args, timeout_seconds: ceiling }, waitSeconds: ceiling };
+}
+
+/** The orchestrator's wait answer as an object, from either form it takes. */
+function readWaitAnswer(result: unknown): Record<string, unknown> | null {
+  if (!result || typeof result !== "object") return null;
+  const record = result as Record<string, unknown>;
+  if (!Array.isArray(record.content)) return record;
+  const first = record.content[0] as { type?: unknown; text?: unknown };
+  if (record.content.length !== 1 || first?.type !== "text") return null;
+  if (typeof first.text !== "string") return null;
+  const parsed = tryParseJson(first.text);
+  return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+    ? (parsed as Record<string, unknown>)
+    : null;
+}
+
+/**
+ * When the orchestrator's wait ended at its timeout with the execution still
+ * running, the tool result that says so and how to continue; otherwise null,
+ * and the orchestrator's result goes back unchanged.
+ */
+export function stillRunningResult(
+  toolName: string,
+  result: unknown,
+  waitSeconds: number,
+): unknown | null {
+  const answer = readWaitAnswer(result);
+  if (!answer || answer.timed_out !== true) return null;
+  const executionId = answer.execution_id;
+  const status = typeof answer.status === "string" ? answer.status : "running";
+  const progress =
+    typeof answer.iteration_count === "number"
+      ? `, iteration count ${answer.iteration_count}`
+      : typeof answer.current_state === "string"
+        ? `, in state ${answer.current_state}`
+        : "";
+  const body: Record<string, unknown> = {
+    tool: toolName,
+    execution_id: executionId,
+    status,
+    ...(answer.iteration_count !== undefined
+      ? { iteration_count: answer.iteration_count }
+      : {}),
+    ...(answer.current_state !== undefined
+      ? { current_state: answer.current_state }
+      : {}),
+    still_running: true,
+    timed_out: true,
+    waited_seconds: waitSeconds,
+    message:
+      `Execution ${String(executionId)} is still ${status} after ${waitSeconds}s${progress}. ` +
+      `Repeat this same ${toolName} call to continue waiting.`,
+  };
+  return {
+    content: [{ type: "text", text: JSON.stringify(body, null, 2) }],
+    isError: false,
+  };
+}
+
+function describeWaitCeiling(
+  tool: AegisToolDefinition,
+  ceiling: number,
+): AegisToolDefinition {
+  const sentence =
+    `On this server one call waits at most ${ceiling} seconds, whatever timeout_seconds asks: ` +
+    `if the execution is still running then, the result says so, and repeating the same call continues the wait.`;
+  return {
+    ...tool,
+    description: tool.description ? `${tool.description} ${sentence}` : sentence,
+  };
 }
 
 function normalizeBaseUrl(url: string): string {
@@ -128,8 +250,15 @@ export class OrchestratorClient {
   private readonly cacheTtlMs: number;
   private readonly sessionCache = new Map<string, ZaruSealSession>();
   private readonly toolCache = new Map<string, ToolDiscoveryCacheEntry>();
+  private readonly waitCeilingSeconds: number | null;
 
   constructor(options: OrchestratorClientOptions = {}) {
+    this.waitCeilingSeconds =
+      options.waitCeilingSeconds !== undefined
+        ? options.waitCeilingSeconds
+        : onWorkersRuntime()
+          ? WAIT_CEILING_SECONDS
+          : null;
     this.baseUrl = normalizeBaseUrl(
       options.baseUrl ??
         process.env.AEGIS_ORCHESTRATOR_URL ??
@@ -145,6 +274,15 @@ export class OrchestratorClient {
   }
 
   async listTools(user: ZaruUser): Promise<AegisToolDefinition[]> {
+    const tools = await this.discoverTools(user);
+    const ceiling = this.waitCeilingSeconds;
+    if (ceiling === null) return tools;
+    return tools.map((tool) =>
+      isWaitTool(tool.name) ? describeWaitCeiling(tool, ceiling) : tool,
+    );
+  }
+
+  private async discoverTools(user: ZaruUser): Promise<AegisToolDefinition[]> {
     const cacheKey = user.securityContext;
     const cached = this.toolCache.get(cacheKey);
     const now = Date.now();
@@ -232,16 +370,25 @@ export class OrchestratorClient {
     }
     logInfo("tool.invoke.start", baseFields);
 
+    const ceiling = this.waitCeilingSeconds;
+    const bounded =
+      ceiling !== null && isWaitTool(name)
+        ? boundWaitArguments(args, ceiling)
+        : null;
+
     try {
-      const result = await this.invokeJsonRpc(user, {
+      const upstream = await this.invokeJsonRpc(user, {
         jsonrpc: "2.0",
         id,
         method: "tools/call",
         params: {
           name,
-          arguments: args,
+          arguments: bounded ? bounded.args : args,
         },
       });
+      const result = bounded
+        ? (stillRunningResult(name, upstream, bounded.waitSeconds) ?? upstream)
+        : upstream;
       const duration_ms = Number(
         (process.hrtime.bigint() - start) / 1_000_000n,
       );

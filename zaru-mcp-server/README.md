@@ -155,6 +155,13 @@ seconds:
 {"payload":{...},"security_token":"<JWT>","timestamp":1711024496}
 ```
 
+On the Cloudflare Worker, a waiting tool (a name ending in `.wait`) is
+forwarded with `timeout_seconds` of at most 45, whatever the caller sent; a
+smaller value is honoured. If the execution is still running at that bound,
+the result says so (`still_running: true`, status, iteration count or state,
+`waited_seconds`) and that repeating the same call continues the wait. The
+container keeps the orchestrator's own wait.
+
 ### Tool Discovery
 
 ```text

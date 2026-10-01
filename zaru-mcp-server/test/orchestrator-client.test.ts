@@ -4,6 +4,7 @@ import {
   InvalidExecutionIdError,
   OrchestratorClient,
   OrchestratorInvokeError,
+  WAIT_CEILING_SECONDS,
 } from "../src/mcp/orchestrator-client.js";
 
 function jsonResponse(payload: unknown, status = 200): Response {
@@ -579,4 +580,167 @@ test("session cache uses separate entries for same userId with different tenantI
     2,
     "should attest twice: once per distinct tenantId, personal reuses cache",
   );
+});
+
+// The wait ceiling (Zaru ADR-0045; AEGIS known-defects-4). The Worker's
+// behaviour in the Workers runtime is test/wait-ceiling.worker.test.ts; these
+// pin the client's rule and that it is off outside that runtime.
+
+const waitUser = {
+  userId: "user-wait",
+  tier: "pro",
+  securityContext: "zaru-pro",
+  token: "jwt",
+  isOperator: false,
+};
+
+/** A client whose orchestrator records each tools/call's arguments and
+ *  answers with `answer(name, args)`. */
+function waitClient(
+  answer: (name: string, args: Record<string, unknown>) => unknown,
+  waitCeilingSeconds?: number | null,
+) {
+  const forwarded: Array<Record<string, unknown>> = [];
+  const client = new OrchestratorClient({
+    baseUrl: "http://aegis.test",
+    toolDiscoveryUrl: "http://aegis.test/v1/seal/tools",
+    ...(waitCeilingSeconds !== undefined ? { waitCeilingSeconds } : {}),
+    fetchImpl: async (input, init) => {
+      const url = String(input);
+      if (url.endsWith("/v1/seal/attest")) {
+        return jsonResponse({ security_token: "issued-token" });
+      }
+      if (url.endsWith("/v1/seal/tools")) {
+        return jsonResponse({
+          tools: [
+            { name: "aegis.task.wait", description: "Waits.", inputSchema: { type: "object" } },
+            { name: "aegis.task.status", description: "Status.", inputSchema: { type: "object" } },
+          ],
+        });
+      }
+      const envelope = JSON.parse(String(init?.body)) as {
+        payload: { params: { name: string; arguments: Record<string, unknown> } };
+      };
+      forwarded.push(envelope.payload.params.arguments);
+      return jsonResponse({
+        jsonrpc: "2.0",
+        id: null,
+        result: answer(envelope.payload.params.name, envelope.payload.params.arguments),
+      });
+    },
+  });
+  return { client, forwarded };
+}
+
+const RUNNING = "3c1d7a52-9e0b-4f6a-8d21-5b7e9f0c2a14";
+
+function stillRunning(_name: string, args: Record<string, unknown>) {
+  return {
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify({
+          tool: "aegis.task.wait",
+          execution_id: args.execution_id,
+          status: "running",
+          timed_out: true,
+          message: `Execution still running after ${String(args.timeout_seconds)}s timeout`,
+          iteration_count: 3,
+        }),
+      },
+    ],
+    isError: false,
+  };
+}
+
+test("wait ceiling: the Worker's ceiling is 45 seconds", () => {
+  assert.equal(WAIT_CEILING_SECONDS, 45);
+});
+
+test("wait ceiling: outside the Workers runtime no ceiling applies, so the container's entrypoints keep the orchestrator's wait", async () => {
+  const { client, forwarded } = waitClient(stillRunning);
+  const result = await client.invokeTool(
+    waitUser,
+    "aegis.task.wait",
+    { execution_id: RUNNING, timeout_seconds: 300 },
+    null,
+  );
+  assert.deepEqual(forwarded, [{ execution_id: RUNNING, timeout_seconds: 300 }]);
+  assert.deepEqual(result, stillRunning("aegis.task.wait", forwarded[0]!));
+  const tools = await client.listTools(waitUser);
+  assert.equal(tools[0]?.description, "Waits.");
+});
+
+test("wait ceiling: timeout_seconds above the ceiling, absent, or not a whole number is asked for as the ceiling; at or under it, as sent", async () => {
+  const { client, forwarded } = waitClient(stillRunning, 45);
+  const cases: Array<[Record<string, unknown>, number]> = [
+    [{ execution_id: RUNNING, timeout_seconds: 300 }, 45],
+    [{ execution_id: RUNNING }, 45],
+    [{ execution_id: RUNNING, timeout_seconds: 10.5 }, 45],
+    [{ execution_id: RUNNING, timeout_seconds: "30" }, 45],
+    [{ execution_id: RUNNING, timeout_seconds: 45 }, 45],
+    [{ execution_id: RUNNING, timeout_seconds: 10 }, 10],
+  ];
+  for (const [args] of cases) {
+    await client.invokeTool(waitUser, "aegis.task.wait", args, null);
+  }
+  assert.deepEqual(
+    forwarded.map((a) => a.timeout_seconds),
+    cases.map(([, expected]) => expected),
+  );
+});
+
+test("wait ceiling: a wait still running at the bound answers a tool result that says so and how to continue", async () => {
+  const { client } = waitClient(stillRunning, 45);
+  const result = (await client.invokeTool(
+    waitUser,
+    "aegis.task.wait",
+    { execution_id: RUNNING, timeout_seconds: 300 },
+    null,
+  )) as { content: Array<{ text: string }>; isError: boolean };
+  assert.equal(result.isError, false);
+  const answer = JSON.parse(result.content[0]!.text);
+  assert.deepEqual(answer, {
+    tool: "aegis.task.wait",
+    execution_id: RUNNING,
+    status: "running",
+    iteration_count: 3,
+    still_running: true,
+    timed_out: true,
+    waited_seconds: 45,
+    message: `Execution ${RUNNING} is still running after 45s, iteration count 3. Repeat this same aegis.task.wait call to continue waiting.`,
+  });
+});
+
+test("wait ceiling: a finished execution's result comes back as the orchestrator sent it", async () => {
+  const finished = {
+    tool: "aegis.task.wait",
+    execution_id: RUNNING,
+    status: "completed",
+    iteration_count: 1,
+    last_output: "done",
+  };
+  const { client } = waitClient(() => finished, 45);
+  const result = await client.invokeTool(
+    waitUser,
+    "aegis.task.wait",
+    { execution_id: RUNNING, timeout_seconds: 300 },
+    null,
+  );
+  assert.deepEqual(result, finished);
+});
+
+test("wait ceiling: a tool whose name does not end in .wait is forwarded untouched", async () => {
+  const { client, forwarded } = waitClient(() => ({ timed_out: true }), 45);
+  const args = { execution_id: RUNNING, timeout_seconds: 300 };
+  const result = await client.invokeTool(waitUser, "aegis.task.status", args, null);
+  assert.deepEqual(forwarded, [args]);
+  assert.deepEqual(result, { timed_out: true });
+});
+
+test("wait ceiling: the wait tools' descriptions name the ceiling, and no other tool's changes", async () => {
+  const { client } = waitClient(() => null, 45);
+  const tools = await client.listTools(waitUser);
+  assert.match(tools[0]?.description ?? "", /^Waits\. On this server one call waits at most 45 seconds/);
+  assert.equal(tools[1]?.description, "Status.");
 });
