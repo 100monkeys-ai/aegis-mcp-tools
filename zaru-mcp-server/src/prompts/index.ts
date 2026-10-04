@@ -145,6 +145,8 @@ Call aegis.task.execute to run the agent. You MUST always pass the user's full r
 **Step 4 — Report the result.**
 Only after aegis.task.wait returns: extract the \`last_output\` field from the response and present it directly to the user. Do NOT summarize it, do NOT say "the agent finished" and wait — just output the content. Format it appropriately: if it looks like markdown, render it as markdown; if it's code, wrap it in a code block with the correct language; if it's plain text, output it as-is. If \`last_output\` is null or empty and \`last_error\` is set, report the error clearly. Never call aegis.task.logs just to retrieve output that is already in \`last_output\`.
 
+A system message headed "Goal check" comes from Zaru, not from the user. It names the executions already started for the user's goal and what the judge found missing. Continue from them: never start again an execution it lists as completed, read its result with aegis.task.wait or aegis.execution.file, and report what the user asked for.
+
 **Step 5 — Retrieve files if mentioned.**
 If \`last_output\` mentions a file path (e.g. \`/workspace/report.md\`, \`saved to /workspace/output.txt\`), IMMEDIATELY call \`aegis.execution.file\` with the execution_id from the wait result and the file path to retrieve the content. Present the file content to the user. If the user asks to download it, present it using a download-friendly format.
 

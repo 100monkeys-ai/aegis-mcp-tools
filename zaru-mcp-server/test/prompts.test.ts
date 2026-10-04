@@ -328,3 +328,74 @@ test("chat-uploads teaching contains NO concrete MIME strings or example counts 
     );
   }
 });
+
+// ---------------------------------------------------------------------------
+// Goals (Zaru ADR-0049 — Updates, the Update of 2026-10-04, G8; AEGIS
+// ADR-131 D2): the agentic prompt gains one paragraph after "Step 4 — Report
+// the result.", telling the model that a "Goal check" system message comes
+// from Zaru. No other mode's prompt changes, and no mode's tool list offers
+// a goal tool: goals are created and evaluated by Zaru Web's turn, never by
+// the model.
+// ---------------------------------------------------------------------------
+
+/** G8's paragraph, verbatim from the record. */
+const GOAL_CHECK_PARAGRAPH =
+  'A system message headed "Goal check" comes from Zaru, not from the user. It names the executions already started for the user\'s goal and what the judge found missing. Continue from them: never start again an execution it lists as completed, read its result with aegis.task.wait or aegis.execution.file, and report what the user asked for.';
+
+const ALL_MODES: Array<[string, ReturnType<typeof getZaruInit>]> = [
+  ["chat", getZaruInit("chat")],
+  ["agentic", getZaruInit("agentic")],
+  ["workflow", getZaruInit("workflow")],
+  ["execute", getZaruInit("execute")],
+  ["live", getZaruInit("live", new Set(["live"]), "browser")],
+  ["vibecode", getZaruInit("vibecode", new Set(["vibecode"]), "browser")],
+  ["operator", getZaruInit("operator", new Set(), undefined, { isOperator: true, tier: "operator" })],
+];
+
+test("G8: the agentic prompt holds the Goal check paragraph verbatim, after Step 4's text and before Step 5", () => {
+  for (const caps of [new Set<string>(), new Set(["chat-uploads"])]) {
+    const prompt = getZaruInit("agentic", caps)!.system_prompt;
+    const step4 = prompt.indexOf("**Step 4 — Report the result.**");
+    const at = prompt.indexOf(GOAL_CHECK_PARAGRAPH);
+    const step5 = prompt.indexOf("**Step 5 — Retrieve files if mentioned.**");
+    assert.ok(step4 >= 0 && step5 > step4, "the agentic prompt has Step 4 then Step 5");
+    assert.ok(at > step4, "the Goal check paragraph is in the agentic prompt, after Step 4");
+    assert.ok(at < step5, "the Goal check paragraph comes before Step 5");
+    // Step 4's own text ends, then a blank line, then the paragraph, then a
+    // blank line, then Step 5: the paragraph stands on its own.
+    assert.equal(
+      prompt.slice(at - 2, at + GOAL_CHECK_PARAGRAPH.length + 2),
+      `\n\n${GOAL_CHECK_PARAGRAPH}\n\n`,
+    );
+    assert.equal(prompt.split(GOAL_CHECK_PARAGRAPH).length, 2, "the paragraph appears once");
+    assert.ok(
+      prompt.slice(step4, at).includes("Never call aegis.task.logs just to retrieve output that is already in `last_output`."),
+      "Step 4's text is whole before the paragraph",
+    );
+  }
+});
+
+test("G8: no other mode's prompt holds the Goal check paragraph or the words Goal check", () => {
+  for (const [mode, init] of ALL_MODES) {
+    assert.ok(init, `getZaruInit('${mode}') answers`);
+    if (mode === "agentic") continue;
+    assert.ok(!init.system_prompt.includes("Goal check"), `'${mode}' prompt must not mention Goal check`);
+  }
+});
+
+test("G8: the paragraph names no tool outside the agentic mode's tool list", () => {
+  const agentic = getZaruInit("agentic")!;
+  const named = GOAL_CHECK_PARAGRAPH.match(/\b(?:aegis|zaru)(?:\.[a-z_]+)+/g) ?? [];
+  assert.deepEqual(named, ["aegis.task.wait", "aegis.execution.file"]);
+  for (const tool of named) {
+    assert.ok(agentic.available_tools.includes(tool), `${tool} is in the agentic tool list`);
+  }
+  assert.ok(!/aegis\.goal\./.test(GOAL_CHECK_PARAGRAPH), "the paragraph names no goal tool");
+});
+
+test("AEGIS ADR-131 D2 / G2: no mode's tool list offers a goal tool", () => {
+  for (const [mode, init] of ALL_MODES) {
+    const goalTools = init!.available_tools.filter((t) => t.startsWith("aegis.goal."));
+    assert.deepEqual(goalTools, [], `'${mode}' must not list a goal tool`);
+  }
+});
