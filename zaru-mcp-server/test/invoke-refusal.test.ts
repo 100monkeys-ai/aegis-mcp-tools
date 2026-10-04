@@ -440,3 +440,73 @@ test("zaru.script.run: a refused aegis.script.list is returned as the refusal, n
     request_id: REQUEST_ID,
   });
 });
+
+// ── The attest and discovery routes (q2) ──────────────────────────────────
+//
+// At aegis-orchestrator 0c60875b neither route answers in ADR-035's shape:
+// attest answers {"error": <text>} (cli/src/daemon/handlers/seal.rs 490-497,
+// 552-560), discovery 500 {"error": <text>} (703-708), and the text can hold
+// a repository's error. The server tells neither as text.
+
+const REPOSITORY_LEAK = {
+  error:
+    "Security context 'zaru-free' not found: error returned from database: relation \"security_contexts\" does not exist; volume /aegis/volumes/0b6c/workspace",
+};
+
+test("attest: a failed attestation is a tool result with the generic failure, none of the route's text", async () => {
+  for (const [status, body] of [
+    [401, REPOSITORY_LEAK],
+    [500, "Database error: connection refused at /var/lib/aegis/volumes/1"],
+  ] as const) {
+    const client = new OrchestratorClient({
+      baseUrl: "http://aegis.test",
+      fetchImpl: async (input) => {
+        if (String(input).endsWith("/v1/seal/attest")) {
+          return new Response(
+            typeof body === "string" ? body : JSON.stringify(body),
+            { status },
+          );
+        }
+        throw new Error("no invoke is expected without a session");
+      },
+    });
+    const { value, logs } = await withLogs(() =>
+      client.invokeTool(USER, "aegis.task.list", {}, 7),
+    );
+    const result = value as ToolResult;
+    assert.equal(result.isError, true);
+    const text = result.content[0]!.text;
+    assert.deepEqual(JSON.parse(text), {
+      error: {
+        code: "invoke_failed",
+        message: `AEGIS attestation failed: ${status}`,
+      },
+    });
+    assert.doesNotMatch(text, /database|Database|volumes|security_contexts/);
+    const end = endLog(logs);
+    assert.equal(end.level, "error");
+    assert.equal(end.upstream_route, "attest");
+    assert.deepEqual(end.upstream_body, body);
+  }
+});
+
+test("discovery: a failed tool discovery throws the generic failure, none of the route's text", async () => {
+  const client = new OrchestratorClient({
+    baseUrl: "http://aegis.test",
+    fetchImpl: async () =>
+      new Response(JSON.stringify(REPOSITORY_LEAK), { status: 500 }),
+  });
+  const { logs } = await withLogs(async () => {
+    await assert.rejects(
+      () => client.listTools(USER),
+      (err: Error) => {
+        assert.equal(err.message, "AEGIS tool discovery failed: 500");
+        return true;
+      },
+    );
+  });
+  const failed = logs.filter((l) => l.event === "tool.discovery.failed");
+  assert.equal(failed.length, 1);
+  assert.equal(failed[0]!.level, "error");
+  assert.deepEqual(failed[0]!.upstream_body, REPOSITORY_LEAK);
+});

@@ -540,8 +540,26 @@ export class OrchestratorClient {
     }
 
     if (discoveryResponse.status !== 404 && discoveryResponse.status !== 405) {
+      // The route's body is never passed on as text: it goes through the
+      // relay rule, and to the log whole. At aegis-orchestrator 0c60875b
+      // the route answers a failure as 500 {"error": <text>}
+      // (cli/src/daemon/handlers/seal.rs 703-708), outside ADR-035's shape,
+      // so it is told as the generic failure.
+      const body = tryParseJson(await discoveryResponse.text());
+      const relayed = relayFailure("discovery", discoveryResponse.status, body);
+      log("error", "tool.discovery.failed", {
+        security_context: user.securityContext,
+        upstream_status: discoveryResponse.status,
+        upstream_code: relayed.upstreamCode,
+        upstream_request_id: relayed.requestId,
+        upstream_body: body,
+      });
+      const told =
+        relayed.kind === "generic"
+          ? relayed.message
+          : `${relayed.code}: ${relayed.message}`;
       throw new Error(
-        `Tool discovery failed: ${discoveryResponse.status} ${await discoveryResponse.text()}`,
+        relayed.requestId ? `${told} (request_id ${relayed.requestId})` : told,
       );
     }
 
@@ -905,8 +923,15 @@ export class OrchestratorClient {
     );
 
     if (!response.ok) {
-      throw new Error(
-        `Attestation failed: ${response.status} ${await response.text()}`,
+      // Never the route's text: `invokeTool` tells the caller by the relay
+      // rule and logs the body. At aegis-orchestrator 0c60875b the route
+      // answers {"error": <text>} (cli/src/daemon/handlers/seal.rs 490-497,
+      // 552-560), outside ADR-035's shape, and that text can carry a
+      // repository's error, so it is told as the generic failure.
+      throw new OrchestratorInvokeError(
+        response.status,
+        tryParseJson(await response.text()),
+        { route: "attest" },
       );
     }
 
