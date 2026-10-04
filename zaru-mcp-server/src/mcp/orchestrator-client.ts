@@ -218,6 +218,36 @@ function normalizeToolCallResult(payload: unknown): unknown {
   return payload;
 }
 
+/** A coded refusal, `{ error, message }`, as the orchestrator answered it. */
+export interface OrchestratorRefusal {
+  error: string;
+  message: string;
+  [field: string]: unknown;
+}
+
+/**
+ * The orchestrator's answer on one of the operator escalation's routes
+ * (Zaru ADR-0050 D3, D4): its JSON object on a 2xx, or its refusal. A
+ * refusal it sent is carried unchanged (the record's Update U1); an
+ * orchestrator that could not be reached, or answered without an object
+ * carrying a string `error`, is `orchestrator_unavailable` with the status
+ * seen (Update U2).
+ */
+export type OperatorEscalationAnswer =
+  | { ok: true; body: Record<string, unknown> }
+  | { ok: false; refusal: OrchestratorRefusal };
+
+/** How long one escalation request may take before it is unavailable. */
+const OPERATOR_ESCALATION_TIMEOUT_MS = 30_000;
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function orchestratorUnavailable(message: string): OperatorEscalationAnswer {
+  return { ok: false, refusal: { error: "orchestrator_unavailable", message } };
+}
+
 /**
  * The orchestrator issues execution ids as UUIDs and its execution routes
  * parse the path segment as `Uuid`. An id in any other shape can never
@@ -336,6 +366,80 @@ export class OrchestratorClient {
         Authorization: `Bearer ${user.token}`,
       },
     });
+  }
+
+  /**
+   * Redeem an operator escalation code for the key the caller presents:
+   * `POST /v1/operator-escalations` with `{ code }` and the caller's own
+   * token as Bearer (Zaru ADR-0050 D3; AEGIS ADR-129 D14). Never through
+   * SEAL: the escalation is held by the key, not by a session.
+   */
+  redeemOperatorEscalation(
+    user: ZaruUser,
+    code: string,
+  ): Promise<OperatorEscalationAnswer> {
+    return this.operatorEscalationRequest(
+      user,
+      "POST",
+      "/v1/operator-escalations",
+      { code },
+    );
+  }
+
+  /**
+   * End the escalation the caller's key holds:
+   * `DELETE /v1/operator-escalations/current` with the caller's own token
+   * (Zaru ADR-0050 D4; AEGIS ADR-129 Update U5).
+   */
+  releaseOperatorEscalation(user: ZaruUser): Promise<OperatorEscalationAnswer> {
+    return this.operatorEscalationRequest(
+      user,
+      "DELETE",
+      "/v1/operator-escalations/current",
+    );
+  }
+
+  private async operatorEscalationRequest(
+    user: ZaruUser,
+    method: "POST" | "DELETE",
+    path: string,
+    body?: Record<string, unknown>,
+  ): Promise<OperatorEscalationAnswer> {
+    let response: globalThis.Response;
+    let text: string;
+    try {
+      response = await this.fetchImpl(resolveUrl(this.baseUrl, path), {
+        method,
+        headers: {
+          Accept: "application/json",
+          ...(body ? { "Content-Type": "application/json" } : {}),
+          Authorization: `Bearer ${user.token}`,
+        },
+        ...(body ? { body: JSON.stringify(body) } : {}),
+        signal: AbortSignal.timeout(OPERATOR_ESCALATION_TIMEOUT_MS),
+      });
+      text = await response.text();
+    } catch (error) {
+      return orchestratorUnavailable(
+        `The orchestrator could not be reached: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+    const parsed = tryParseJson(text);
+    if (response.ok && isPlainObject(parsed)) {
+      return { ok: true, body: parsed };
+    }
+    if (
+      !response.ok &&
+      isPlainObject(parsed) &&
+      typeof parsed.error === "string"
+    ) {
+      return { ok: false, refusal: parsed as OrchestratorRefusal };
+    }
+    return orchestratorUnavailable(
+      `The orchestrator answered HTTP ${response.status} without an error object.`,
+    );
   }
 
   async invokeTool(

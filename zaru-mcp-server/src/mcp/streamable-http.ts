@@ -5,8 +5,15 @@ import {
   ListToolsRequestSchema,
   CallToolRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import type { ZaruRequest, ZaruUser } from "../middleware/auth.js";
-import { OrchestratorClient } from "./orchestrator-client.js";
+import {
+  isApiKey,
+  type ZaruRequest,
+  type ZaruUser,
+} from "../middleware/auth.js";
+import {
+  OrchestratorClient,
+  type OperatorEscalationAnswer,
+} from "./orchestrator-client.js";
 import { ZaruClient, VersionConflictError } from "../clients/zaru-client.js";
 import {
   getZaruInit,
@@ -474,6 +481,131 @@ export async function handleZaruChat(
   }
 }
 
+/** D3's code: six decimal digits (Zaru ADR-0050). */
+export const OPERATOR_CODE_PATTERN = "^[0-9]{6}$";
+const OPERATOR_CODE = new RegExp(OPERATOR_CODE_PATTERN);
+
+/**
+ * The listing of `zaru.operator.escalate` (Zaru ADR-0050 D3): listed to every
+ * API-key caller, since only an API key can hold an escalation (AEGIS ADR-129
+ * D11) and the server cannot tell an operator's key from anyone else's before
+ * the orchestrator answers.
+ */
+export const ZARU_OPERATOR_ESCALATE_TOOL = {
+  name: "zaru.operator.escalate",
+  description: `Escalate this connection to the AEGIS operator tools with the one-time code an operator generates on Zaru Web's operator page (ask.myzaru.com, in the stepped-up operator session). Ask the person for the six-digit code shown on that page and pass it as \`code\`; never guess or invent a code: a wrong code counts against the person's code, and enough wrong attempts invalidate it.
+
+The code is valid once and only for a few minutes after it is generated. The escalation is held by the API key this connection presents and lasts until \`expires_at\` (30 minutes by default); list the tools again to see the operator tools, and call zaru.operator.release to end it early. Only an operator's own API key, created from their consumer session, can be escalated.
+
+Returns { aegis_role, expires_at }. A refusal is an error whose text is { error, message }, the error one of invalid_code, code_expired, escalation_requires_api_key, orchestrator_unavailable.`,
+  inputSchema: {
+    type: "object",
+    properties: {
+      code: {
+        type: "string",
+        pattern: OPERATOR_CODE_PATTERN,
+        description:
+          "The six-digit code shown on Zaru Web's operator page, exactly as the person gives it.",
+      },
+    },
+    required: ["code"],
+  },
+};
+
+/**
+ * The listing of `zaru.operator.release` (Zaru ADR-0050 D4): listed only
+ * while the presenting key holds an escalation (D5).
+ */
+export const ZARU_OPERATOR_RELEASE_TOOL = {
+  name: "zaru.operator.release",
+  description: `End this connection's operator escalation now, instead of at its expiry. The operator tools leave the tool list at the next listing; a call that arrives after the end is refused by AEGIS.
+
+Returns { ended_at }. A refusal is an error whose text is { error, message }, the error one of escalation_not_found, orchestrator_unavailable.`,
+  inputSchema: {
+    type: "object",
+    properties: {},
+  },
+};
+
+type OperatorToolResult = {
+  content: Array<{ type: string; text: string }>;
+  structuredContent?: Record<string, unknown>;
+  isError: boolean;
+};
+
+function operatorToolResult(
+  answer: OperatorEscalationAnswer,
+  fields: string[],
+): OperatorToolResult {
+  if (!answer.ok) {
+    // Relayed unchanged (Zaru ADR-0050, Update U1 and U2).
+    return {
+      content: [{ type: "text", text: JSON.stringify(answer.refusal) }],
+      isError: true,
+    };
+  }
+  const output: Record<string, unknown> = {};
+  for (const field of fields) output[field] = answer.body[field];
+  return {
+    content: [{ type: "text", text: JSON.stringify(output) }],
+    structuredContent: output,
+    isError: false,
+  };
+}
+
+/**
+ * Dispatch `zaru.operator.escalate` (Zaru ADR-0050 D3): post the code to the
+ * orchestrator with the caller's own token and return the escalation's role
+ * and end, or the orchestrator's refusal unchanged. A code that is not six
+ * decimal digits is refused `invalid_code` here and never sent, so it does
+ * not count against the user's live codes (the record's Update U3).
+ *
+ * Exported for unit testing.
+ */
+export async function handleOperatorEscalate(
+  client: Pick<OrchestratorClient, "redeemOperatorEscalation">,
+  user: ZaruUser,
+  args: unknown,
+): Promise<OperatorToolResult> {
+  const code = (args as Record<string, unknown> | undefined)?.code;
+  if (typeof code !== "string" || !OPERATOR_CODE.test(code)) {
+    return operatorToolResult(
+      {
+        ok: false,
+        refusal: {
+          error: "invalid_code",
+          message:
+            "The code is six decimal digits, exactly as Zaru Web's operator page shows it.",
+        },
+      },
+      [],
+    );
+  }
+  const answer = await client.redeemOperatorEscalation(user, code);
+  if (!answer.ok) {
+    logWarn("zaru.operator.escalate.refused", { code: answer.refusal.error });
+  }
+  return operatorToolResult(answer, ["aegis_role", "expires_at"]);
+}
+
+/**
+ * Dispatch `zaru.operator.release` (Zaru ADR-0050 D4): end the escalation the
+ * caller's key holds and return its end, or the orchestrator's refusal
+ * unchanged.
+ *
+ * Exported for unit testing.
+ */
+export async function handleOperatorRelease(
+  client: Pick<OrchestratorClient, "releaseOperatorEscalation">,
+  user: ZaruUser,
+): Promise<OperatorToolResult> {
+  const answer = await client.releaseOperatorEscalation(user);
+  if (!answer.ok) {
+    logWarn("zaru.operator.release.refused", { code: answer.refusal.error });
+  }
+  return operatorToolResult(answer, ["ended_at"]);
+}
+
 /**
  * Tool calls that may carry an `attachments` array per ADR-113. Only clients
  * that declare the "chat-uploads" capability are permitted to forward
@@ -797,6 +929,10 @@ Available modes:
           },
         },
         ZARU_CHAT_TOOL,
+        // Zaru ADR-0050 D3 and D4: escalate to every API-key caller; release
+        // only while the presented key holds an escalation.
+        ...(isApiKey(user.token) ? [ZARU_OPERATOR_ESCALATE_TOOL] : []),
+        ...(user.operatorEscalation ? [ZARU_OPERATOR_RELEASE_TOOL] : []),
       ],
     };
   });
@@ -928,6 +1064,14 @@ Available modes:
 
     if (name === ZARU_CHAT_TOOL.name) {
       return handleZaruChat(zaruClient, user, args, context.zaruTurn === true);
+    }
+
+    if (name === "zaru.operator.escalate") {
+      return handleOperatorEscalate(client, user, args);
+    }
+
+    if (name === "zaru.operator.release") {
+      return handleOperatorRelease(client, user);
     }
 
     // ADR-113 defence-in-depth: reject `attachments` from any client that has

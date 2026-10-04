@@ -9,7 +9,12 @@
 // `operator_escalation: { expires_at }` while the stub holds an escalation
 // for it, and with `aegis_role` null otherwise; ROLE_KEY, a key created from
 // an operator identity, always carries its stored "aegis:operator" and never
-// an escalation. Tool discovery answers by the security context it is asked
+// an escalation. `POST /v1/operator-escalations` and `DELETE
+// /v1/operator-escalations/current` answer as the orchestrator's routes do
+// (operator_escalations.rs): VALID_CODE redeemed by ESCALATING_KEY starts the
+// escalation, EXPIRED_CODE is code_expired, any other code (and any code
+// from ROLE_KEY) invalid_code, a bearer that is not an aegis_ key
+// escalation_requires_api_key; the end route answers {ended_at} or 404. Tool discovery answers by the security context it is asked
 // for, so the list shows which context the server asked for (the server
 // caches a list per context for 5 s, so the list, not the count of
 // discovery requests, is what the tests read).
@@ -29,6 +34,8 @@ export const STUB_TOOL = "aegis.stub.echo";
 /** A tool the stub lists only for the operator context. */
 export const OPERATOR_ONLY_TOOL = "aegis.system.config";
 export const OPERATOR_CONTEXT = "aegis-system-operator";
+export const VALID_CODE = "042917";
+export const EXPIRED_CODE = "111111";
 
 export interface EscalationStub {
   url: string;
@@ -40,6 +47,10 @@ export interface EscalationStub {
   escalated: boolean;
   /** Its expires_at while it holds one. */
   expiresAt: string;
+  /** Every redemption the stub received: the bearer and the body. */
+  redemptions: Array<{ token: string | undefined; body: unknown }>;
+  /** Every end request the stub received: the bearer. */
+  releases: Array<string | undefined>;
   /** Keycloak paths the stub was asked for (its JWKS for both realms). */
   keycloakRequests: string[];
   /** Sign a JWT as the realm `realm` of the stub's Keycloak would. */
@@ -69,6 +80,8 @@ export async function startEscalationStub(): Promise<EscalationStub> {
     attested: [],
     escalated: false,
     expiresAt: new Date(Date.now() + 1800_000).toISOString(),
+    redemptions: [],
+    releases: [],
     keycloakRequests: [],
     signJwt: (realm, claims) => signAs(privateKey, `${state.url}/realms/${realm}`, claims),
     close: async () => undefined,
@@ -115,6 +128,51 @@ export async function startEscalationStub(): Promise<EscalationStub> {
         return;
       }
       sendJson(401, { error: "Invalid or expired API key" });
+      return;
+    }
+    if (url.pathname === "/v1/operator-escalations" && req.method === "POST") {
+      const raw = await readBody(req);
+      const body = raw ? (JSON.parse(raw) as { code?: unknown }) : {};
+      state.redemptions.push({ token, body });
+      if (!token?.startsWith("aegis_")) {
+        sendJson(403, {
+          error: "escalation_requires_api_key",
+          message: "only an API key can hold an operator escalation",
+        });
+        return;
+      }
+      if (token === ESCALATING_KEY && body.code === VALID_CODE) {
+        state.escalated = true;
+        sendJson(200, { aegis_role: "aegis:operator", expires_at: state.expiresAt });
+        return;
+      }
+      if (token === ESCALATING_KEY && body.code === EXPIRED_CODE) {
+        sendJson(400, {
+          error: "code_expired",
+          message: "the code has expired; generate a new one",
+        });
+        return;
+      }
+      sendJson(400, {
+        error: "invalid_code",
+        message: "the code is not valid for this key",
+      });
+      return;
+    }
+    if (
+      url.pathname === "/v1/operator-escalations/current" &&
+      req.method === "DELETE"
+    ) {
+      state.releases.push(token);
+      if (token === ESCALATING_KEY && state.escalated) {
+        state.escalated = false;
+        sendJson(200, { ended_at: new Date().toISOString() });
+        return;
+      }
+      sendJson(404, {
+        error: "escalation_not_found",
+        message: "this key holds no active escalation",
+      });
       return;
     }
     if (url.pathname === "/v1/seal/tools" && req.method === "GET") {
@@ -181,6 +239,7 @@ export type McpPost = (
 
 interface ToolResult {
   content: Array<{ type: string; text: string }>;
+  structuredContent?: unknown;
   isError?: boolean;
 }
 
@@ -206,7 +265,11 @@ async function rpc(
 
 type ListedTool = {
   name: string;
-  inputSchema: { properties?: Record<string, { enum?: string[] }> };
+  description?: string;
+  inputSchema: {
+    properties?: Record<string, { enum?: string[]; pattern?: string }>;
+    required?: string[];
+  };
 };
 
 async function listTools(post: McpPost, token: string): Promise<ListedTool[]> {
@@ -350,5 +413,120 @@ export function registerOperatorSurfaceTests(
       },
     );
     assert.equal(res.status, 200, await res.text());
+  });
+}
+
+function errorOf(result: ToolResult): Record<string, unknown> {
+  assert.equal(result.isError, true, result.content[0]?.text);
+  return JSON.parse(result.content[0]!.text) as Record<string, unknown>;
+}
+
+/**
+ * Registers the tests of Zaru ADR-0050 D3 and D4 (and the record's Update
+ * U1 and U3) against one entrypoint.
+ */
+export function registerEscalationToolTests(
+  label: string,
+  context: () => EscalationTestContext,
+): void {
+  test(`${label}: zaru.operator.escalate is listed to an API-key caller with D3's input, and zaru.operator.release is not until the key holds an escalation`, async () => {
+    const { post, stub } = context();
+    stub.escalated = false;
+    const tools = await listTools(post, ESCALATING_KEY);
+    const escalate = tools.find((t) => t.name === "zaru.operator.escalate");
+    assert.ok(escalate, names(tools).join(", "));
+    assert.deepEqual(escalate.inputSchema.required, ["code"]);
+    assert.equal(escalate.inputSchema.properties?.code?.pattern, "^[0-9]{6}$");
+    assert.match(escalate.description ?? "", /never guess/i);
+    assert.ok(!names(tools).includes("zaru.operator.release"), names(tools).join(", "));
+    // A key with a stored role is an API-key caller too.
+    assert.ok(names(await listTools(post, ROLE_KEY)).includes("zaru.operator.escalate"));
+  });
+
+  test(`${label}: a consumer JWT caller is not offered zaru.operator.escalate (it cannot hold an escalation)`, async () => {
+    const { post, stub } = context();
+    const token = await stub.signJwt("zaru-consumer", { sub: "c-1", zaru_tier: "pro" });
+    const tools = await listTools(post, token);
+    assert.ok(!names(tools).includes("zaru.operator.escalate"), names(tools).join(", "));
+    assert.ok(!names(tools).includes("zaru.operator.release"), names(tools).join(", "));
+    // Called anyway, the orchestrator's refusal comes back unchanged.
+    const result = await callTool(post, token, "zaru.operator.escalate", {
+      code: VALID_CODE,
+    });
+    assert.deepEqual(errorOf(result), {
+      error: "escalation_requires_api_key",
+      message: "only an API key can hold an operator escalation",
+    });
+  });
+
+  test(`${label}: escalate posts the code with the caller's key and returns {aegis_role, expires_at}; the operator surface and release follow; release ends it (D3, D4, D5)`, async () => {
+    const { post, stub } = context();
+    stub.escalated = false;
+    const before = stub.redemptions.length;
+    const result = await callTool(post, ESCALATING_KEY, "zaru.operator.escalate", {
+      code: VALID_CODE,
+    });
+    assert.equal(result.isError, false, result.content[0]?.text);
+    assert.equal(stub.redemptions.length, before + 1);
+    assert.deepEqual(stub.redemptions.at(-1), {
+      token: ESCALATING_KEY,
+      body: { code: VALID_CODE },
+    });
+    const expected = { aegis_role: "aegis:operator", expires_at: stub.expiresAt };
+    assert.deepEqual(JSON.parse(result.content[0]!.text), expected);
+    assert.deepEqual(result.structuredContent, expected);
+
+    const escalated = await listTools(post, ESCALATING_KEY);
+    assert.ok(names(escalated).includes("zaru.operator.release"), names(escalated).join(", "));
+    assert.ok(names(escalated).includes(OPERATOR_ONLY_TOOL));
+    assert.ok(modeEnum(escalated).includes("operator"));
+
+    const released = await callTool(post, ESCALATING_KEY, "zaru.operator.release", {});
+    assert.equal(released.isError, false, released.content[0]?.text);
+    assert.equal(stub.releases.at(-1), ESCALATING_KEY);
+    assert.equal(
+      typeof (JSON.parse(released.content[0]!.text) as { ended_at?: unknown }).ended_at,
+      "string",
+    );
+
+    const after = await listTools(post, ESCALATING_KEY);
+    assert.ok(!names(after).includes("zaru.operator.release"), names(after).join(", "));
+    assert.ok(!names(after).includes(OPERATOR_ONLY_TOOL), names(after).join(", "));
+    assert.ok(!modeEnum(after).includes("operator"));
+  });
+
+  test(`${label}: the orchestrator's refusals are relayed unchanged (Update U1)`, async () => {
+    const { post, stub } = context();
+    stub.escalated = false;
+    assert.deepEqual(
+      errorOf(await callTool(post, ESCALATING_KEY, "zaru.operator.escalate", { code: "999999" })),
+      { error: "invalid_code", message: "the code is not valid for this key" },
+    );
+    assert.deepEqual(
+      errorOf(await callTool(post, ESCALATING_KEY, "zaru.operator.escalate", { code: EXPIRED_CODE })),
+      { error: "code_expired", message: "the code has expired; generate a new one" },
+    );
+    // A key with a stored role learns nothing beyond invalid_code.
+    assert.deepEqual(
+      errorOf(await callTool(post, ROLE_KEY, "zaru.operator.escalate", { code: VALID_CODE })),
+      { error: "invalid_code", message: "the code is not valid for this key" },
+    );
+    // Release with no escalation: the end route's 404.
+    assert.deepEqual(
+      errorOf(await callTool(post, ESCALATING_KEY, "zaru.operator.release", {})),
+      { error: "escalation_not_found", message: "this key holds no active escalation" },
+    );
+  });
+
+  test(`${label}: a code that is not six decimal digits is refused invalid_code and never sent (Update U3)`, async () => {
+    const { post, stub } = context();
+    const before = stub.redemptions.length;
+    for (const code of ["12345", "1234567", "12a456", "", 42917]) {
+      const error = errorOf(
+        await callTool(post, ESCALATING_KEY, "zaru.operator.escalate", { code }),
+      );
+      assert.equal(error.error, "invalid_code", JSON.stringify(code));
+    }
+    assert.equal(stub.redemptions.length, before, "no redemption reached the orchestrator");
   });
 }

@@ -7,6 +7,7 @@ import { after, before } from "node:test";
 import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import {
+  registerEscalationToolTests,
   registerOperatorSurfaceTests,
   startEscalationStub,
   type EscalationStub,
@@ -50,3 +51,4 @@ const context = () => ({
 });
 
 registerOperatorSurfaceTests("container", context);
+registerEscalationToolTests("container", context);

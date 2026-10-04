@@ -745,3 +745,106 @@ test("wait ceiling: the wait tools' descriptions name the ceiling, and no other 
   assert.match(tools[0]?.description ?? "", /^Waits\. On this server one call waits at most 45 seconds/);
   assert.equal(tools[1]?.description, "Status.");
 });
+
+// ── The operator escalation's two routes (Zaru ADR-0050 D3, D4; Update U1, U2)
+
+const escalatingUser = {
+  userId: "5a1e0000-consumer",
+  tier: "pro",
+  securityContext: "zaru-pro",
+  token: "aegis_operator_consumer_key",
+  isOperator: false,
+};
+
+function recordingClient(respond: () => Response | Promise<Response>) {
+  const calls: Array<{
+    url: string;
+    method?: string;
+    headers: Record<string, string>;
+    body?: string;
+  }> = [];
+  const client = new OrchestratorClient({
+    baseUrl: "http://aegis.test/",
+    fetchImpl: async (input, init) => {
+      calls.push({
+        url: String(input),
+        method: init?.method,
+        headers: (init?.headers ?? {}) as Record<string, string>,
+        body: init?.body as string | undefined,
+      });
+      return respond();
+    },
+  });
+  return { client, calls };
+}
+
+test("redeemOperatorEscalation posts {code} to /v1/operator-escalations with the caller's own token", async () => {
+  const { client, calls } = recordingClient(() =>
+    jsonResponse({ aegis_role: "aegis:operator", expires_at: "2026-10-04T07:00:00Z" }),
+  );
+  const answer = await client.redeemOperatorEscalation(escalatingUser, "042917");
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0]?.url, "http://aegis.test/v1/operator-escalations");
+  assert.equal(calls[0]?.method, "POST");
+  assert.equal(calls[0]?.headers["Authorization"], "Bearer aegis_operator_consumer_key");
+  assert.equal(calls[0]?.headers["Content-Type"], "application/json");
+  assert.deepEqual(JSON.parse(calls[0]!.body!), { code: "042917" });
+  assert.deepEqual(answer, {
+    ok: true,
+    body: { aegis_role: "aegis:operator", expires_at: "2026-10-04T07:00:00Z" },
+  });
+});
+
+test("releaseOperatorEscalation deletes /v1/operator-escalations/current with the caller's own token", async () => {
+  const { client, calls } = recordingClient(() =>
+    jsonResponse({ ended_at: "2026-10-04T06:40:00Z" }),
+  );
+  const answer = await client.releaseOperatorEscalation(escalatingUser);
+  assert.equal(calls[0]?.url, "http://aegis.test/v1/operator-escalations/current");
+  assert.equal(calls[0]?.method, "DELETE");
+  assert.equal(calls[0]?.headers["Authorization"], "Bearer aegis_operator_consumer_key");
+  assert.equal(calls[0]?.body, undefined);
+  assert.deepEqual(answer, { ok: true, body: { ended_at: "2026-10-04T06:40:00Z" } });
+});
+
+test("an orchestrator refusal {error, message} is returned unchanged (Update U1)", async () => {
+  for (const [status, refusal] of [
+    [400, { error: "invalid_code", message: "the code is not valid for this key" }],
+    [400, { error: "code_expired", message: "the code has expired; generate a new one" }],
+    [403, { error: "escalation_requires_api_key", message: "only an API key can hold an operator escalation" }],
+    [404, { error: "escalation_not_found", message: "this key holds no active escalation" }],
+  ] as const) {
+    const { client } = recordingClient(() => jsonResponse(refusal, status));
+    assert.deepEqual(
+      await client.redeemOperatorEscalation(escalatingUser, "123456"),
+      { ok: false, refusal },
+    );
+  }
+});
+
+test("an unreachable orchestrator is orchestrator_unavailable (Update U2)", async () => {
+  const { client } = recordingClient(() => {
+    throw new TypeError("fetch failed");
+  });
+  const answer = await client.redeemOperatorEscalation(escalatingUser, "123456");
+  assert.equal(answer.ok, false);
+  assert.equal(!answer.ok && answer.refusal.error, "orchestrator_unavailable");
+  assert.match(!answer.ok ? answer.refusal.message : "", /fetch failed/);
+});
+
+test("an answer without an error object is orchestrator_unavailable with the status seen (Update U2)", async () => {
+  for (const [status, body] of [
+    [502, "<html>Bad gateway</html>"],
+    [500, JSON.stringify({ message: "no code" })],
+    [400, JSON.stringify(["not", "an", "object"])],
+    [200, "not json"],
+  ] as const) {
+    const { client } = recordingClient(
+      () => new Response(body, { status, headers: { "Content-Type": "application/json" } }),
+    );
+    const answer = await client.releaseOperatorEscalation(escalatingUser);
+    assert.equal(answer.ok, false, `${status} ${body}`);
+    assert.equal(!answer.ok && answer.refusal.error, "orchestrator_unavailable");
+    assert.match(!answer.ok ? answer.refusal.message : "", new RegExp(`HTTP ${status}`));
+  }
+});

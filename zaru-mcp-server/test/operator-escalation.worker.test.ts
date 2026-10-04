@@ -6,6 +6,7 @@
 import { after, before } from "node:test";
 import { unstable_dev, type Unstable_DevWorker } from "wrangler";
 import {
+  registerEscalationToolTests,
   registerOperatorSurfaceTests,
   startEscalationStub,
   type EscalationStub,
@@ -47,3 +48,4 @@ const context = () => ({
 });
 
 registerOperatorSurfaceTests("worker", context);
+registerEscalationToolTests("worker", context);
