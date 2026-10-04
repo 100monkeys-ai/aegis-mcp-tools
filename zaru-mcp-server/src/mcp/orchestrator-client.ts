@@ -205,6 +205,26 @@ function tryParseJson(s: string): unknown {
   }
 }
 
+/**
+ * Whether a 400 from `/v1/seal/invoke` says the session itself is no longer
+ * usable, so that a new session cures it. The orchestrator answers every
+ * invoke error but an ended escalation as 400 `{"error": <Display text>}`
+ * (`aegis-orchestrator` 675984dc, `cli/src/daemon/handlers/seal.rs`
+ * 605-610), and words its two session conditions
+ * (`orchestrator/core/src/domain/seal_session.rs` 161-162) as
+ * `"Session is inactive: {status:?}"` and `"Session has expired"`. Only
+ * those texts, as the whole `error` field, are a session condition.
+ */
+function isSessionCondition(body: unknown): boolean {
+  if (!body || typeof body !== "object") return false;
+  const error = (body as Record<string, unknown>).error;
+  return (
+    typeof error === "string" &&
+    (error === "Session has expired" ||
+      error.startsWith("Session is inactive: "))
+  );
+}
+
 function normalizeToolCallResult(payload: unknown): unknown {
   if (
     payload &&
@@ -555,28 +575,20 @@ export class OrchestratorClient {
     );
 
     const cacheKey = `${user.userId}:${user.tenantId ?? "personal"}`;
-    if (response.status === 401 || response.status === 403) {
+    if (response.status === 401) {
       this.sessionCache.delete(cacheKey);
       return this.invokeJsonRpcWithFreshSession(user, payload);
     }
 
-    // Session expired returns as 400 with specific session error codes — re-attest
-    if (response.status === 400) {
-      const body = await response.text();
-      if (
-        body.includes("Session is inactive") ||
-        body.includes("SessionExpired") ||
-        body.includes("SessionInactive")
-      ) {
+    if (!response.ok) {
+      const body = tryParseJson(await response.text());
+      if (response.status === 400 && isSessionCondition(body)) {
         this.sessionCache.delete(cacheKey);
         return this.invokeJsonRpcWithFreshSession(user, payload);
       }
-      throw new OrchestratorInvokeError(response.status, tryParseJson(body));
-    }
-
-    if (!response.ok) {
-      const body = await response.text();
-      throw new OrchestratorInvokeError(response.status, tryParseJson(body));
+      // A 403 is a refusal of the call itself (a policy, tenant or judge
+      // refusal): a new session does not cure it, so it is not re-attested.
+      throw new OrchestratorInvokeError(response.status, body);
     }
 
     return normalizeToolCallResult(await response.json());
