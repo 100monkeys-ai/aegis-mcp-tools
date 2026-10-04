@@ -232,6 +232,25 @@ export function registerZaruChatTests(
     const chat = tools.find((t) => t.name === "zaru.chat");
     assert.ok(chat, `tools: ${tools.map((t) => t.name).join(", ")}`);
     assert.equal(typeof chat.description, "string");
+    // Zaru ADR-0049's Update, G10 and H16: an agentic turn whose answer
+    // carries `goal` is judged and continued by Zaru after the call, so the
+    // caller sends no "keep going" and reads the goal's state, not `status`.
+    const description = chat.description as string;
+    for (const phrase of [
+      "when the answer carries goal",
+      'send no "keep going"',
+      "aegis.goal.status",
+      "whether the work is done is the goal's state",
+      "usage?, goal? }",
+    ]) {
+      assert.ok(description.includes(phrase), `missing: ${phrase}`);
+    }
+    for (const phrase of [
+      "everything done so far stored; send your next message",
+      "usage? }.",
+    ]) {
+      assert.ok(!description.includes(phrase), `still there: ${phrase}`);
+    }
     const schema = chat.inputSchema as {
       type: string;
       properties: Record<string, Record<string, unknown>>;
