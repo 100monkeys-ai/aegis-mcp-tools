@@ -415,13 +415,9 @@ test("invokeTool does NOT retry when 400 body contains 'session' in an unrelated
 
 // ── When to attest again ──────────────────────────────────────────────────
 //
-// The rule: a 401 is re-attested always; a 400 only when its body is a
-// session condition in the words the orchestrator writes for it
-// (`aegis-orchestrator` 675984dc, orchestrator/core/src/domain/seal_session.rs
-// 161-162: "Session is inactive: {status:?}" and "Session has expired",
-// answered by cli/src/daemon/handlers/seal.rs 605-610 as {"error": <text>});
-// a 403 never, since a policy refusal is not cured by a new session. One
-// re-attest and one retry at most.
+// The rule: a 401 is re-attested always, whatever its body; any other
+// status never (AEGIS ADR-035 R5, R8: every session condition is 401, a
+// policy refusal 403). One re-attest and one retry at most.
 
 /**
  * A client whose /v1/seal/invoke answers `answers` in turn (the last one
@@ -480,32 +476,19 @@ const okAnswer = () =>
     result: { content: [{ type: "text", text: "ok" }], isError: false },
   });
 
-test("re-attest rule: a 400 for an expired session, as the orchestrator words it, is re-attested and retried once", async () => {
-  const { counts, call } = reattestHarness([
-    () => jsonResponse({ error: "Session has expired" }, 400),
-    okAnswer,
-  ]);
-  const result = await call();
-  assert.deepEqual(result, {
-    content: [{ type: "text", text: "ok" }],
-    isError: false,
-  });
-  assert.equal(counts.attest, 2, "the expired session is replaced");
-  assert.equal(counts.invoke, 2, "the call is retried once");
-});
-
-test("re-attest rule: a 400 for an inactive session, as the orchestrator words it, is re-attested and retried once", async () => {
-  const { counts, call } = reattestHarness([
-    () =>
-      jsonResponse(
-        { error: 'Session is inactive: Revoked { reason: "rotated" }' },
-        400,
-      ),
-    okAnswer,
-  ]);
-  await call();
-  assert.equal(counts.attest, 2);
-  assert.equal(counts.invoke, 2);
+test("re-attest rule: a 400 is never re-attested, even in the session words of orchestrators before 0c60875b", async () => {
+  for (const error of [
+    "Session has expired",
+    'Session is inactive: Revoked { reason: "rotated" }',
+  ]) {
+    const { counts, call } = reattestHarness([
+      () => jsonResponse({ error }, 400),
+      okAnswer,
+    ]);
+    assert.deepEqual(await call(), invokeFailed(400));
+    assert.equal(counts.attest, 1, `no re-attest for 400 ${error}`);
+    assert.equal(counts.invoke, 1, `no retry for 400 ${error}`);
+  }
 });
 
 test("re-attest rule: a 401 is re-attested and retried once, whatever its body", async () => {
@@ -551,7 +534,7 @@ test("re-attest rule: a 403 is not re-attested; it fails on the first answer", a
   assert.equal(counts.invoke, 1, "no second call for a refusal");
 });
 
-test("re-attest rule: a 400 that is not one of the orchestrator's session texts is not re-attested", async () => {
+test("re-attest rule: no other 400 is re-attested either", async () => {
   for (const error of [
     "Policy violation: tool aegis.task.list not allowed",
     "Invalid tool arguments: Session has expired",
@@ -571,7 +554,6 @@ test("re-attest rule: a 400 that is not one of the orchestrator's session texts 
 test("re-attest rule: one re-attest and one retry at most", async () => {
   for (const [answer, status] of [
     [() => new Response("Unauthorized", { status: 401 }), 401],
-    [() => jsonResponse({ error: "Session has expired" }, 400), 400],
   ] as const) {
     const { counts, call } = reattestHarness([answer]);
     assert.deepEqual(await call(), invokeFailed(status));
