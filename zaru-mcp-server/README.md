@@ -74,8 +74,8 @@ and hosts the canonical Zaru system prompts.
   removing that suffix and is always trusted
 - **`KEYCLOAK_SYSTEM_ISSUER`** (default
   `<JWKS_URI host>/realms/aegis-system`) -- Issuer of the aegis-system
-  realm. Always trusted; the only issuer whose `aegis_role` claim grants
-  operator identity
+  realm. Never trusted: a token it issued is refused 401 before any key
+  set is fetched (Zaru ADR-0050 D6)
 - **`KEYCLOAK_TRUSTED_ISSUERS`** (default empty) -- Comma-separated
   list of further exact issuer URLs to trust, for example an enterprise
   realm `https://auth.example.com/realms/tenant-acme`. Each is verified
@@ -101,20 +101,26 @@ The server accepts tokens via three mechanisms
 3. `token` query parameter (for SSE GET requests)
 
 **Keycloak JWT** -- the token's `iss` must exactly match one of the
-trusted issuers fixed at startup (the `JWKS_URI` realm,
-`KEYCLOAK_SYSTEM_ISSUER`, and `KEYCLOAK_TRUSTED_ISSUERS`). A token from
-any other issuer is refused before any key set is fetched. The
+trusted issuers fixed at startup (the `JWKS_URI` realm and
+`KEYCLOAK_TRUSTED_ISSUERS`). A token from any other issuer is refused
+before any key set is fetched; a token of the aegis-system realm
+(`KEYCLOAK_SYSTEM_ISSUER`) is refused 401. The
 signature is verified against that issuer's JWKS, with key rotation
 handled per issuer. The `sub` claim becomes the user identity;
 `zaru_tier` resolves to a `SecurityContext` (`zaru-free`,
-`zaru-pro`, `zaru-business`, `zaru-enterprise`). Tokens with an
-`aegis_role` claim (`admin`, `operator`, `readonly`) are treated
-as operator identities.
+`zaru-pro`, `zaru-business`, `zaru-enterprise`). An `aegis_role`
+claim grants nothing: no JWT carries the operator surface.
 
 **AEGIS API key** -- tokens prefixed with `aegis_` are validated
 against `POST ${AEGIS_ORCHESTRATOR_URL}/v1/api-keys/validate`.
 The orchestrator hashes the key, looks it up, and returns the
-owner identity and role.
+owner identity and role. A key's stored role grants nothing here: the
+key is served the operator context (`aegis-system-operator`, the
+`operator` mode) only while the answer carries
+`operator_escalation: { expires_at }` with `expires_at` in the future
+and an `aegis_role` of `aegis:admin` or `aegis:operator`, an escalation
+the key gained by `zaru.operator.escalate` with a code from Zaru Web's
+operator page (Zaru ADR-0050 D3 to D5; AEGIS ADR-129).
 
 ## SEAL Contract
 

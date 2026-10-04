@@ -13,6 +13,12 @@ export interface ZaruUser {
   token: string;
   isOperator: boolean;
   tenantId?: string;
+  /**
+   * Present only while the presented API key holds an operator escalation
+   * (Zaru ADR-0050 D5): its end, as the orchestrator's validate answer gave
+   * it. `zaru.operator.release` is listed only while it is set (D4).
+   */
+  operatorEscalation?: { expiresAt: string };
 }
 
 export interface ZaruRequest extends Request {
@@ -55,13 +61,49 @@ export function isApiKey(token: string): boolean {
 /**
  * Response shape from the orchestrator's `POST /v1/api-keys/validate` endpoint.
  * Returns the identity associated with the API key.
+ *
+ * `aegis_role` is in the orchestrator's spelling (`aegis:admin`,
+ * `aegis:operator`, `aegis:readonly`). While a key with no stored role holds
+ * an operator escalation it is the escalation's role and `operator_escalation`
+ * carries the escalation's end (AEGIS ADR-129 D14 and its Update U7).
  */
 export interface ApiKeyIdentity {
   user_id: string;
   tenant_id: string | null;
-  aegis_role: AegisRole | null;
+  aegis_role: string | null;
   zaru_tier: string | null;
   scopes: string[];
+  operator_escalation?: { expires_at?: unknown } | null;
+}
+
+/**
+ * The roles an escalation serves the operator surface for, mapped to the
+ * tier `allowedModesFor` reads (`src/prompts/index.ts`).
+ */
+const ESCALATED_TIERS: ReadonlyMap<string, string> = new Map([
+  ["aegis:admin", "admin"],
+  ["aegis:operator", "operator"],
+]);
+
+/**
+ * The operator escalation a validate answer reports, when it is one the
+ * server serves (Zaru ADR-0050 D5): an `operator_escalation` whose
+ * `expires_at` is later than `now`, with an `aegis_role` of `aegis:admin` or
+ * `aegis:operator`. Anything else is no escalation.
+ */
+export function activeOperatorEscalation(
+  identity: ApiKeyIdentity,
+  now: number = Date.now(),
+): { tier: string; expiresAt: string } | null {
+  const expiresAt = identity.operator_escalation?.expires_at;
+  if (typeof expiresAt !== "string") return null;
+  const end = Date.parse(expiresAt);
+  if (!Number.isFinite(end) || end <= now) return null;
+  const tier = identity.aegis_role
+    ? ESCALATED_TIERS.get(identity.aegis_role)
+    : undefined;
+  if (!tier) return null;
+  return { tier, expiresAt };
 }
 
 export type ApiKeyValidator = (token: string) => Promise<ApiKeyIdentity>;
@@ -117,14 +159,12 @@ const jwksUri =
   "http://localhost:8180/realms/zaru-consumer/protocol/openid-connect/certs";
 const keycloakHost = jwksUri.replace(/\/realms\/.*$/, "");
 
-// Issuer URL of the aegis-system Keycloak realm. Per ADR-041 and ADR-073,
-// operator privilege is system-realm-only — the orchestrator's
-// `resolve_role_rejects_consumer_identity_even_with_aegis_role_claim` test
-// (keycloak_iam_service.rs) enforces this invariant on the Rust side.
-// Honoring `aegis_role` from any other issuer would be a privilege-
-// escalation surface: a consumer-realm JWT must NEVER be able to elevate
-// the caller, even with a forged claim. Default mirrors the pod-network
-// deployment shape; override via KEYCLOAK_SYSTEM_ISSUER in production.
+// Issuer URL of the aegis-system Keycloak realm, named here only to refuse
+// its tokens. Through this server no credential carries the operator surface
+// of its own: an aegis-system JWT presented as a bearer is refused 401, and
+// the operator surface is served only while an API key holds an operator
+// escalation (Zaru ADR-0050 D5, D6; AEGIS ADR-129 D15). Default mirrors the
+// pod-network deployment shape; override via KEYCLOAK_SYSTEM_ISSUER.
 const SYSTEM_REALM_ISSUER =
   process.env.KEYCLOAK_SYSTEM_ISSUER ?? `${keycloakHost}/realms/aegis-system`;
 
@@ -132,15 +172,28 @@ function isSystemRealmIssuer(issuer: unknown): boolean {
   return typeof issuer === "string" && issuer === SYSTEM_REALM_ISSUER;
 }
 
+/** The `iss` of a JWT-shaped token, read without verification; else undefined. */
+function unverifiedIssuer(token: string): unknown {
+  try {
+    return decodeJwt(token).iss;
+  } catch {
+    return undefined;
+  }
+}
+
+const SYSTEM_REALM_REFUSAL =
+  "Unauthorized: aegis-system tokens are not accepted; the operator surface is reached only by an operator escalation (zaru.operator.escalate)";
+
 const JWKS_PATH_SUFFIX = "/protocol/openid-connect/certs";
 
 /**
  * The exact set of issuers whose tokens this server verifies, fixed at
- * startup. It mirrors the orchestrator's configured issuer-to-realm map:
- *   - the realm JWKS_URI points at (the consumer realm in production),
- *   - the aegis-system realm (SYSTEM_REALM_ISSUER), and
+ * startup:
+ *   - the realm JWKS_URI points at (the consumer realm in production), and
  *   - each exact issuer URL in KEYCLOAK_TRUSTED_ISSUERS (comma-separated),
  *     which is how an enterprise `tenant-{slug}` realm is added.
+ * The aegis-system realm is not in it: its tokens are refused (Zaru ADR-0050
+ * D6), so it holds no key set.
  * A token whose unverified `iss` is not in this set is refused before any
  * key set is allocated or any request is made. Previously a prefix check
  * let an unauthenticated caller grow an unbounded cache and choose the
@@ -157,15 +210,12 @@ function buildTrustedIssuers(): Map<
   }
   const jwksEndpoints = new Map<string, string>();
   jwksEndpoints.set(jwksUri.slice(0, -JWKS_PATH_SUFFIX.length), jwksUri);
-  const extraIssuers = [
-    SYSTEM_REALM_ISSUER,
-    ...(process.env.KEYCLOAK_TRUSTED_ISSUERS ?? "")
-      .split(",")
-      .map((issuer) => issuer.trim())
-      .filter((issuer) => issuer.length > 0),
-  ];
+  const extraIssuers = (process.env.KEYCLOAK_TRUSTED_ISSUERS ?? "")
+    .split(",")
+    .map((issuer) => issuer.trim())
+    .filter((issuer) => issuer.length > 0);
   for (const issuer of extraIssuers) {
-    if (!jwksEndpoints.has(issuer)) {
+    if (!jwksEndpoints.has(issuer) && !isSystemRealmIssuer(issuer)) {
       jwksEndpoints.set(issuer, `${issuer}${JWKS_PATH_SUFFIX}`);
     }
   }
@@ -308,21 +358,34 @@ export async function authenticateZaruRequest(
 
   // API key authentication: tokens with `aegis_` prefix are API keys,
   // validated against the orchestrator instead of Keycloak JWKS.
+  //
+  // The operator context is served only while the orchestrator reports an
+  // active operator escalation for the key (Zaru ADR-0050 D5). A key's stored
+  // aegis_role grants nothing here: such a key is served the consumer context
+  // like any other (D6; AEGIS ADR-129 D15).
   if (isApiKey(rawToken)) {
     try {
       const identity = await apiKeyValidator(rawToken);
-      const isOp =
-        identity.aegis_role === "admin" || identity.aegis_role === "operator";
-      const tier = identity.aegis_role ?? identity.zaru_tier ?? "free";
-      const secCtx = isOp
-        ? OPERATOR_SECURITY_CONTEXT
-        : `zaru-${identity.zaru_tier ?? "free"}`;
+      const escalation = activeOperatorEscalation(identity);
+      if (escalation) {
+        user = {
+          userId: identity.user_id,
+          tier: escalation.tier,
+          securityContext: OPERATOR_SECURITY_CONTEXT,
+          token: rawToken,
+          isOperator: true,
+          tenantId: identity.tenant_id ?? undefined,
+          operatorEscalation: { expiresAt: escalation.expiresAt },
+        };
+        return { user };
+      }
+      const tier = identity.zaru_tier ?? "free";
       user = {
         userId: identity.user_id,
         tier,
-        securityContext: secCtx,
+        securityContext: `zaru-${tier}`,
         token: rawToken,
-        isOperator: isOp,
+        isOperator: false,
         tenantId: identity.tenant_id ?? undefined,
       };
       return { user };
@@ -331,6 +394,12 @@ export async function authenticateZaruRequest(
         error instanceof Error ? error.message : "Invalid API key";
       return { status: 401, error: message };
     }
+  }
+
+  // An aegis-system JWT is refused before any verification or key fetch:
+  // no credential carries the operator surface of its own (Zaru ADR-0050 D6).
+  if (isSystemRealmIssuer(unverifiedIssuer(rawToken))) {
+    return { status: 401, error: SYSTEM_REALM_REFUSAL };
   }
 
   // JWT authentication: validate via Keycloak JWKS
@@ -373,35 +442,18 @@ export async function authenticateZaruRequest(
       tenantId = jwtTenantId;
     }
 
-    // Per ADR-073, operator privilege lives exclusively in the
-    // aegis-system realm. A consumer-realm JWT carrying `aegis_role` is
-    // either misconfigured Keycloak or a forgery attempt — drop the
-    // claim and treat the caller as a normal tier user. The orchestrator
-    // (keycloak_iam_service.rs) enforces the same invariant on the
-    // Rust side; this keeps the MCP middleware in line.
-    if (
-      isValidAegisRole(claims.aegis_role) &&
-      isSystemRealmIssuer(claims.iss)
-    ) {
-      user = {
-        userId: claims.sub,
-        tier: claims.aegis_role,
-        securityContext: OPERATOR_SECURITY_CONTEXT,
-        token: rawToken,
-        isOperator: true,
-        tenantId,
-      };
-    } else {
-      const tier = normalizeTier(claims.zaru_tier);
-      user = {
-        userId: claims.sub,
-        tier,
-        securityContext: mapTierToSecurityContext(tier),
-        token: rawToken,
-        isOperator: false,
-        tenantId,
-      };
-    }
+    // A JWT never carries the operator surface (Zaru ADR-0050 D6): an
+    // `aegis_role` claim on any token this server verifies is ignored and
+    // the caller is served its tier.
+    const tier = normalizeTier(claims.zaru_tier);
+    user = {
+      userId: claims.sub,
+      tier,
+      securityContext: mapTierToSecurityContext(tier),
+      token: rawToken,
+      isOperator: false,
+      tenantId,
+    };
 
     return { user };
   } catch (error) {

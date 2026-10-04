@@ -108,34 +108,51 @@ test("auth middleware normalizes unknown tier to free", async () => {
   });
 });
 
-test("auth middleware maps aegis_role operator to operator identity", async () => {
-  const middleware = createZaruAuthMiddleware(async () => ({
-    sub: "operator-1",
-    iss: "http://localhost:8180/realms/aegis-system",
-    aegis_role: "admin" as const,
-  }));
+// ── Zaru ADR-0050 D6: no operator surface without an escalation ────────────
+//
+// An aegis-system JWT presented as a bearer is refused 401, whatever it
+// carries, and the verifier is never asked; an API key's stored aegis_role
+// no longer grants the operator context.
 
+/** The issuer of the aegis-system realm as this process derives it. */
+const SYSTEM_ISSUER = "http://localhost:8180/realms/aegis-system";
+
+/** A JWT-shaped token carrying `claims`, unsigned: refused before verification. */
+function unsignedJwt(claims: Record<string, unknown>): string {
+  const part = (value: unknown) =>
+    Buffer.from(JSON.stringify(value)).toString("base64url");
+  return `${part({ alg: "RS256", typ: "JWT" })}.${part(claims)}.c2ln`;
+}
+
+async function refusedWithoutVerifying(claims: Record<string, unknown>) {
+  let verifierCalled = false;
+  const middleware = createZaruAuthMiddleware(async () => {
+    verifierCalled = true;
+    return { sub: String(claims.sub), ...claims } as any;
+  });
   const req = {
-    headers: {
-      "x-zaru-user-token": "jwt-token",
-    },
+    headers: { authorization: `Bearer ${unsignedJwt(claims)}` },
+    query: {},
   } as any;
   const res = createResponseRecorder();
   let nextCalled = false;
-
   await middleware(req, res, (() => {
     nextCalled = true;
   }) as NextFunction);
+  assert.equal(nextCalled, false);
+  assert.equal(res.statusCode, 401);
+  assert.equal(verifierCalled, false);
+  assert.equal(req.zaruUser, undefined);
+  return res.body as { error: string };
+}
 
-  assert.equal(nextCalled, true);
-  assert.deepEqual(req.zaruUser, {
-    userId: "operator-1",
-    tier: "admin",
-    securityContext: "aegis-system-operator",
-    token: "jwt-token",
-    isOperator: true,
-    tenantId: undefined,
+test("an aegis-system JWT with aegis_role admin is refused 401 (D6)", async () => {
+  const body = await refusedWithoutVerifying({
+    sub: "operator-1",
+    iss: SYSTEM_ISSUER,
+    aegis_role: "admin",
   });
+  assert.match(body.error, /aegis-system/);
 });
 
 // ── System-Realm Gating for aegis_role (ADR-073) ────────────────────────────
@@ -178,61 +195,40 @@ test("consumer_realm_jwt_with_aegis_role_falls_back_to_tier_context", async () =
   assert.equal(req.zaruUser?.tier, "pro");
 });
 
-test("system_realm_jwt_with_aegis_role_assigns_operator_context", async () => {
-  // Positive case: a JWT issued by the aegis-system realm with a valid
-  // aegis_role claim is honored and the caller is mapped to the operator
-  // security context.
-  const middleware = createZaruAuthMiddleware(async () => ({
+test("an aegis-system JWT with aegis_role operator is refused 401 (D6)", async () => {
+  await refusedWithoutVerifying({
     sub: "operator-real-1",
-    iss: "http://localhost:8180/realms/aegis-system",
-    aegis_role: "operator" as const,
-  }));
-
-  const req = {
-    headers: {
-      "x-zaru-user-token": "jwt-token",
-    },
-  } as any;
-  const res = createResponseRecorder();
-  let nextCalled = false;
-
-  await middleware(req, res, (() => {
-    nextCalled = true;
-  }) as NextFunction);
-
-  assert.equal(nextCalled, true);
-  assert.equal(res.statusCode, 200);
-  assert.equal(req.zaruUser?.isOperator, true);
-  assert.equal(req.zaruUser?.securityContext, "aegis-system-operator");
-  assert.equal(req.zaruUser?.tier, "operator");
+    iss: SYSTEM_ISSUER,
+    aegis_role: "operator",
+  });
 });
 
-test("system_realm_jwt_without_aegis_role_falls_back_to_tier_context", async () => {
-  // A system-realm JWT that lacks aegis_role (e.g., a service-account token
-  // that has no operator claim) must NOT be promoted to operator. The
-  // caller falls through to the normal tier path.
-  const middleware = createZaruAuthMiddleware(async () => ({
+test("an aegis-system JWT without aegis_role is refused 401 too (D6)", async () => {
+  await refusedWithoutVerifying({
     sub: "system-svc-1",
-    iss: "http://localhost:8180/realms/aegis-system",
+    iss: SYSTEM_ISSUER,
     zaru_tier: "free",
-  }));
+  });
+});
 
+test("an aegis-system JWT in x-zaru-user-token is refused 401 (D6)", async () => {
+  const middleware = createZaruAuthMiddleware(async () => {
+    throw new Error("the verifier must not be asked");
+  });
   const req = {
     headers: {
-      "x-zaru-user-token": "jwt-token",
+      "x-zaru-user-token": unsignedJwt({
+        sub: "operator-1",
+        iss: SYSTEM_ISSUER,
+        aegis_role: "admin",
+      }),
     },
+    query: {},
   } as any;
   const res = createResponseRecorder();
-  let nextCalled = false;
-
-  await middleware(req, res, (() => {
-    nextCalled = true;
-  }) as NextFunction);
-
-  assert.equal(nextCalled, true);
-  assert.equal(res.statusCode, 200);
-  assert.equal(req.zaruUser?.isOperator, false);
-  assert.equal(req.zaruUser?.securityContext, "zaru-free");
+  await middleware(req, res, (() => undefined) as NextFunction);
+  assert.equal(res.statusCode, 401);
+  assert.equal(req.zaruUser, undefined);
 });
 
 test("auth middleware rejects request with no token", async () => {
@@ -270,19 +266,20 @@ test("isApiKey returns false for JWT-like tokens", () => {
 
 // ── API Key Auth Tests ──────────────────────────────────────────────────────
 
-test("auth middleware validates aegis_ API key via apiKeyValidator", async () => {
+test("a key with a stored aegis_role is served the consumer context, not the operator's (D6)", async () => {
   const jwtVerifier = async () => {
     throw new Error("JWT verifier should not be called for API keys");
   };
   const apiKeyValidator = async (token: string) => {
     assert.equal(token, "aegis_test_key_12345");
+    // The orchestrator's spelling of a stored role (iam/mod.rs as_claim_str).
     return {
       user_id: "api-user-789",
       tenant_id: null,
       zaru_tier: null,
-      aegis_role: "operator" as const,
+      aegis_role: "aegis:operator",
       scopes: ["agent:read", "agent:execute"],
-    };
+    } as any;
   };
 
   const middleware = createZaruAuthMiddleware(jwtVerifier, apiKeyValidator);
@@ -303,10 +300,10 @@ test("auth middleware validates aegis_ API key via apiKeyValidator", async () =>
   assert.equal(nextCalled, true);
   assert.deepEqual(req.zaruUser, {
     userId: "api-user-789",
-    tier: "operator",
-    securityContext: "aegis-system-operator",
+    tier: "free",
+    securityContext: "zaru-free",
     token: "aegis_test_key_12345",
-    isOperator: true,
+    isOperator: false,
     tenantId: undefined,
   });
 });
@@ -345,10 +342,10 @@ test("auth middleware routes aegis_ token from x-zaru-user-token header to API k
     return {
       user_id: "header-user",
       tenant_id: null,
-      zaru_tier: null,
-      aegis_role: "admin" as const,
+      zaru_tier: "pro",
+      aegis_role: "aegis:admin",
       scopes: ["key:list"],
-    };
+    } as any;
   };
 
   const middleware = createZaruAuthMiddleware(async () => {
@@ -368,14 +365,117 @@ test("auth middleware routes aegis_ token from x-zaru-user-token header to API k
   }) as NextFunction);
 
   assert.equal(nextCalled, true);
+  // A stored aegis:admin grants nothing here either (D6).
   assert.deepEqual(req.zaruUser, {
     userId: "header-user",
-    tier: "admin",
-    securityContext: "aegis-system-operator",
+    tier: "pro",
+    securityContext: "zaru-pro",
     token: "aegis_header_key",
-    isOperator: true,
+    isOperator: false,
     tenantId: undefined,
   });
+});
+
+// ── Zaru ADR-0050 D5: what an escalated key is served ──────────────────────
+
+const IN_AN_HOUR = () => new Date(Date.now() + 3600_000).toISOString();
+const AN_HOUR_AGO = () => new Date(Date.now() - 3600_000).toISOString();
+
+async function userForKey(identity: Record<string, unknown>) {
+  const middleware = createZaruAuthMiddleware(
+    async () => {
+      throw new Error("should not be called");
+    },
+    async () =>
+      ({
+        user_id: "consumer-sub-1",
+        tenant_id: "u-consumer-sub-1",
+        zaru_tier: "pro",
+        scopes: [],
+        ...identity,
+      }) as any,
+  );
+  const req = {
+    headers: { authorization: "Bearer aegis_escalated_key" },
+    query: {},
+  } as any;
+  const res = createResponseRecorder();
+  let nextCalled = false;
+  await middleware(req, res, (() => {
+    nextCalled = true;
+  }) as NextFunction);
+  assert.equal(nextCalled, true);
+  return req.zaruUser;
+}
+
+test("a key holding an escalation as aegis:operator is served the operator context (D5)", async () => {
+  const expiresAt = IN_AN_HOUR();
+  const user = await userForKey({
+    aegis_role: "aegis:operator",
+    operator_escalation: { expires_at: expiresAt },
+  });
+  assert.deepEqual(user, {
+    userId: "consumer-sub-1",
+    tier: "operator",
+    securityContext: "aegis-system-operator",
+    token: "aegis_escalated_key",
+    isOperator: true,
+    tenantId: "u-consumer-sub-1",
+    operatorEscalation: { expiresAt },
+  });
+});
+
+test("a key holding an escalation as aegis:admin is served tier admin (D5)", async () => {
+  const user = await userForKey({
+    aegis_role: "aegis:admin",
+    operator_escalation: { expires_at: IN_AN_HOUR() },
+  });
+  assert.equal(user.isOperator, true);
+  assert.equal(user.tier, "admin");
+  assert.equal(user.securityContext, "aegis-system-operator");
+});
+
+test("the same key once validate omits operator_escalation is served its consumer context (D5)", async () => {
+  const user = await userForKey({ aegis_role: null });
+  assert.deepEqual(user, {
+    userId: "consumer-sub-1",
+    tier: "pro",
+    securityContext: "zaru-pro",
+    token: "aegis_escalated_key",
+    isOperator: false,
+    tenantId: "u-consumer-sub-1",
+  });
+});
+
+test("an escalation whose expires_at has passed grants nothing (D5)", async () => {
+  const user = await userForKey({
+    aegis_role: "aegis:operator",
+    operator_escalation: { expires_at: AN_HOUR_AGO() },
+  });
+  assert.equal(user.isOperator, false);
+  assert.equal(user.securityContext, "zaru-pro");
+  assert.equal(user.operatorEscalation, undefined);
+});
+
+test("an escalation with a role other than aegis:admin or aegis:operator grants nothing (D5)", async () => {
+  for (const role of ["aegis:readonly", "operator", "admin", null]) {
+    const user = await userForKey({
+      aegis_role: role,
+      operator_escalation: { expires_at: IN_AN_HOUR() },
+    });
+    assert.equal(user.isOperator, false, `role ${String(role)}`);
+    assert.equal(user.securityContext, "zaru-pro", `role ${String(role)}`);
+  }
+});
+
+test("an operator_escalation without a readable expires_at grants nothing (D5)", async () => {
+  for (const escalation of [{}, { expires_at: "not a time" }, { expires_at: 5 }, null]) {
+    const user = await userForKey({
+      aegis_role: "aegis:operator",
+      operator_escalation: escalation,
+    });
+    assert.equal(user.isOperator, false, JSON.stringify(escalation));
+  }
 });
 
 test("auth middleware does not call API key validator for non-aegis_ tokens", async () => {

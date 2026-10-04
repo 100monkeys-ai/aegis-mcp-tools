@@ -136,7 +136,20 @@ test("tokens from unconfigured issuers are refused before any key set is allocat
   assert.deepEqual([...statuses], [[401, FORGED_ISSUER_COUNT]], measured);
   assert.equal(keycloakRequests.length, 0, measured);
   assert.equal(keySetsAfter, keySetsBefore, measured);
-  assert.equal(keySetsAfter, 3, measured);
+  // The JWKS_URI realm and the one KEYCLOAK_TRUSTED_ISSUERS realm. The
+  // aegis-system realm holds no key set: its tokens are refused (Zaru
+  // ADR-0050 D6).
+  assert.equal(keySetsAfter, 2, measured);
+});
+
+test("a token of the aegis-system realm is refused 401 without a request to Keycloak (Zaru ADR-0050 D6)", async () => {
+  keycloakRequests.length = 0;
+  const res = await get(
+    `Bearer ${unsignedToken(`${keycloakBase}/realms/aegis-system`)}`,
+  );
+  assert.equal(res.status, 401, res.body);
+  assert.match(res.body, /aegis-system/);
+  assert.deepEqual(keycloakRequests, []);
 });
 
 test("an issuer that only shares the realm prefix is refused without a request to Keycloak", async () => {
