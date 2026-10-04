@@ -178,23 +178,237 @@ function normalizeToolList(payload: unknown): AegisToolDefinition[] {
   throw new Error("Tool discovery response did not contain a tools array");
 }
 
+/** The orchestrator route an answer came from. */
+export type AegisRoute = "invoke" | "attest" | "discovery";
+
+/** The generic failure's words per route, followed by the HTTP status. */
+const GENERIC_FAILURE: Record<AegisRoute, string> = {
+  invoke: "AEGIS invoke failed",
+  attest: "AEGIS attestation failed",
+  discovery: "AEGIS tool discovery failed",
+};
+
 /**
- * Thrown by `invokeJsonRpc` when the orchestrator returns a non-success
- * response that is not a recoverable session-expiry. Carries the raw
- * upstream `status` and (parsed when JSON, otherwise raw) `body` so the
- * caller can classify the failure (policy_denied vs upstream_error vs
- * timeout) and emit a structured log without re-parsing the error
- * message string.
+ * Thrown by `invokeJsonRpc` (and by `createSession`, route `attest`) when the
+ * orchestrator answers a non-success status. Carries the raw upstream
+ * `status`, the (parsed when JSON, otherwise raw) `body` and the
+ * `Retry-After` header, so `invokeTool` can classify the answer by
+ * `relayFailure` and log it without re-parsing the message. The message
+ * never holds the body.
  */
 export class OrchestratorInvokeError extends Error {
   readonly status: number;
   readonly body: unknown;
-  constructor(status: number, body: unknown) {
-    super(`AEGIS invoke failed: ${status}`);
+  readonly route: AegisRoute;
+  readonly retryAfter: string | null;
+  constructor(
+    status: number,
+    body: unknown,
+    options: { route?: AegisRoute; retryAfter?: string | null } = {},
+  ) {
+    const route = options.route ?? "invoke";
+    super(`${GENERIC_FAILURE[route]}: ${status}`);
     this.name = "OrchestratorInvokeError";
     this.status = status;
     this.body = body;
+    this.route = route;
+    this.retryAfter = options.retryAfter ?? null;
   }
+}
+
+/**
+ * AEGIS ADR-035, Update R1 to R8 (adrs/035-updates, revision 43571), R5's
+ * table: each code of `POST /v1/seal/invoke` with its HTTP status and
+ * whether it is a caller-facing refusal or an internal failure. A code is
+ * relayed only at its own status (`aegis-orchestrator` 0c60875b,
+ * `orchestrator/core/src/domain/seal_session.rs` 300-400).
+ */
+const R5_ROWS: Readonly<
+  Record<string, { status: number; internal: boolean }>
+> = {
+  MALFORMED_ENVELOPE: { status: 400, internal: false },
+  SIGNATURE_INVALID: { status: 401, internal: false },
+  ENVELOPE_REPLAYED: { status: 401, internal: false },
+  SESSION_INACTIVE: { status: 401, internal: false },
+  SESSION_EXPIRED: { status: 401, internal: false },
+  OPERATOR_ESCALATION_EXPIRED: { status: 401, internal: false },
+  TOOL_NOT_ALLOWED: { status: 403, internal: false },
+  TOOL_DENIED: { status: 403, internal: false },
+  PATH_NOT_ALLOWED: { status: 403, internal: false },
+  PATH_TRAVERSAL: { status: 403, internal: false },
+  DOMAIN_NOT_ALLOWED: { status: 403, internal: false },
+  COMMAND_NOT_ALLOWED: { status: 403, internal: false },
+  SUBCOMMAND_NOT_ALLOWED: { status: 403, internal: false },
+  POLICY_ARGUMENT_REQUIRED: { status: 403, internal: false },
+  LIMIT_EXCEEDED: { status: 403, internal: false },
+  RATE_LIMIT_EXCEEDED: { status: 429, internal: false },
+  JUDGE_REJECTED: { status: 403, internal: false },
+  TENANT_MISMATCH: { status: 403, internal: false },
+  INVALID_ARGUMENTS: { status: 422, internal: false },
+  QUOTA_EXCEEDED: { status: 422, internal: false },
+  NOT_FOUND: { status: 404, internal: false },
+  CONFLICT: { status: 409, internal: false },
+  NOT_IMPLEMENTED: { status: 501, internal: false },
+  EDGE_UNAVAILABLE: { status: 503, internal: false },
+  INTERNAL_ERROR: { status: 500, internal: true },
+  UPSTREAM_UNAVAILABLE: { status: 502, internal: true },
+  SERVICE_UNAVAILABLE: { status: 503, internal: true },
+};
+
+/**
+ * The fixed sentence of each internal class (R4, R5), the server's own copy:
+ * an internal failure is told by this sentence, never by the body's message.
+ */
+const INTERNAL_SENTENCES: Readonly<Record<string, string>> = {
+  INTERNAL_ERROR:
+    "The request could not be completed because of an internal error.",
+  UPSTREAM_UNAVAILABLE:
+    "A service this tool depends on did not answer. Try again in a moment.",
+  SERVICE_UNAVAILABLE: "This tool is not available right now.",
+};
+
+/**
+ * What the caller is told of a 401 that survived the one re-attest and
+ * retry: the orchestrator's sentence ("Attest again ...") is addressed to
+ * this server, not to the person, so it goes only to the log.
+ */
+export const SESSION_NOT_RENEWED_MESSAGE =
+  "The session with AEGIS could not be renewed. Try the call again.";
+
+/** The code of an answer the relay does not trust. */
+export const INVOKE_FAILED_CODE = "invoke_failed";
+
+const REQUEST_ID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** What the caller is told of one orchestrator failure, and how it is logged. */
+export interface RelayedFailure {
+  /**
+   * `refused`: a caller-facing row, relayed. `internal`: an internal row,
+   * told by its fixed sentence. `session`: a 401 row after the re-attest.
+   * `generic`: anything the relay does not trust.
+   */
+  kind: "refused" | "internal" | "session" | "generic";
+  /** The body's `status` was `policy_violation`. */
+  policy: boolean;
+  code: string;
+  message: string;
+  requestId?: string;
+  retryAfterSeconds?: number;
+  /** The body's own `error.code` and `error.message`, for the log only. */
+  upstreamCode?: string;
+  upstreamMessage?: string;
+}
+
+/**
+ * The relay rule (AEGIS ADR-035 R1 to R5). An answer is trusted only when
+ * its body has ADR-035's shape (`protocol` "seal/v1", a UUID `request_id`,
+ * `status` "policy_violation" or "error", an `error` object with string
+ * `code` and `message`) and its (code, HTTP status) is a row of R5. Then a
+ * caller-facing row relays `error.code` and `error.message`; an internal row
+ * relays the code with the server's own sentence; a 401 row (one that
+ * survived the re-attest) is told SESSION_NOT_RENEWED_MESSAGE. Anything else
+ * is `invoke_failed` with the route's generic words and the status, and the
+ * body's `request_id` only when it is a UUID. A 429's `Retry-After`, when a
+ * whole number of seconds, is `retryAfterSeconds`.
+ */
+export function relayFailure(
+  route: AegisRoute,
+  httpStatus: number,
+  body: unknown,
+  retryAfter: string | null = null,
+): RelayedFailure {
+  const record = isPlainObject(body) ? body : null;
+  const requestId =
+    record &&
+    typeof record.request_id === "string" &&
+    REQUEST_ID_PATTERN.test(record.request_id)
+      ? record.request_id
+      : undefined;
+  const error = record && isPlainObject(record.error) ? record.error : null;
+  const shaped =
+    record !== null &&
+    record.protocol === "seal/v1" &&
+    requestId !== undefined &&
+    (record.status === "policy_violation" || record.status === "error") &&
+    error !== null &&
+    typeof error.code === "string" &&
+    typeof error.message === "string";
+  const code = shaped ? (error!.code as string) : undefined;
+  const row = code !== undefined ? R5_ROWS[code] : undefined;
+  const upstream = shaped
+    ? {
+        upstreamCode: error!.code as string,
+        upstreamMessage: error!.message as string,
+      }
+    : {};
+  if (!row || row.status !== httpStatus || code === undefined) {
+    return {
+      kind: "generic",
+      policy: false,
+      code: INVOKE_FAILED_CODE,
+      message: `${GENERIC_FAILURE[route]}: ${httpStatus}`,
+      ...(requestId ? { requestId } : {}),
+      ...upstream,
+    };
+  }
+  if (row.internal) {
+    return {
+      kind: "internal",
+      policy: false,
+      code,
+      message: INTERNAL_SENTENCES[code]!,
+      requestId,
+      ...upstream,
+    };
+  }
+  if (httpStatus === 401) {
+    return {
+      kind: "session",
+      policy: false,
+      code,
+      message: SESSION_NOT_RENEWED_MESSAGE,
+      requestId,
+      ...upstream,
+    };
+  }
+  const retryAfterSeconds =
+    httpStatus === 429 && retryAfter !== null && /^\d+$/.test(retryAfter.trim())
+      ? Number(retryAfter.trim())
+      : undefined;
+  return {
+    kind: "refused",
+    policy: record!.status === "policy_violation",
+    code,
+    message: error!.message as string,
+    requestId,
+    ...(retryAfterSeconds !== undefined ? { retryAfterSeconds } : {}),
+    ...upstream,
+  };
+}
+
+/**
+ * The tool result an MCP client sees for a relayed failure: an ordinary
+ * result with `isError` true and one text item,
+ * `{"error":{"code","message"},"request_id"[,"retry_after_seconds"]}`.
+ * The error is an object so that a reader taking `error.message` (Zaru Web,
+ * `components/chat/tool-failure.ts`) shows the message.
+ */
+export function failureToolResult(failure: RelayedFailure): {
+  content: Array<{ type: "text"; text: string }>;
+  isError: true;
+} {
+  const payload: Record<string, unknown> = {
+    error: { code: failure.code, message: failure.message },
+  };
+  if (failure.requestId) payload.request_id = failure.requestId;
+  if (failure.retryAfterSeconds !== undefined) {
+    payload.retry_after_seconds = failure.retryAfterSeconds;
+  }
+  return {
+    content: [{ type: "text", text: JSON.stringify(payload) }],
+    isError: true,
+  };
 }
 
 function tryParseJson(s: string): unknown {
@@ -516,35 +730,51 @@ export class OrchestratorClient {
       const duration_ms = Number(
         (process.hrtime.bigint() - start) / 1_000_000n,
       );
-      let status: "policy_denied" | "upstream_error" | "timeout" =
-        "upstream_error";
-      let upstreamStatus: number | undefined;
-      let upstreamBody: unknown;
       if (error instanceof OrchestratorInvokeError) {
-        upstreamStatus = error.status;
-        upstreamBody = error.body;
-        if (error.status === 400) {
-          // The SEAL gateway returns 400 with a structured policy
-          // violation when a tool call is denied by the security
-          // policy layer. Treat any non-session-expiry 400 as a
-          // policy_denied; session-expiry 400s are retried inside
-          // `invokeJsonRpc` and never surface here.
-          status = "policy_denied";
-        }
-      } else if (
+        // The orchestrator answered: the caller gets a tool result by the
+        // relay rule, never a JSON-RPC error. A caller-facing refusal is
+        // logged at info (ADR-035 R3's level; a 403 or 429 policy refusal as
+        // policy_denied), a 401 that survived the re-attest at warn with the
+        // orchestrator's own sentence, and an internal or untrusted answer at
+        // error with the whole body.
+        const relayed = relayFailure(
+          error.route,
+          error.status,
+          error.body,
+          error.retryAfter,
+        );
+        const [level, status] =
+          relayed.kind === "refused"
+            ? (["info", relayed.policy ? "policy_denied" : "refused"] as const)
+            : relayed.kind === "session"
+              ? (["warn", "session_not_renewed"] as const)
+              : (["error", "upstream_error"] as const);
+        log(level, "tool.invoke.end", {
+          request_id: context.requestId,
+          tool_name: name,
+          tenant_id: user.tenantId,
+          status,
+          duration_ms,
+          upstream_route: error.route,
+          upstream_status: error.status,
+          upstream_code: relayed.upstreamCode,
+          upstream_request_id: relayed.requestId,
+          upstream_message: relayed.upstreamMessage,
+          upstream_body: error.body,
+        });
+        return failureToolResult(relayed);
+      }
+      const status =
         error instanceof Error &&
         (error.name === "TimeoutError" || error.name === "AbortError")
-      ) {
-        status = "timeout";
-      }
-      log(status === "policy_denied" ? "warn" : "error", "tool.invoke.end", {
+          ? "timeout"
+          : "upstream_error";
+      log("error", "tool.invoke.end", {
         request_id: context.requestId,
         tool_name: name,
         tenant_id: user.tenantId,
         status,
         duration_ms,
-        upstream_status: upstreamStatus,
-        upstream_body: upstreamBody,
         error: error instanceof Error ? error : { message: String(error) },
       });
       throw error;
@@ -588,7 +818,9 @@ export class OrchestratorClient {
       }
       // A 403 is a refusal of the call itself (a policy, tenant or judge
       // refusal): a new session does not cure it, so it is not re-attested.
-      throw new OrchestratorInvokeError(response.status, body);
+      throw new OrchestratorInvokeError(response.status, body, {
+        retryAfter: response.headers.get("retry-after"),
+      });
     }
 
     return normalizeToolCallResult(await response.json());
@@ -623,7 +855,9 @@ export class OrchestratorClient {
 
     if (!response.ok) {
       const body = await response.text();
-      throw new OrchestratorInvokeError(response.status, tryParseJson(body));
+      throw new OrchestratorInvokeError(response.status, tryParseJson(body), {
+        retryAfter: response.headers.get("retry-after"),
+      });
     }
 
     return normalizeToolCallResult(await response.json());

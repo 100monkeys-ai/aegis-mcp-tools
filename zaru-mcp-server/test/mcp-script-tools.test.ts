@@ -218,6 +218,34 @@ test("zaru.script.run with a name that matches no scripts returns a 'no script n
   );
 });
 
+test("zaru.script.run returns a refused aegis.script.list as the refusal and fetches nothing", async () => {
+  // The relay's tool result for a refusal (AEGIS ADR-035 R1 to R5).
+  const refusal = {
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify({
+          error: {
+            code: "TOOL_NOT_ALLOWED",
+            message:
+              "Policy violation: tool 'aegis.script.list' is not allowed; permitted tools: [zaru.*]",
+          },
+          request_id: "6f1c2b3a-4d5e-4f60-8a7b-9c0d1e2f3a4b",
+        }),
+      },
+    ],
+    isError: true,
+  };
+  const client = mockClient([refusal]);
+
+  const result = await handleZaruScriptTool(client, USER, "zaru.script.run", {
+    name: "hello",
+  });
+
+  assert.equal(client.calls.length, 1);
+  assert.deepEqual(result, refusal);
+});
+
 // ---------------------------------------------------------------------------
 // zaru.script.run — name matches multiple scripts
 // ---------------------------------------------------------------------------

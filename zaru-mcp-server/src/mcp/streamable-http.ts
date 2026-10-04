@@ -139,6 +139,15 @@ export async function handleZaruScriptTool(
       null,
       { requestId },
     );
+    // A refused or failed list is the answer, not an empty list: read as
+    // one, it would say "No saved script named" for a refusal.
+    if (
+      listResult &&
+      typeof listResult === "object" &&
+      (listResult as Record<string, unknown>).isError === true
+    ) {
+      return normalizeToolResult(listResult);
+    }
     const scripts = extractScriptsArray(listResult);
     const matches = scripts.filter(
       (s) => s.name?.toLowerCase() === scriptName.toLowerCase(),

@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import {
   InvalidExecutionIdError,
   OrchestratorClient,
-  OrchestratorInvokeError,
   WAIT_CEILING_SECONDS,
 } from "../src/mcp/orchestrator-client.js";
 
@@ -386,19 +385,25 @@ test("invokeTool does NOT retry when 400 body contains 'session' in an unrelated
     isOperator: false,
   };
 
-  await assert.rejects(
-    () =>
-      client.invokeTool(user, "fs.read", { path: "/tmp/test" }, "req-retry"),
-    (err: Error) => {
-      // Since 829f829 the upstream body travels on the typed error rather
-      // than in the message, so the structured logger can record it.
-      assert.ok(err instanceof OrchestratorInvokeError);
-      assert.equal(err.message, "AEGIS invoke failed: 400");
-      assert.equal(err.status, 400);
-      assert.match(String(err.body), /storage error/);
-      return true;
-    },
+  // A body outside AEGIS ADR-035's shape is not relayed: the caller is
+  // told the generic failure as a tool result (adrs/035-updates R1, R5).
+  const result = await client.invokeTool(
+    user,
+    "fs.read",
+    { path: "/tmp/test" },
+    "req-retry",
   );
+  assert.deepEqual(result, {
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify({
+          error: { code: "invoke_failed", message: "AEGIS invoke failed: 400" },
+        }),
+      },
+    ],
+    isError: true,
+  });
 
   // Must NOT have retried — only one invoke call
   assert.equal(
@@ -451,6 +456,22 @@ function reattestHarness(answers: Array<() => Response>) {
     client.invokeTool(user, "aegis.task.list", {}, "req-reattest-rule");
   return { counts, call };
 }
+
+/** The generic failure the relay answers for a body it does not trust. */
+const invokeFailed = (status: number) => ({
+  content: [
+    {
+      type: "text",
+      text: JSON.stringify({
+        error: {
+          code: "invoke_failed",
+          message: `AEGIS invoke failed: ${status}`,
+        },
+      }),
+    },
+  ],
+  isError: true,
+});
 
 const okAnswer = () =>
   jsonResponse({
@@ -507,7 +528,7 @@ test("re-attest rule: a 401 is re-attested and retried once, whatever its body",
   }
 });
 
-test("re-attest rule: a 403 is not re-attested; it fails on the first answer with its status", async () => {
+test("re-attest rule: a 403 is not re-attested; it fails on the first answer", async () => {
   const { counts, call } = reattestHarness([
     () =>
       jsonResponse(
@@ -524,12 +545,8 @@ test("re-attest rule: a 403 is not re-attested; it fails on the first answer wit
       ),
     okAnswer,
   ]);
-  await assert.rejects(call, (err: Error) => {
-    assert.ok(err instanceof OrchestratorInvokeError);
-    assert.equal(err.message, "AEGIS invoke failed: 403");
-    assert.equal(err.status, 403);
-    return true;
-  });
+  // Not ADR-035's shape (a numeric code): told as the generic failure.
+  assert.deepEqual(await call(), invokeFailed(403));
   assert.equal(counts.attest, 1, "no second attestation for a refusal");
   assert.equal(counts.invoke, 1, "no second call for a refusal");
 });
@@ -545,27 +562,19 @@ test("re-attest rule: a 400 that is not one of the orchestrator's session texts 
       () => jsonResponse({ error }, 400),
       okAnswer,
     ]);
-    await assert.rejects(call, (err: Error) => {
-      assert.ok(err instanceof OrchestratorInvokeError);
-      assert.equal(err.message, "AEGIS invoke failed: 400");
-      assert.deepEqual(err.body, { error });
-      return true;
-    });
+    assert.deepEqual(await call(), invokeFailed(400));
     assert.equal(counts.attest, 1, `no re-attest for 400 ${error}`);
     assert.equal(counts.invoke, 1, `no retry for 400 ${error}`);
   }
 });
 
 test("re-attest rule: one re-attest and one retry at most", async () => {
-  for (const answer of [
-    () => new Response("Unauthorized", { status: 401 }),
-    () => jsonResponse({ error: "Session has expired" }, 400),
-  ]) {
+  for (const [answer, status] of [
+    [() => new Response("Unauthorized", { status: 401 }), 401],
+    [() => jsonResponse({ error: "Session has expired" }, 400), 400],
+  ] as const) {
     const { counts, call } = reattestHarness([answer]);
-    await assert.rejects(call, (err: Error) => {
-      assert.ok(err instanceof OrchestratorInvokeError);
-      return true;
-    });
+    assert.deepEqual(await call(), invokeFailed(status));
     assert.equal(counts.attest, 2);
     assert.equal(counts.invoke, 2);
   }
