@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 
 import { getZaruInit, ZARU_VERSION } from "../src/prompts/index.js";
 
@@ -397,5 +398,147 @@ test("AEGIS ADR-131 D2 / G2: no mode's tool list offers a goal tool", () => {
   for (const [mode, init] of ALL_MODES) {
     const goalTools = init!.available_tools.filter((t) => t.startsWith("aegis.goal."));
     assert.deepEqual(goalTools, [], `'${mode}' must not list a goal tool`);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Chat mode: the mode decision comes first (Zaru ADR-0028 W41). A reasoning
+// model in Chat mode was handed a multi-vehicle routing problem and spent its
+// whole output on working it out, with no text and no zaru.mode call: the
+// prompt's rules for when to switch named no request that needs exact
+// computation at scale, and told the model it could not call tools at all.
+// The decision now opens Chat mode's own text, its criteria named by kind.
+// These tests pin the text; whether the model obeys it is proved on the live
+// page, not here.
+// ---------------------------------------------------------------------------
+
+const MODE_DECISION_HEADING = "# FIRST, DECIDE WHERE THIS BELONGS";
+
+/** The shared personality, read from the agentic prompt: the text before its first own section. */
+function sharedPersonality(): string {
+  const agentic = getZaruInit("agentic")!.system_prompt;
+  return agentic.slice(0, agentic.indexOf("\n\n# TOOL USE — MANDATORY RULES"));
+}
+
+/** Chat mode's own text: everything after the shared personality. */
+function chatOwnText(): string {
+  const chat = getZaruInit("chat")!.system_prompt;
+  const personality = sharedPersonality();
+  assert.ok(chat.startsWith(personality), "the chat prompt opens with the shared personality");
+  return chat.slice(personality.length);
+}
+
+/** The mode decision section: from its heading to the next top-level heading. */
+function modeDecisionSection(): string {
+  const own = chatOwnText();
+  const start = own.indexOf(MODE_DECISION_HEADING);
+  assert.ok(start >= 0, "the chat prompt holds the mode decision section");
+  const next = own.indexOf("\n# ", start + MODE_DECISION_HEADING.length);
+  return own.slice(start, next < 0 ? undefined : next);
+}
+
+test("W41: Chat mode's own text opens with the mode decision, before any other guidance", () => {
+  const own = chatOwnText();
+  assert.equal(
+    own.indexOf(MODE_DECISION_HEADING),
+    2,
+    "the mode decision is the first section after the shared personality",
+  );
+  const section = modeDecisionSection();
+  const afterSection = own.indexOf(section) + section.length;
+  for (const later of ["# IN THIS CONVERSATION", "workflow", "execute"]) {
+    const at = own.indexOf(later);
+    assert.ok(at < 0 || at >= afterSection, `'${later}' comes after the mode decision`);
+  }
+  assert.ok(
+    /decide[^.]*before you (?:work|plan|solve)/i.test(section),
+    "the section tells the model to decide before working anything out",
+  );
+});
+
+test("W41: the decision tells the model to call zaru.mode with agentic as its first act", () => {
+  const section = modeDecisionSection();
+  assert.ok(section.includes("call zaru.mode"), "names the call");
+  assert.ok(section.includes('mode "agentic"'), "names the target mode");
+  assert.ok(/first act/i.test(section), "the call is the first act");
+});
+
+test("W41: the criteria for Agentic are named by kind", () => {
+  const section = modeDecisionSection().toLowerCase();
+  const kinds: Array<[string, RegExp]> = [
+    ["exact computation", /exact computation/],
+    ["search over many constraints", /search over many/],
+    ["routing", /routing/],
+    ["scheduling", /scheduling/],
+    ["optimisation", /optimi[sz]ation/],
+    ["code to write or run", /code to write[^\n]*run/],
+    ["files to read or produce", /files to read[^\n]*produce/],
+    ["tools or the web", /the web/],
+    ["several steps", /several steps/],
+    ["minutes of work", /minute/],
+    ["checked or iterated", /checked[^\n]*(?:rerun|improved|iterat)/],
+  ];
+  for (const [name, pattern] of kinds) {
+    assert.ok(pattern.test(section), `the criteria name ${name}`);
+  }
+});
+
+test("W41: plain questions, conversation, planning and advice stay in Chat", () => {
+  const section = modeDecisionSection().toLowerCase();
+  assert.ok(/stay in chat/.test(section), "says what stays in Chat");
+  for (const kind of ["question", "conversation", "planning", "advice"]) {
+    assert.ok(section.includes(kind), `'${kind}' stays in Chat`);
+  }
+});
+
+test("W41: when unsure and a wrong guess means a failed answer, the switch is proposed", () => {
+  const section = modeDecisionSection().toLowerCase();
+  assert.ok(/unsure[^.]*fail/.test(section), "the unsure rule names the failed answer");
+  assert.ok(/never start solving/.test(section), "the model does not start solving to find out");
+});
+
+test("W41: the reason shown to the person is plain, and the example reason carries no jargon", () => {
+  const section = modeDecisionSection();
+  assert.ok(/one or two plain sentences/i.test(section), "the reason is one or two plain sentences");
+  assert.ok(/do not mention tokens, limits/i.test(section), "the reason never mentions tokens or limits");
+  const example = section.match(/For example: "([^"]+)"/);
+  assert.ok(example, "the section gives an example reason");
+  const banned = /\b(?:token|tokens|limit|limits|context|model|models|tool|tools|sandbox|aegis|mcp|api|llm|reasoning|budget|zaru\.mode)\b/i;
+  assert.ok(!banned.test(example![1]), `the example reason carries no jargon: ${example![1]}`);
+  const sentences = example![1].split(/(?<=[.!?])\s+/).filter((s) => s.length > 0);
+  assert.ok(sentences.length >= 1 && sentences.length <= 2, "the example reason is one or two sentences");
+});
+
+test("W41: the chat prompt no longer says the model cannot call tools, and names no surface's controls", () => {
+  const own = chatOwnText();
+  assert.ok(!own.includes("cannot execute tasks or call tools"), "the retired contradiction is gone");
+  // Zaru ADR-0027 D2: the served prompt is universal; a card or a button is one surface's.
+  assert.ok(!/\b(?:card|button|click|tap)\b/i.test(own), "no surface-specific control is named");
+});
+
+test("W41: after calling zaru.mode the model waits for the person", () => {
+  const section = modeDecisionSection();
+  assert.ok(/After you call zaru\.mode, stop/.test(section), "the model stops after the call");
+});
+
+// Every other prompt is byte for byte what it was at aegis-mcp-tools 688b587,
+// when the chat prompt's mode decision was written. A change to one of these
+// is a change to that mode's own record, not to W41.
+const UNCHANGED_PROMPTS: Array<[string, () => ReturnType<typeof getZaruInit>, number, string]> = [
+  ["agentic", () => getZaruInit("agentic"), 11018, "25b580646390fe7699ea041a2c198581bcdeee5ee52f946033a84356b4d3a4e0"],
+  ["agentic+chat-uploads", () => getZaruInit("agentic", new Set(["chat-uploads"])), 14828, "4a9780ed0d4313906119a26e21232097748e33f40becd01b2d333372d78f923d"],
+  ["workflow", () => getZaruInit("workflow"), 8757, "a8fbbbfdb6b57f23df9397a4e96da8bbd7f3ca601b0ded3ca94592c53c5d0233"],
+  ["workflow+chat-uploads", () => getZaruInit("workflow", new Set(["chat-uploads"])), 12567, "b36b1d794922ea0107a5e7df2c6ba3cb70c1a80309e6cdab683f858364337149"],
+  ["execute", () => getZaruInit("execute"), 10438, "c94952cf7250094103075794f8883f086b94e886f2279c5125e29fd7ed756991"],
+  ["live", () => getZaruInit("live", new Set(["live"]), "browser"), 7910, "217f83602b4e3f058945fc6e2e5baada5dd18651c76e3ac269d95ca92cf355a5"],
+  ["vibecode", () => getZaruInit("vibecode", new Set(["vibecode"]), "browser"), 11340, "149229a0ab6350a11ac8b68ef858247dedd316882a69ebc2a49711b49456bd83"],
+  ["operator", () => getZaruInit("operator", new Set(), undefined, { isOperator: true, tier: "operator" }), 9580, "dec8fb625ecbc5b5764ae2f4de787cb98b35e93d905d64f7047eff0f442ab56a"],
+];
+
+test("W41: every other mode's prompt is unchanged byte for byte", () => {
+  for (const [name, init, length, sha256] of UNCHANGED_PROMPTS) {
+    const prompt = init()!.system_prompt;
+    assert.equal(prompt.length, length, `'${name}' prompt length`);
+    assert.equal(createHash("sha256").update(prompt).digest("hex"), sha256, `'${name}' prompt bytes`);
   }
 });
