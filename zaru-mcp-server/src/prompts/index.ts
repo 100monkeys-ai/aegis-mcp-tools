@@ -159,6 +159,8 @@ A system message headed "Goal check" comes from Zaru, not from the user. It name
 **Step 5 — Files the run made.**
 If the wait result's \`produced_files\` lists a file, it already reaches the user as a download card on the result: do not call \`aegis.execution.file\` for it. Call \`aegis.execution.file\` only to read a text file's contents the user asked to see. If \`last_output\` names a file that \`produced_files\` does not list, the file was not made: say so.
 
+When the person asks you to stop, call aegis.goal.cancel at once: it stops the work and every run still going for it, and nothing starts again for it. Then say in one sentence that the work has stopped.
+
 ## TOOL KNOWLEDGE
 
 - \`aegis.execution.file\`: Read a file from a completed execution's workspace. Takes execution_id and path. The path can include or exclude the /workspace/ prefix — both work.
@@ -205,6 +207,8 @@ Call aegis.task.execute to run a test execution. You MUST then immediately call 
 
 **Step 6 — Report the result.**
 Only after aegis.task.wait returns (or after creation if no test was run): extract the \`last_output\` field from the aegis.task.wait response and present it directly to the user. Do NOT summarize it — output the content as-is. Format it appropriately: markdown as markdown, code in a code block, plain text as plain text. If \`last_output\` is null or empty and \`last_error\` is set, report the error clearly. Then tell the user what was built and how to use it.
+
+When the person asks you to stop, call aegis.goal.cancel at once: it stops the work and every run still going for it, and nothing starts again for it. Then say in one sentence that the work has stopped.
 ${ZARU_PROMISE}`;
 
 const OPERATOR_PROMPT = `${PERSONALITY}
@@ -357,6 +361,8 @@ Only after aegis.execute.wait returns: extract the \`last_output\` field from th
 
 **Step 5 — Files the run made.**
 If the wait result's \`produced_files\` lists a file, it already reaches the user as a download card on the result: do not call \`aegis.execution.file\` for it. Call \`aegis.execution.file\` only to read a text file's contents the user asked to see. If the wait result carries \`produced_files\` and \`last_output\` names a file that it does not list, the file was not made: say so. If the wait result carries no \`produced_files\`, do not say whether a file named in \`last_output\` was made.
+
+When the person asks you to stop, call aegis.goal.cancel at once: it stops the work and every run still going for it, and nothing starts again for it. Then say in one sentence that the work has stopped.
 
 ## TOOL KNOWLEDGE
 
@@ -531,6 +537,7 @@ const TOOL_SCOPES: Record<string, string[]> = {
     "aegis.tools.list",
     "aegis.tools.search",
     "aegis.execution.file",
+    "aegis.goal.cancel",
   ],
   execute: [
     "zaru.mode",
@@ -541,6 +548,7 @@ const TOOL_SCOPES: Record<string, string[]> = {
     "aegis.execute.status",
     "aegis.execute.wait",
     "aegis.execution.file",
+    "aegis.goal.cancel",
   ],
   workflow: [
     "zaru.mode",
@@ -560,6 +568,7 @@ const TOOL_SCOPES: Record<string, string[]> = {
     "aegis.task.wait",
     "aegis.workflow.wait",
     "aegis.execution.file",
+    "aegis.goal.cancel",
   ],
   live: [
     "zaru.mode",
@@ -619,6 +628,8 @@ const TOOL_SCOPES: Record<string, string[]> = {
     "aegis.workflow.signal",
     "aegis.workflow.delete",
     "aegis.task.remove",
+    // The person's stop: ends the goal and its work (AEGIS ADR-131 U33).
+    "aegis.goal.cancel",
   ],
 };
 

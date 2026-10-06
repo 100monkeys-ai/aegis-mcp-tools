@@ -31,7 +31,7 @@ import { unstable_dev, type Unstable_DevWorker } from "wrangler";
 const GOAL_ID = "5b0f3c2e-8d4a-4e1b-9a6c-2f7d1e0b3a94";
 const CONVERSATION_ID = "0c9e4d7a-3b2f-4a61-8e5d-7f1a2b3c4d5e";
 
-/** The three goal tools as the orchestrator would serve them (U8's shapes). */
+/** The goal tools as the orchestrator would serve them (U8's shapes, and U33's cancel). */
 const GOAL_TOOLS = [
   {
     name: "aegis.goal.create",
@@ -65,6 +65,15 @@ const GOAL_TOOLS = [
     inputSchema: {
       type: "object",
       properties: { goal_id: { type: "string" } },
+      required: ["goal_id"],
+    },
+  },
+  {
+    name: "aegis.goal.cancel",
+    description: "Stops the person's goal and every execution still running for it.",
+    inputSchema: {
+      type: "object",
+      properties: { goal_id: { type: "string" }, reason: { type: "string" } },
       required: ["goal_id"],
     },
   },

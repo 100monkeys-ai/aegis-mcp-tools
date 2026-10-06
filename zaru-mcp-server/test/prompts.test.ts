@@ -394,10 +394,12 @@ test("G8: the paragraph names no tool outside the agentic mode's tool list", () 
   assert.ok(!/aegis\.goal\./.test(GOAL_CHECK_PARAGRAPH), "the paragraph names no goal tool");
 });
 
-test("AEGIS ADR-131 D2 / G2: no mode's tool list offers a goal tool", () => {
+test("AEGIS ADR-131 D2 / G2, U33: no mode's tool list offers a goal tool but aegis.goal.cancel", () => {
   for (const [mode, init] of ALL_MODES) {
-    const goalTools = init!.available_tools.filter((t) => t.startsWith("aegis.goal."));
-    assert.deepEqual(goalTools, [], `'${mode}' must not list a goal tool`);
+    const goalTools = init!.available_tools.filter(
+      (t) => t.startsWith("aegis.goal.") && t !== "aegis.goal.cancel",
+    );
+    assert.deepEqual(goalTools, [], `'${mode}' must not list a goal tool other than aegis.goal.cancel`);
   }
 });
 
@@ -529,13 +531,15 @@ test("W41: after calling zaru.mode the model waits for the person", () => {
 // Zaru ADR-0020's Update of 2026-10-06 (K5, K5a, K5b: Step 5, files the run
 // made); the operator pin was re-measured for Zaru ADR-0050's Update of
 // 2026-10-06 (V2: a deployed agent is fixed in place with aegis.agent.update);
+// the agentic, workflow and execute pins (and their chat-uploads forms) were
+// re-measured for AEGIS ADR-131 U33 (the person's stop: aegis.goal.cancel);
 // every other pin stands as it was.
 const UNCHANGED_PROMPTS: Array<[string, () => ReturnType<typeof getZaruInit>, number, string]> = [
-  ["agentic", () => getZaruInit("agentic"), 11140, "e1233a0ffedfe786cb4eb570492b0f7931960f9c6401b364566f9d051abc1c45"],
-  ["agentic+chat-uploads", () => getZaruInit("agentic", new Set(["chat-uploads"])), 14950, "ccfaa41176bec9b18858e9e2e03e5c66226bf5925333d740b474c2e101c5c406"],
-  ["workflow", () => getZaruInit("workflow"), 8757, "a8fbbbfdb6b57f23df9397a4e96da8bbd7f3ca601b0ded3ca94592c53c5d0233"],
-  ["workflow+chat-uploads", () => getZaruInit("workflow", new Set(["chat-uploads"])), 12567, "b36b1d794922ea0107a5e7df2c6ba3cb70c1a80309e6cdab683f858364337149"],
-  ["execute", () => getZaruInit("execute"), 10564, "8d2345ff2bd8e895c15f17f65a5449a826b2f4040e627139d45a93c7f6857e0c"],
+  ["agentic", () => getZaruInit("agentic"), 11344, "f508986164aba954cd22f86f52620a0a6611e742b29af437d125b74db35f8a81"],
+  ["agentic+chat-uploads", () => getZaruInit("agentic", new Set(["chat-uploads"])), 15154, "1dc48b5caf4f04803afc0fb90bc81a6b68e6056b2731aacd8ce53d2bb5fe7903"],
+  ["workflow", () => getZaruInit("workflow"), 8961, "004c4e13d7459545e5b7383a65793674b16ff6bd71fee64e334b3e75881830ce"],
+  ["workflow+chat-uploads", () => getZaruInit("workflow", new Set(["chat-uploads"])), 12771, "95dda9946813085fc322ab2a777d7bff90366c769b6070ecc80469be63878119"],
+  ["execute", () => getZaruInit("execute"), 10768, "e33841b9d90b44106c324fa60522f6405c8fdd5a2962067610ed08cdb9b6941b"],
   ["live", () => getZaruInit("live", new Set(["live"]), "browser"), 7910, "217f83602b4e3f058945fc6e2e5baada5dd18651c76e3ac269d95ca92cf355a5"],
   ["vibecode", () => getZaruInit("vibecode", new Set(["vibecode"]), "browser"), 11340, "149229a0ab6350a11ac8b68ef858247dedd316882a69ebc2a49711b49456bd83"],
   ["operator", () => getZaruInit("operator", new Set(), undefined, { isOperator: true, tier: "operator" }), 9902, "e07c1f5f314a71f15932e86342fca8dfc5dc7b4b5e048d654f81a6e52f4f22b3"],
