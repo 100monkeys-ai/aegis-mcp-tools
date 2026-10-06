@@ -358,7 +358,7 @@ test("G8: the agentic prompt holds the Goal check paragraph verbatim, after Step
     const prompt = getZaruInit("agentic", caps)!.system_prompt;
     const step4 = prompt.indexOf("**Step 4 — Report the result.**");
     const at = prompt.indexOf(GOAL_CHECK_PARAGRAPH);
-    const step5 = prompt.indexOf("**Step 5 — Retrieve files if mentioned.**");
+    const step5 = prompt.indexOf("**Step 5 — Files the run made.**");
     assert.ok(step4 >= 0 && step5 > step4, "the agentic prompt has Step 4 then Step 5");
     assert.ok(at > step4, "the Goal check paragraph is in the agentic prompt, after Step 4");
     assert.ok(at < step5, "the Goal check paragraph comes before Step 5");
@@ -525,13 +525,15 @@ test("W41: after calling zaru.mode the model waits for the person", () => {
 // when the chat prompt's mode decision was written. A change to one of these
 // is a change to that mode's own record, not to W41. The two agentic pins were
 // re-measured for Zaru ADR-0026's Update of 2026-10-06 (D3a), that mode's own
-// record; every other pin stands as it was.
+// record; the two agentic pins and the execute pin were re-measured again for
+// Zaru ADR-0020's Update of 2026-10-06 (K5, K5a, K5b: Step 5, files the run
+// made); every other pin stands as it was.
 const UNCHANGED_PROMPTS: Array<[string, () => ReturnType<typeof getZaruInit>, number, string]> = [
-  ["agentic", () => getZaruInit("agentic"), 11152, "d25dcab6e6ad7e0aca90ef8547e94d19de22bb2141a307be24e2450678103063"],
-  ["agentic+chat-uploads", () => getZaruInit("agentic", new Set(["chat-uploads"])), 14962, "318fd96cfe39bbd92ed5d156e1353ee459871dbce160ff409c7d9ddfada9ca28"],
+  ["agentic", () => getZaruInit("agentic"), 11140, "e1233a0ffedfe786cb4eb570492b0f7931960f9c6401b364566f9d051abc1c45"],
+  ["agentic+chat-uploads", () => getZaruInit("agentic", new Set(["chat-uploads"])), 14950, "ccfaa41176bec9b18858e9e2e03e5c66226bf5925333d740b474c2e101c5c406"],
   ["workflow", () => getZaruInit("workflow"), 8757, "a8fbbbfdb6b57f23df9397a4e96da8bbd7f3ca601b0ded3ca94592c53c5d0233"],
   ["workflow+chat-uploads", () => getZaruInit("workflow", new Set(["chat-uploads"])), 12567, "b36b1d794922ea0107a5e7df2c6ba3cb70c1a80309e6cdab683f858364337149"],
-  ["execute", () => getZaruInit("execute"), 10438, "c94952cf7250094103075794f8883f086b94e886f2279c5125e29fd7ed756991"],
+  ["execute", () => getZaruInit("execute"), 10564, "8d2345ff2bd8e895c15f17f65a5449a826b2f4040e627139d45a93c7f6857e0c"],
   ["live", () => getZaruInit("live", new Set(["live"]), "browser"), 7910, "217f83602b4e3f058945fc6e2e5baada5dd18651c76e3ac269d95ca92cf355a5"],
   ["vibecode", () => getZaruInit("vibecode", new Set(["vibecode"]), "browser"), 11340, "149229a0ab6350a11ac8b68ef858247dedd316882a69ebc2a49711b49456bd83"],
   ["operator", () => getZaruInit("operator", new Set(), undefined, { isOperator: true, tier: "operator" }), 9580, "dec8fb625ecbc5b5764ae2f4de787cb98b35e93d905d64f7047eff0f442ab56a"],
@@ -602,4 +604,44 @@ test("ADR-0026 D3a: only talk about the work in hand is answered directly; conve
   assert.ok(chatLine, "rule 6 names the chat mode");
   assert.ok(/conversation alone/i.test(chatLine!), `the chat line is for conversation alone: ${chatLine}`);
   assert.ok(!/pure conversation with no execution needed/.test(own), "the old chat line is gone");
+});
+
+// ---------------------------------------------------------------------------
+// Files the run made (Zaru ADR-0020's Update of 2026-10-06, K5, K5a, K5b).
+// The result card of a completed aegis.task.wait or aegis.agent.wait lists
+// the execution's produced_files as download cards (zaru-client 7edc066), so
+// Step 5 no longer tells the model to fetch a file the person already has.
+// aegis.execute.wait carries no produced_files until AEGIS ADR-005 I9 lands,
+// so the Execute prompt calls a file unmade only when the key is present.
+// These tests pin the text; whether the model obeys it is proved on the live
+// page, not here.
+// ---------------------------------------------------------------------------
+
+/** K5's first sentence, verbatim from the record. */
+const K5_FIRST_SENTENCE =
+  "If the wait result's `produced_files` lists a file, it already reaches the user as a download card on the result: do not call `aegis.execution.file` for it.";
+
+/** K5a's fourth sentence, verbatim from the record: the Execute prompt only. */
+const K5A_FOURTH_SENTENCE =
+  "If the wait result carries no `produced_files`, do not say whether a file named in `last_output` was made.";
+
+test("ADR-0020 K5, K5a, K5b: Step 5 says a listed file already reaches the user, and no prompt still fetches every named file", () => {
+  const failures: string[] = [];
+  const changed: Array<[string, string]> = [
+    ["agentic", getZaruInit("agentic")!.system_prompt],
+    ["agentic+chat-uploads", getZaruInit("agentic", new Set(["chat-uploads"]))!.system_prompt],
+    ["execute", getZaruInit("execute")!.system_prompt],
+  ];
+  for (const [name, prompt] of changed) {
+    if (!prompt.includes(K5_FIRST_SENTENCE)) failures.push(`'${name}' does not hold K5's first sentence`);
+    if (prompt.includes("IMMEDIATELY call")) failures.push(`'${name}' still says "IMMEDIATELY call"`);
+    if (prompt.includes("Retrieve files if mentioned")) failures.push(`'${name}' still says "Retrieve files if mentioned"`);
+    if (!prompt.includes("**Step 5 — Files the run made.**")) failures.push(`'${name}' has no "Step 5 — Files the run made." heading`);
+  }
+  const execute = changed[2][1];
+  if (!execute.includes(K5A_FOURTH_SENTENCE)) failures.push("'execute' does not hold K5a's fourth sentence");
+  for (const [name, prompt] of changed.slice(0, 2)) {
+    if (prompt.includes(K5A_FOURTH_SENTENCE)) failures.push(`'${name}' holds K5a's fourth sentence, which is the Execute prompt's alone`);
+  }
+  assert.deepEqual(failures, [], failures.join("; "));
 });

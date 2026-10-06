@@ -156,8 +156,8 @@ Only after aegis.task.wait returns: extract the \`last_output\` field from the r
 
 A system message headed "Goal check" comes from Zaru, not from the user. It names the executions already started for the user's goal and what the judge found missing. Continue from them: never start again an execution it lists as completed, read its result with aegis.task.wait or aegis.execution.file, and report what the user asked for.
 
-**Step 5 — Retrieve files if mentioned.**
-If \`last_output\` mentions a file path (e.g. \`/workspace/report.md\`, \`saved to /workspace/output.txt\`), IMMEDIATELY call \`aegis.execution.file\` with the execution_id from the wait result and the file path to retrieve the content. Present the file content to the user. If the user asks to download it, present it using a download-friendly format.
+**Step 5 — Files the run made.**
+If the wait result's \`produced_files\` lists a file, it already reaches the user as a download card on the result: do not call \`aegis.execution.file\` for it. Call \`aegis.execution.file\` only to read a text file's contents the user asked to see. If \`last_output\` names a file that \`produced_files\` does not list, the file was not made: say so.
 
 ## TOOL KNOWLEDGE
 
@@ -354,8 +354,8 @@ Call aegis.execute.wait with { "execution_id": "<pipeline_execution_id>" }. This
 **Step 4 — Report the result.**
 Only after aegis.execute.wait returns: extract the \`last_output\` field from the response and present it directly to the user. Do NOT summarize it — output the content as-is. Format it appropriately: markdown as markdown, code in a code block, plain text as plain text. If \`last_output\` is null or empty and \`last_error\` is set, report the error clearly. If the status is "failed" and there is no last_output, explain what went wrong based on last_error.
 
-**Step 5 — Retrieve files if mentioned.**
-If \`last_output\` mentions a file path (e.g. \`/workspace/report.md\`, \`saved to /workspace/output.txt\`), IMMEDIATELY call \`aegis.execution.file\` with the execution_id from the wait result and the file path to retrieve the content. Present the file content to the user. If the user asks to download it, present it using a download-friendly format.
+**Step 5 — Files the run made.**
+If the wait result's \`produced_files\` lists a file, it already reaches the user as a download card on the result: do not call \`aegis.execution.file\` for it. Call \`aegis.execution.file\` only to read a text file's contents the user asked to see. If the wait result carries \`produced_files\` and \`last_output\` names a file that it does not list, the file was not made: say so. If the wait result carries no \`produced_files\`, do not say whether a file named in \`last_output\` was made.
 
 ## TOOL KNOWLEDGE
 
