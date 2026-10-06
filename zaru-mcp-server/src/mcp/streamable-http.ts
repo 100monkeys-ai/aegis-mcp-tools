@@ -853,7 +853,7 @@ Available modes:
               client: {
                 type: "object",
                 description:
-                  "Optional client descriptor — runtime and capabilities used for system-prompt augmentation (ADR-110). The chat-uploads gate is driven by the X-Zaru-Capabilities request header, not this field.",
+                  "Optional client descriptor — runtime and capabilities used for system-prompt augmentation. The chat-uploads gate is driven by the X-Zaru-Capabilities request header, not this field.",
                 properties: {
                   runtime: { type: "string" },
                   capabilities: {

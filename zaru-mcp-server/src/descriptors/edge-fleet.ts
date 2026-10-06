@@ -212,7 +212,7 @@ export const aegisEdgeFleetInvoke: FleetToolDefinition = {
       policy: {
         ...fleetPolicySchema,
         description:
-          "Dispatch policy. Defaults: { mode: 'sequential', failure_policy: 'fail-fast', per_target_deadline_secs: 60 } per ADR-117.",
+          "Dispatch policy. Defaults: { mode: 'sequential', failure_policy: 'fail-fast', per_target_deadline_secs: 60 }.",
       },
       security_context_name: {
         type: "string",
