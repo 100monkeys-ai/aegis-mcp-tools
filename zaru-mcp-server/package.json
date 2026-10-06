@@ -9,7 +9,7 @@
     "prepare": "npm run build",
     "test": "node --test --import ./test/register-ts-node.mjs test/*.test.ts",
     "worker:typecheck": "mkdir -p .wrangler/types && wrangler types --include-env=false .wrangler/types/runtime.d.ts && tsc -p tsconfig.worker.json",
-    "worker:test": "node --test --import ./test/register-ts-node.mjs test/*.worker.test.ts",
+    "worker:test": "node --test --test-timeout=30000 --test-force-exit --import ./test/register-ts-node.mjs test/*.worker.test.ts",
     "worker:dry-run": "wrangler deploy --dry-run --env staging --outdir .wrangler/dry-run/staging && wrangler deploy --dry-run --env production --outdir .wrangler/dry-run/production"
   },
   "engines": {

@@ -70,3 +70,4 @@ temp/
 # Ignore OS files
 Thumbs.db
 Desktop.ini
+.wrangler/

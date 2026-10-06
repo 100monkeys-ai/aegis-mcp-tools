@@ -22,6 +22,7 @@ before(async () => {
     ip: "127.0.0.1",
     port: 0,
     logLevel: "warn",
+    persist: false,
     vars: {
       AEGIS_ORCHESTRATOR_URL: stub.url,
       ZARU_CLIENT_URL: stub.url,
