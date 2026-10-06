@@ -527,7 +527,9 @@ test("W41: after calling zaru.mode the model waits for the person", () => {
 // re-measured for Zaru ADR-0026's Update of 2026-10-06 (D3a), that mode's own
 // record; the two agentic pins and the execute pin were re-measured again for
 // Zaru ADR-0020's Update of 2026-10-06 (K5, K5a, K5b: Step 5, files the run
-// made); every other pin stands as it was.
+// made); the operator pin was re-measured for Zaru ADR-0050's Update of
+// 2026-10-06 (V2: a deployed agent is fixed in place with aegis.agent.update);
+// every other pin stands as it was.
 const UNCHANGED_PROMPTS: Array<[string, () => ReturnType<typeof getZaruInit>, number, string]> = [
   ["agentic", () => getZaruInit("agentic"), 11140, "e1233a0ffedfe786cb4eb570492b0f7931960f9c6401b364566f9d051abc1c45"],
   ["agentic+chat-uploads", () => getZaruInit("agentic", new Set(["chat-uploads"])), 14950, "ccfaa41176bec9b18858e9e2e03e5c66226bf5925333d740b474c2e101c5c406"],
@@ -536,7 +538,7 @@ const UNCHANGED_PROMPTS: Array<[string, () => ReturnType<typeof getZaruInit>, nu
   ["execute", () => getZaruInit("execute"), 10564, "8d2345ff2bd8e895c15f17f65a5449a826b2f4040e627139d45a93c7f6857e0c"],
   ["live", () => getZaruInit("live", new Set(["live"]), "browser"), 7910, "217f83602b4e3f058945fc6e2e5baada5dd18651c76e3ac269d95ca92cf355a5"],
   ["vibecode", () => getZaruInit("vibecode", new Set(["vibecode"]), "browser"), 11340, "149229a0ab6350a11ac8b68ef858247dedd316882a69ebc2a49711b49456bd83"],
-  ["operator", () => getZaruInit("operator", new Set(), undefined, { isOperator: true, tier: "operator" }), 9580, "dec8fb625ecbc5b5764ae2f4de787cb98b35e93d905d64f7047eff0f442ab56a"],
+  ["operator", () => getZaruInit("operator", new Set(), undefined, { isOperator: true, tier: "operator" }), 9902, "e07c1f5f314a71f15932e86342fca8dfc5dc7b4b5e048d654f81a6e52f4f22b3"],
 ];
 
 test("W41: every other mode's prompt is unchanged byte for byte", () => {
@@ -545,6 +547,42 @@ test("W41: every other mode's prompt is unchanged byte for byte", () => {
     assert.equal(prompt.length, length, `'${name}' prompt length`);
     assert.equal(createHash("sha256").update(prompt).digest("hex"), sha256, `'${name}' prompt bytes`);
   }
+});
+
+// ---------------------------------------------------------------------------
+// Operator mode: a deployed agent is fixed in place (Zaru ADR-0050's Update of
+// 2026-10-06, V1 to V4). Jeshua: "We should add agent update to operator
+// tools". The escalated connection already carried the update tools; the
+// operator mode's own list and prompt did not, so a model in that mode had no
+// way to fix a deployed agent's manifest but to create another.
+// ---------------------------------------------------------------------------
+
+const operatorInit = () => getZaruInit("operator", new Set(), undefined, { isOperator: true, tier: "operator" })!;
+
+test("ADR-0050 V1: the operator mode lists the update tools and the export the update needs", () => {
+  const tools = operatorInit().available_tools;
+  const missing = ["aegis.agent.update", "aegis.workflow.update", "aegis.workflow.signal", "aegis.agent.export"].filter(
+    (tool) => !tools.includes(tool),
+  );
+  assert.deepEqual(missing, [], `the operator tool list lacks ${missing.join(", ")}`);
+});
+
+test("ADR-0050 V2: the operator prompt fixes a deployed agent's manifest with aegis.agent.update", () => {
+  const prompt = operatorInit().system_prompt;
+  assert.ok(
+    prompt.includes("then call aegis.agent.update with { \"manifest_yaml\": \"<the changed manifest>\" }") &&
+      prompt.includes("raise its metadata.version"),
+    "the operator prompt names aegis.agent.update with manifest_yaml as the way to fix a deployed agent's manifest",
+  );
+  assert.ok(!/\bforce\b/.test(prompt), "the operator prompt never names force");
+});
+
+test("ADR-0050 V4: every aegis.* tool the operator prompt names is in the operator tool list", () => {
+  const init = operatorInit();
+  const named = [...new Set(init.system_prompt.match(/aegis\.[a-z_]+(?:\.[a-z_]+)+/g) ?? [])];
+  assert.ok(named.length > 0, "the operator prompt names aegis.* tools");
+  const unlisted = named.filter((tool) => !init.available_tools.includes(tool));
+  assert.deepEqual(unlisted, [], `the operator prompt names tools its list lacks: ${unlisted.join(", ")}`);
 });
 
 // ---------------------------------------------------------------------------

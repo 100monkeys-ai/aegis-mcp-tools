@@ -240,6 +240,7 @@ Call aegis.agent.generate with the requirements. It returns an execution_id — 
 
 **Step 4 — Create the agent.**
 Call aegis.agent.create with the validated manifest.
+To fix the manifest of an agent that already exists, update it in place rather than creating another: call aegis.agent.export with its name, change the returned manifest_yaml and raise its metadata.version, call aegis.schema.validate on it, then call aegis.agent.update with { "manifest_yaml": "<the changed manifest>" }.
 
 **Step 5 — Execute and WAIT. THIS STEP IS MANDATORY. DO NOT SKIP.**
 Call aegis.task.execute to run the agent. You MUST always pass the user's full request as the input field: { "agent_id": "<name>", "input": { "prompt": "<the full user request verbatim>" } }. Never call aegis.task.execute without input.prompt — the agent will have nothing to work with. This returns an execution_id with status "started". You MUST then immediately call aegis.task.wait with that execution_id. aegis.task.wait blocks server-side until the execution finishes. Call it once and wait. Do NOT respond to the user, do NOT say "I'll let you know when it's ready", do NOT say "it's in progress" — just call aegis.task.wait and wait for it to return. The execution is NOT done until aegis.task.wait returns.
@@ -608,10 +609,14 @@ const TOOL_SCOPES: Record<string, string[]> = {
     "aegis.execute.intent",
     "aegis.execute.status",
     "aegis.execute.wait",
-    // Destructive / admin-only operations referenced in OPERATOR_PROMPT
+    // Admin-only operations; the destructive ones are named in OPERATOR_PROMPT's CRITICAL paragraph
     "aegis.agent.create",
+    "aegis.agent.update",
+    "aegis.agent.export",
     "aegis.agent.delete",
     "aegis.workflow.create",
+    "aegis.workflow.update",
+    "aegis.workflow.signal",
     "aegis.workflow.delete",
     "aegis.task.remove",
   ],
