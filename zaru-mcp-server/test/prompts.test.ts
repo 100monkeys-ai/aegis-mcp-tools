@@ -523,10 +523,12 @@ test("W41: after calling zaru.mode the model waits for the person", () => {
 
 // Every other prompt is byte for byte what it was at aegis-mcp-tools 688b587,
 // when the chat prompt's mode decision was written. A change to one of these
-// is a change to that mode's own record, not to W41.
+// is a change to that mode's own record, not to W41. The two agentic pins were
+// re-measured for Zaru ADR-0026's Update of 2026-10-06 (D3a), that mode's own
+// record; every other pin stands as it was.
 const UNCHANGED_PROMPTS: Array<[string, () => ReturnType<typeof getZaruInit>, number, string]> = [
-  ["agentic", () => getZaruInit("agentic"), 11018, "25b580646390fe7699ea041a2c198581bcdeee5ee52f946033a84356b4d3a4e0"],
-  ["agentic+chat-uploads", () => getZaruInit("agentic", new Set(["chat-uploads"])), 14828, "4a9780ed0d4313906119a26e21232097748e33f40becd01b2d333372d78f923d"],
+  ["agentic", () => getZaruInit("agentic"), 11152, "d25dcab6e6ad7e0aca90ef8547e94d19de22bb2141a307be24e2450678103063"],
+  ["agentic+chat-uploads", () => getZaruInit("agentic", new Set(["chat-uploads"])), 14962, "318fd96cfe39bbd92ed5d156e1353ee459871dbce160ff409c7d9ddfada9ca28"],
   ["workflow", () => getZaruInit("workflow"), 8757, "a8fbbbfdb6b57f23df9397a4e96da8bbd7f3ca601b0ded3ca94592c53c5d0233"],
   ["workflow+chat-uploads", () => getZaruInit("workflow", new Set(["chat-uploads"])), 12567, "b36b1d794922ea0107a5e7df2c6ba3cb70c1a80309e6cdab683f858364337149"],
   ["execute", () => getZaruInit("execute"), 10438, "c94952cf7250094103075794f8883f086b94e886f2279c5125e29fd7ed756991"],
@@ -541,4 +543,63 @@ test("W41: every other mode's prompt is unchanged byte for byte", () => {
     assert.equal(prompt.length, length, `'${name}' prompt length`);
     assert.equal(createHash("sha256").update(prompt).digest("hex"), sha256, `'${name}' prompt bytes`);
   }
+});
+
+// ---------------------------------------------------------------------------
+// Agentic mode: every request for a result is dispatched (Zaru ADR-0026's
+// Update of 2026-10-06, D3a). Asked "43 inches in centimeters" in Agentic
+// mode, the model answered it itself with no agent: the prompt's rules fired
+// on a list of "do" verbs (create, write, generate, analyze, process...) and
+// no line covered a question the model could answer from what it knows. The
+// trigger is now the request for a result, however simple, with no verb list;
+// only talk about the work in hand is answered directly, and conversation
+// alone is offered Chat. These tests pin the text; whether the model obeys
+// it is proved on the live page, not here.
+// ---------------------------------------------------------------------------
+
+/** Agentic mode's own text: after the shared personality, before the Zaru promise. */
+function agenticOwnText(caps?: Set<string>): string {
+  const agentic = getZaruInit("agentic", caps)!.system_prompt;
+  const personality = sharedPersonality();
+  assert.ok(agentic.startsWith(personality), "the agentic prompt opens with the shared personality");
+  const end = agentic.indexOf("\n# THE ZARU PROMISE");
+  assert.ok(end > personality.length, "the agentic prompt closes with the Zaru promise");
+  return agentic.slice(personality.length, end);
+}
+
+/** Verbs a request might be phrased with. Two of them in one comma-separated run are a verb list. */
+const REQUEST_VERBS =
+  "(?:create|write|generate|analy[sz]e|process|compute|calculate|convert|look up|produce|research|automate|send|summari[sz]e|translate|search|find|build|make)";
+const VERB_LIST = new RegExp(`\\b${REQUEST_VERBS}\\b[^,.\\n]{0,24},\\s*(?:(?:and|or)\\s+)?\\b${REQUEST_VERBS}\\b`, "i");
+
+test("ADR-0026 D3a: the Agentic text says every request for a result is dispatched, however simple, and names no verb list", () => {
+  for (const caps of [undefined, new Set(["chat-uploads"])]) {
+    const own = agenticOwnText(caps);
+    const failures: string[] = [];
+    if (!/every request for a result/i.test(own)) failures.push("it does not say every request for a result is dispatched");
+    if (!/however simple/i.test(own)) failures.push("it does not say however simple");
+    const list = own.match(VERB_LIST);
+    if (list) failures.push(`it names a verb list: "${list[0]}"`);
+    if (/asks you to DO\b/.test(own)) failures.push('the rules still fire on "asks you to DO"');
+    assert.deepEqual(failures, [], `Agentic text (${caps ? "chat-uploads" : "base"}): ${failures.join("; ")}`);
+  }
+});
+
+test("ADR-0026 D3a: the mandatory sequence covers every request for a result and starts with aegis.agent.list", () => {
+  const own = agenticOwnText();
+  const heading = own.indexOf("## MANDATORY SEQUENCE");
+  assert.ok(heading >= 0, "the Agentic text holds the mandatory sequence");
+  const step1 = own.indexOf("**Step 1", heading);
+  const intro = own.slice(heading, step1);
+  assert.ok(/every request for a result/i.test(intro), "the sequence is for every request for a result");
+  assert.ok(/aegis\.agent\.list FIRST/.test(own.slice(step1, own.indexOf("**Step 2", step1))), "Step 1 calls aegis.agent.list first");
+});
+
+test("ADR-0026 D3a: only talk about the work in hand is answered directly; conversation alone is offered Chat through zaru.mode", () => {
+  const own = agenticOwnText();
+  assert.ok(/answer directly[^.]*work in hand|work in hand[^.]*answer(?:ed)? directly/i.test(own), "talk about the work in hand is answered directly");
+  const chatLine = own.split("\n").find((line) => line.startsWith("- chat:"));
+  assert.ok(chatLine, "rule 6 names the chat mode");
+  assert.ok(/conversation alone/i.test(chatLine!), `the chat line is for conversation alone: ${chatLine}`);
+  assert.ok(!/pure conversation with no execution needed/.test(own), "the old chat line is gone");
 });
