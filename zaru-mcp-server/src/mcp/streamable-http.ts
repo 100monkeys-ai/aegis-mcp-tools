@@ -741,10 +741,72 @@ export function parseCapabilitiesHeader(
   return out;
 }
 
+/**
+ * The header carrying a conversation's chosen contexts: a JSON object naming,
+ * for each remote server, the binding the person chose (its id) or `null`
+ * for none. The orchestrator lists and calls that server's tools with the
+ * chosen binding; the model never sees it (AEGIS ADR-132 S7, S8; Zaru
+ * ADR-0055 D19b).
+ */
+export const ZARU_CONTEXTS_HEADER = "x-zaru-contexts";
+
+/** A conversation's choices: server name to binding id, or `null` for none. */
+export type ContextChoices = Record<string, string | null>;
+
+/** The refusal of an `x-zaru-contexts` header of any other shape. */
+export const CONTEXTS_HEADER_SHAPE =
+  "x-zaru-contexts must be a JSON object naming a binding id or null for each server";
+
+const BINDING_ID =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Parse the `x-zaru-contexts` header: absent is no choice (`{}`); a JSON
+ * object whose every value is a binding id (a UUID) or `null` is the
+ * choices; anything else is the refusal `CONTEXTS_HEADER_SHAPE`, which the
+ * entrypoints answer 400.
+ */
+export function parseContextsHeader(
+  headerValue: string | string[] | null | undefined,
+): { contexts?: ContextChoices } | { error: string } {
+  if (headerValue === undefined || headerValue === null) return {};
+  if (Array.isArray(headerValue)) return { error: CONTEXTS_HEADER_SHAPE };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(headerValue);
+  } catch {
+    return { error: CONTEXTS_HEADER_SHAPE };
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    return { error: CONTEXTS_HEADER_SHAPE };
+  }
+  const contexts: ContextChoices = {};
+  for (const [server, choice] of Object.entries(parsed)) {
+    if (choice === null) {
+      contexts[server] = null;
+    } else if (typeof choice === "string" && BINDING_ID.test(choice)) {
+      contexts[server] = choice;
+    } else {
+      return { error: CONTEXTS_HEADER_SHAPE };
+    }
+  }
+  return { contexts };
+}
+
+/** Whether the choices name a binding for any server. */
+export function contextChosen(contexts: ContextChoices | undefined): boolean {
+  return (
+    contexts !== undefined &&
+    Object.values(contexts).some((choice) => typeof choice === "string")
+  );
+}
+
 /** What a server learns from its request beyond the user and capabilities. */
 export interface McpRequestContext {
   /** The request carries `x-zaru-turn` (see `carriesZaruTurn`). */
   zaruTurn?: boolean;
+  /** The conversation's chosen contexts (`x-zaru-contexts`), if any. */
+  contexts?: ContextChoices;
 }
 
 /**
@@ -776,7 +838,20 @@ export function createMcpServerForUser(
   );
 
   mcpServer.server.setRequestHandler(ListToolsRequestSchema, async () => {
-    const tools = await client.listTools(user);
+    const listed = await client.listTools(user);
+    // The chosen contexts' tools, listed by the orchestrator with the chosen
+    // binding; best effort: a failure lists none of them and is logged.
+    let contextTools: Awaited<ReturnType<OrchestratorClient["listContextTools"]>> = [];
+    if (contextChosen(context.contexts)) {
+      try {
+        contextTools = await client.listContextTools(user, context.contexts!);
+      } catch (error) {
+        logError("context.tools.failed", {
+          error: error instanceof Error ? error : { message: String(error) },
+        });
+      }
+    }
+    const tools = [...listed, ...contextTools];
     // Per-caller mode enum: filter the advertised modes so the schema only
     // exposes options the caller can actually invoke. The same set is
     // mirrored by the dispatch-time gate in `getZaruInit`.
@@ -967,7 +1042,13 @@ Available modes:
         | { runtime?: string; capabilities?: unknown }
         | undefined;
       const merged = resolveCapabilities(capabilities, client?.capabilities);
-      const result = getZaruInit(mode, merged, client?.runtime, user);
+      const result = getZaruInit(
+        mode,
+        merged,
+        client?.runtime,
+        user,
+        contextChosen(context.contexts),
+      );
       if (!result) {
         return {
           content: [
@@ -1021,7 +1102,13 @@ Available modes:
         | { runtime?: string; capabilities?: unknown }
         | undefined;
       const merged = resolveCapabilities(capabilities, client?.capabilities);
-      const result = getZaruInit(targetMode, merged, client?.runtime, user);
+      const result = getZaruInit(
+        targetMode,
+        merged,
+        client?.runtime,
+        user,
+        contextChosen(context.contexts),
+      );
       if (!result) {
         return {
           content: [
@@ -1109,7 +1196,7 @@ Available modes:
         name,
         (args as Record<string, unknown>) ?? {},
         null,
-        { requestId },
+        { requestId, contexts: context.contexts },
       );
       return normalizeToolResult(result);
     } catch (error) {
@@ -1146,6 +1233,11 @@ export async function handleStreamableHttp(
   const capabilities = parseCapabilitiesHeader(
     req.headers["x-zaru-capabilities"],
   );
+  const chosen = parseContextsHeader(req.headers[ZARU_CONTEXTS_HEADER]);
+  if ("error" in chosen) {
+    res.status(400).json({ error: chosen.error });
+    return;
+  }
 
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: undefined,
@@ -1157,7 +1249,10 @@ export async function handleStreamableHttp(
     capabilities,
     req.requestId,
     orchestratorClient,
-    { zaruTurn: carriesZaruTurn(req.headers[ZARU_TURN_HEADER]) },
+    {
+      zaruTurn: carriesZaruTurn(req.headers[ZARU_TURN_HEADER]),
+      contexts: chosen.contexts,
+    },
   );
   await server.connect(transport);
 

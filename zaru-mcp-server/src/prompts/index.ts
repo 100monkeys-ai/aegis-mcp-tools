@@ -83,7 +83,7 @@ Call zaru.mode with mode "agentic" as your first act, before you write anything 
 - exact computation, or a search over many options or constraints: routing, scheduling, timetables, optimisation, allocation, large calculations
 - code to write, run or test
 - files to read, produce or change, or data to analyse
-- tools, the web, current information, or anything in the user's own accounts and systems
+- tools, the web, current information, or anything in the user's own accounts and systems other than the chosen context
 - work with several steps, or work that would take more than a minute or two to do properly
 - a result the user will want checked, rerun or improved
 
@@ -515,6 +515,16 @@ PASS-THROUGH RULES:
 - Do NOT fabricate or hallucinate \`attachments\` entries. You do not see the array; the platform handles it. If a downstream agent surfaces a "what file?" error, that means your dispatch was wrong — do not try to construct fake \`{volume_id, path}\` refs to satisfy it.
 - Do NOT paraphrase the user's intent in ways that lose the attachment signal. A request "summarize this document" with the marker present must reach \`aegis.agent.generate\` as something like "summarize the attached document" — NOT paraphrased into "create a generic text-input agent that summarizes documents."`;
 
+// A conversation's chosen context (AEGIS ADR-132 S7, S8; Zaru ADR-0055
+// D19, D19b): when the person has chosen one above the chat input, its tools
+// are listed in every mode and this teaching is appended to the mode's
+// prompt. Without a chosen context the prompt is exactly what it was.
+const CONTEXT_TEACHING = `
+
+# THE PERSON'S CHOSEN CONTEXT
+
+The person has chosen a context above the chat input, and its tools are listed to you under its name (for Nuclear Notes, the tools whose names begin with nuclear-notes.). They reach what the person keeps there, as the person, and nothing else. When a message touches something the person may have written down, search and read it with these tools within this turn before you answer, and name what you read so the person can open it. Read and change only what the message asks for. If a call is refused, tell the person in one sentence and answer without it.`;
+
 /** Modes that accept and forward `attachments` when the chat-uploads capability is active. */
 const CHAT_UPLOADS_MODES = new Set(["agentic", "workflow"]);
 
@@ -720,6 +730,7 @@ export function getZaruInit(
   capabilities: ReadonlySet<string> = new Set(),
   runtime?: string,
   user?: { isOperator: boolean; tier: string },
+  contextChosen = false,
 ): ZaruInitResponse | null {
   const effectiveMode = mode ?? "chat";
 
@@ -756,10 +767,11 @@ export function getZaruInit(
   // When the client declares the "chat-uploads" capability and is in an
   // attachment-aware mode, augment the system prompt with pass-through
   // teaching for the `attachments` field on tool call inputs.
-  const augmentedPrompt =
+  const withUploads =
     capabilities.has("chat-uploads") && CHAT_UPLOADS_MODES.has(effectiveMode)
       ? prompt + CHAT_UPLOADS_TEACHING
       : prompt;
+  const augmentedPrompt = contextChosen ? withUploads + CONTEXT_TEACHING : withUploads;
 
   return {
     mode: effectiveMode,

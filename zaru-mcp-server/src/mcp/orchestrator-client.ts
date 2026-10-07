@@ -679,7 +679,16 @@ export class OrchestratorClient {
     name: string,
     args: Record<string, unknown>,
     id: string | number | null,
-    context: { requestId?: string } = {},
+    context: {
+      requestId?: string;
+      /**
+       * A conversation's chosen contexts (`x-zaru-contexts`): sent in the
+       * signed payload's `params._meta.contexts`, never in the arguments, so
+       * the orchestrator calls a chosen context's tool with the chosen
+       * binding and the remote server never sees it (AEGIS ADR-132 S7).
+       */
+      contexts?: Record<string, string | null>;
+    } = {},
   ): Promise<unknown> {
     const start = process.hrtime.bigint();
     const baseFields: Record<string, unknown> = {
@@ -708,6 +717,7 @@ export class OrchestratorClient {
         params: {
           name,
           arguments: bounded ? bounded.args : args,
+          ...(context.contexts ? { _meta: { contexts: context.contexts } } : {}),
         },
       });
       const result = bounded
@@ -777,6 +787,55 @@ export class OrchestratorClient {
       });
       throw error;
     }
+  }
+
+  /**
+   * The tools of each remote server the conversation chose a binding for
+   * (AEGIS ADR-132 S8): a signed `tools/list` with `params._meta.contexts`
+   * to `POST /v1/seal/context-tools`, under the person's SEAL session. The
+   * orchestrator lists each chosen server with the chosen binding and
+   * filters by the session's context. A refusal or failure is thrown as
+   * `OrchestratorInvokeError`; the caller decides what to list instead.
+   */
+  async listContextTools(
+    user: ZaruUser,
+    contexts: Record<string, string | null>,
+  ): Promise<AegisToolDefinition[]> {
+    const payload: JsonRpcRequest = {
+      jsonrpc: "2.0",
+      id: null,
+      method: "tools/list",
+      params: { _meta: { contexts } },
+    };
+    const post = async (session: ZaruSealSession) =>
+      this.fetchImpl(resolveUrl(this.baseUrl, "/v1/seal/context-tools"), {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.securityToken}`,
+        },
+        body: JSON.stringify(
+          buildSealEnvelope(session.securityToken, payload, session.keyPair.privateKey),
+        ),
+        signal: AbortSignal.timeout(30_000),
+      });
+    const cacheKey = `${user.userId}:${user.tenantId ?? "personal"}`;
+    let response = await post(await this.getOrCreateSession(user));
+    if (response.status === 401) {
+      // As a tool call: only a 401 is a session condition; attest again once.
+      this.sessionCache.delete(cacheKey);
+      const fresh = await this.createSession(user);
+      this.sessionCache.set(cacheKey, fresh);
+      response = await post(fresh);
+    }
+    if (!response.ok) {
+      throw new OrchestratorInvokeError(
+        response.status,
+        tryParseJson(await response.text()),
+        { retryAfter: response.headers.get("retry-after") },
+      );
+    }
+    return normalizeToolList(await response.json());
   }
 
   private async invokeJsonRpc(

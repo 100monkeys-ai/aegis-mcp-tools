@@ -687,3 +687,45 @@ test("ADR-0020 K5, K5a, K5b: Step 5 says a listed file already reaches the user,
   }
   assert.deepEqual(failures, [], failures.join("; "));
 });
+
+// ---------------------------------------------------------------------------
+// A conversation's chosen context (AEGIS ADR-132 S7, S8; Zaru ADR-0055 D19b):
+// with a context chosen, every mode's prompt ends with the teaching, once;
+// without one, every prompt is byte for byte as pinned above.
+// ---------------------------------------------------------------------------
+
+const CONTEXT_HEADING = "# THE PERSON'S CHOSEN CONTEXT";
+
+test("D19b: a chosen context appends its teaching to every mode's prompt, once, at the end", () => {
+  const operator = { isOperator: true, tier: "operator" };
+  const complaints: string[] = [];
+  for (const [mode, caps, runtime] of [
+    ["chat", new Set<string>(), undefined],
+    ["agentic", new Set(["chat-uploads"]), undefined],
+    ["workflow", new Set<string>(), undefined],
+    ["execute", new Set<string>(), undefined],
+    ["live", new Set(["live"]), "browser"],
+    ["vibecode", new Set(["vibecode"]), "browser"],
+    ["operator", new Set<string>(), undefined],
+  ] as const) {
+    const without = getZaruInit(mode, caps, runtime, operator)!.system_prompt;
+    const withContext = getZaruInit(mode, caps, runtime, operator, true)!.system_prompt;
+    if (without.includes(CONTEXT_HEADING)) complaints.push(`${mode}: taught with no context`);
+    if (withContext.split(CONTEXT_HEADING).length !== 2) complaints.push(`${mode}: not taught once`);
+    if (!withContext.startsWith(without)) complaints.push(`${mode}: the mode's own prompt changed`);
+    if (!withContext.endsWith("tell the person in one sentence and answer without it.")) {
+      complaints.push(`${mode}: the teaching is not last`);
+    }
+  }
+  assert.deepEqual(complaints, []);
+});
+
+test("D19b: chat mode sends the person's own accounts to Agentic only beyond the chosen context", () => {
+  const chat = getZaruInit("chat")!.system_prompt;
+  assert.ok(
+    chat.includes(
+      "anything in the user's own accounts and systems other than the chosen context\n",
+    ),
+    "the chat prompt's routing line names the chosen context",
+  );
+});

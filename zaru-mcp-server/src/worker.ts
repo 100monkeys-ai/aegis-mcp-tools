@@ -32,10 +32,12 @@ import {
   WAIT_CEILING_SECONDS,
 } from "./mcp/orchestrator-client.js";
 import {
+  ZARU_CONTEXTS_HEADER,
   ZARU_TURN_HEADER,
   carriesZaruTurn,
   createMcpServerForUser,
   parseCapabilitiesHeader,
+  parseContextsHeader,
 } from "./mcp/streamable-http.js";
 
 // Per isolate, as the container's is per process: its caches are the SEAL
@@ -83,6 +85,8 @@ async function handleMcpPost(
   const capabilities = parseCapabilitiesHeader(
     request.headers.get("x-zaru-capabilities") ?? undefined,
   );
+  const chosen = parseContextsHeader(request.headers.get(ZARU_CONTEXTS_HEADER));
+  if ("error" in chosen) return json({ error: chosen.error }, 400);
   // Stateless, as src/mcp/streamable-http.ts: a fresh transport and server
   // per request, holding nothing between requests.
   const transport = new WebStandardStreamableHTTPServerTransport({
@@ -94,7 +98,10 @@ async function handleMcpPost(
     capabilities,
     requestId,
     orchestratorClient,
-    { zaruTurn: carriesZaruTurn(request.headers.get(ZARU_TURN_HEADER)) },
+    {
+      zaruTurn: carriesZaruTurn(request.headers.get(ZARU_TURN_HEADER)),
+      contexts: chosen.contexts,
+    },
   );
   await server.connect(transport);
   try {
