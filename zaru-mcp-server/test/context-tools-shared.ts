@@ -4,7 +4,8 @@
 // with the orchestrator replaced by a loopback stub: API-key validation, SEAL
 // tool discovery, attest, invoke and the context-tools listing. The stub
 // lists `nuclear-notes.search` when the listing's `_meta.contexts` names a
-// binding id for `nuclear-notes`, and refuses a listing naming FAILING_BINDING.
+// binding id, or a list of them, for `nuclear-notes` (Zaru ADR-0055 D20f),
+// and refuses a listing naming FAILING_BINDING.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createServer, type IncomingMessage, type Server } from "node:http";
@@ -14,6 +15,7 @@ export const API_KEY = "aegis_context_tools_test_key";
 export const NODE_TOOL = "aegis.stub.echo";
 export const CONTEXT_TOOL = "nuclear-notes.search";
 export const BINDING = "3f2a9c1e-7b4d-4e8a-9c21-5d6e7f8a9b0c";
+export const SECOND_BINDING = "7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f";
 export const FAILING_BINDING = "00000000-0000-4000-8000-00000000dead";
 
 export interface ContextStub {
@@ -92,7 +94,8 @@ export async function startContextStub(): Promise<ContextStub> {
         | { _meta?: { contexts?: Record<string, unknown> } }
         | undefined;
       const choice = params?._meta?.contexts?.["nuclear-notes"];
-      if (choice === FAILING_BINDING) {
+      const named = typeof choice === "string" ? [choice] : Array.isArray(choice) ? choice : [];
+      if (named.includes(FAILING_BINDING)) {
         sendJson(403, {
           protocol: "seal/v1",
           request_id: "6b1f1d2e-3c4d-4e5f-8a9b-0c1d2e3f4a5b",
@@ -109,7 +112,7 @@ export async function startContextStub(): Promise<ContextStub> {
       sendJson(200, {
         protocol: "seal/v1",
         tools:
-          typeof choice === "string"
+          named.length > 0
             ? [
                 {
                   name: CONTEXT_TOOL,
@@ -254,18 +257,70 @@ export function registerContextToolsTests(
     const { post, stub } = context();
     const before = stub.invoked.length;
     const complaints: string[] = [];
-    for (const header of ["not json", JSON.stringify({ "nuclear-notes": "not-a-uuid" }), "[]"]) {
+    for (const header of [
+      "not json",
+      JSON.stringify({ "nuclear-notes": "not-a-uuid" }),
+      "[]",
+      // A list must be non-empty, of binding ids, each named once whatever its
+      // case (Zaru ADR-0055 D20f; ADR-0058 D3a).
+      JSON.stringify({ "nuclear-notes": [] }),
+      JSON.stringify({ "nuclear-notes": [BINDING, BINDING.toUpperCase()] }),
+      JSON.stringify({ "nuclear-notes": [BINDING, "not-a-uuid"] }),
+      JSON.stringify({ "nuclear-notes": [BINDING, null] }),
+    ]) {
       const res = await post(
         { jsonrpc: "2.0", id: nextId++, method: "tools/list", params: {} },
         headersFor(header),
       );
       const body = await res.text();
       if (res.status !== 400) complaints.push(`${header}: HTTP ${res.status}`);
-      if (!body.includes("x-zaru-contexts must be a JSON object naming a binding id or null for each server")) {
+      if (!body.includes("x-zaru-contexts must be a JSON object naming, for each server, a binding id, a list of binding ids, or null")) {
         complaints.push(`${header}: answered ${body}`);
       }
     }
     if (stub.invoked.length !== before) complaints.push("a call was forwarded");
+    assert.deepEqual(complaints, []);
+  });
+
+  test(`${label}: a list of bindings is accepted and forwarded unchanged, on the listing and on a call`, async () => {
+    const { post, stub } = context();
+    const contexts = { "nuclear-notes": [BINDING, SECOND_BINDING], github: null };
+    const header = JSON.stringify(contexts);
+    const listingsBefore = stub.listings.length;
+    const invokedBefore = stub.invoked.length;
+    const names = await listedNames(post, header);
+    await rpc(post, "tools/call", { name: CONTEXT_TOOL, arguments: { query: "q" } }, header);
+    const complaints: string[] = [];
+    if (!names.includes(CONTEXT_TOOL)) complaints.push(`not listed: ${CONTEXT_TOOL} in ${names.join(", ")}`);
+    const listing = stub.listings[listingsBefore];
+    const listingMeta = (listing?.params as { _meta?: unknown } | undefined)?._meta;
+    if (JSON.stringify(listingMeta) !== JSON.stringify({ contexts })) {
+      complaints.push(`the listing's _meta was ${JSON.stringify(listingMeta)}`);
+    }
+    const call = stub.invoked[invokedBefore] as { params: { _meta?: unknown } } | undefined;
+    if (JSON.stringify(call?.params._meta) !== JSON.stringify({ contexts })) {
+      complaints.push(`the call's _meta was ${JSON.stringify(call?.params._meta)}`);
+    }
+    assert.deepEqual(complaints, []);
+  });
+
+  test(`${label}: zaru.init teaches GitHub's sentence for a github binding, and the generic one for a server with none of its own`, async () => {
+    const { post } = context();
+    const prompt = async (contexts: string) => {
+      const answer = await rpc(post, "tools/call", { name: "zaru.init", arguments: { mode: "chat" } }, contexts);
+      const text = (answer.result as { content: Array<{ text: string }> }).content[0]!.text;
+      return (JSON.parse(text) as { system_prompt: string }).system_prompt;
+    };
+    const github = "The tools whose names begin with github. reach the person's GitHub repositories, issues and pull requests as their token allows.";
+    const generic = "The tools whose names begin with imap. reach the person's imap connection as their credential allows.";
+    const nuclearNotes = "for Nuclear Notes, the tools whose names begin with nuclear-notes.";
+    const complaints: string[] = [];
+    const withGithub = await prompt(JSON.stringify({ github: [BINDING], "nuclear-notes": null }));
+    if (!withGithub.includes(github)) complaints.push("github: GitHub's sentence not taught");
+    if (withGithub.includes(nuclearNotes)) complaints.push("github: Nuclear Notes' paragraph taught");
+    const withImap = await prompt(JSON.stringify({ imap: [BINDING] }));
+    if (!withImap.includes(generic)) complaints.push("imap: the generic sentence not taught");
+    if (withImap.includes(nuclearNotes)) complaints.push("imap: Nuclear Notes' paragraph taught");
     assert.deepEqual(complaints, []);
   });
 

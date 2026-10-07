@@ -743,27 +743,29 @@ export function parseCapabilitiesHeader(
 
 /**
  * The header carrying a conversation's chosen contexts: a JSON object naming,
- * for each remote server, the binding the person chose (its id) or `null`
- * for none. The orchestrator lists and calls that server's tools with the
+ * for each remote server, the binding the person chose (its id), the
+ * bindings (a non-empty list of distinct ids), or `null` for none (Zaru
+ * ADR-0055 D20f). The orchestrator lists and calls that server's tools with the
  * chosen binding; the model never sees it (AEGIS ADR-132 S7, S8; Zaru
  * ADR-0055 D19b).
  */
 export const ZARU_CONTEXTS_HEADER = "x-zaru-contexts";
 
-/** A conversation's choices: server name to binding id, or `null` for none. */
-export type ContextChoices = Record<string, string | null>;
+/** A conversation's choices: server name to a binding id, a list of them, or `null` for none. */
+export type ContextChoices = Record<string, string | string[] | null>;
 
 /** The refusal of an `x-zaru-contexts` header of any other shape. */
 export const CONTEXTS_HEADER_SHAPE =
-  "x-zaru-contexts must be a JSON object naming a binding id or null for each server";
+  "x-zaru-contexts must be a JSON object naming, for each server, a binding id, a list of binding ids, or null";
 
 const BINDING_ID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
  * Parse the `x-zaru-contexts` header: absent is no choice (`{}`); a JSON
- * object whose every value is a binding id (a UUID) or `null` is the
- * choices; anything else is the refusal `CONTEXTS_HEADER_SHAPE`, which the
+ * object whose every value is a binding id (a UUID), a non-empty list of
+ * binding ids with none named twice (compared without regard to case), or
+ * `null` is the choices, kept as sent; anything else is the refusal `CONTEXTS_HEADER_SHAPE`, which the
  * entrypoints answer 400.
  */
 export function parseContextsHeader(
@@ -786,6 +788,13 @@ export function parseContextsHeader(
       contexts[server] = null;
     } else if (typeof choice === "string" && BINDING_ID.test(choice)) {
       contexts[server] = choice;
+    } else if (
+      Array.isArray(choice) &&
+      choice.length > 0 &&
+      choice.every((id) => typeof id === "string" && BINDING_ID.test(id)) &&
+      new Set(choice.map((id: string) => id.toLowerCase())).size === choice.length
+    ) {
+      contexts[server] = choice as string[];
     } else {
       return { error: CONTEXTS_HEADER_SHAPE };
     }
@@ -793,11 +802,13 @@ export function parseContextsHeader(
   return { contexts };
 }
 
-/** Whether the choices name a binding for any server. */
+/** Whether the choices name at least one binding for any server. */
 export function contextChosen(contexts: ContextChoices | undefined): boolean {
   return (
     contexts !== undefined &&
-    Object.values(contexts).some((choice) => typeof choice === "string")
+    Object.values(contexts).some(
+      (choice) => typeof choice === "string" || (Array.isArray(choice) && choice.length > 0),
+    )
   );
 }
 
@@ -1047,7 +1058,7 @@ Available modes:
         merged,
         client?.runtime,
         user,
-        contextChosen(context.contexts),
+        context.contexts ?? {},
       );
       if (!result) {
         return {
@@ -1107,7 +1118,7 @@ Available modes:
         merged,
         client?.runtime,
         user,
-        contextChosen(context.contexts),
+        context.contexts ?? {},
       );
       if (!result) {
         return {

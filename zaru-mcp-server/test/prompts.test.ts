@@ -692,32 +692,156 @@ test("ADR-0020 K5, K5a, K5b: Step 5 says a listed file already reaches the user,
 });
 
 // ---------------------------------------------------------------------------
-// A conversation's chosen context (AEGIS ADR-132 S7, S8; Zaru ADR-0055 D19b):
-// with a context chosen, every mode's prompt ends with the teaching, once;
+// A conversation's chosen contexts (AEGIS ADR-132 S7, S8; Zaru ADR-0055 D19b,
+// D20f; Zaru ADR-0058 D3, D3a): with a binding chosen, every mode's prompt ends
+// with the teaching under one heading, one sentence per chosen server in a
+// fixed order (nuclear-notes, github, then any other server by name), and the
+// several-of-one-kind sentence last when a server names two or more bindings;
 // without one, every prompt is byte for byte as pinned above.
 // ---------------------------------------------------------------------------
 
 const CONTEXT_HEADING = "# THE PERSON'S CHOSEN CONTEXT";
 
-test("D19b: a chosen context appends its teaching to every mode's prompt, once, at the end", () => {
-  const operator = { isOperator: true, tier: "operator" };
+/** The teaching as it stood with one context type, before ADR-0058 D3. */
+const NUCLEAR_NOTES_TEACHING =
+  "\n\n# THE PERSON'S CHOSEN CONTEXT\n\nThe person has chosen a context above the chat input, and its tools are listed to you under its name (for Nuclear Notes, the tools whose names begin with nuclear-notes.). They reach what the person keeps there, as the person, and nothing else. When a message touches something the person may have written down, search and read it with these tools within this turn before you answer, and name what you read so the person can open it. Read and change only what the message asks for. If a call is refused, tell the person in one sentence and answer without it.";
+
+const NUCLEAR_NOTES_SENTENCE = NUCLEAR_NOTES_TEACHING.slice(`\n\n${CONTEXT_HEADING}\n\n`.length);
+
+const GITHUB_SENTENCE =
+  "The tools whose names begin with github. reach the person's GitHub repositories, issues and pull requests as their token allows. Read and change only what the message asks for. A merge or a change to a file on GitHub waits for the person's approval; say so when you make one. If a call is refused, tell the person in one sentence and answer without it.";
+
+const genericSentence = (server: string) =>
+  `The tools whose names begin with ${server}. reach the person's ${server} connection as their credential allows. Read and change only what the message asks for. If a call is refused, tell the person in one sentence and answer without it.`;
+
+const SEVERAL_OF_ONE_KIND =
+  "When you have several contexts of one kind, each of their tools takes '_context': name the one the message means, and say which you used.";
+
+const BINDING_A = "3f2a9c1e-7b4d-4e8a-9c21-5d6e7f8a9b0c";
+const BINDING_B = "7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f";
+const BINDING_C = "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d";
+
+const CONTEXT_MODES = [
+  ["chat", new Set<string>(), undefined],
+  ["agentic", new Set(["chat-uploads"]), undefined],
+  ["workflow", new Set<string>(), undefined],
+  ["execute", new Set<string>(), undefined],
+  ["live", new Set(["live"]), "browser"],
+  ["vibecode", new Set(["vibecode"]), "browser"],
+  ["operator", new Set<string>(), undefined],
+] as const;
+
+const CONTEXT_OPERATOR = { isOperator: true, tier: "operator" };
+
+/** What each mode's prompt gains from `contexts`, or a complaint when its own prompt changed. */
+type Contexts = Record<string, string | string[] | null>;
+
+function teachingsFor(contexts: Contexts): Array<[string, string]> {
+  return CONTEXT_MODES.map(([mode, caps, runtime]) => {
+    const without = getZaruInit(mode, caps, runtime, CONTEXT_OPERATOR)!.system_prompt;
+    const withContexts = getZaruInit(mode, caps, runtime, CONTEXT_OPERATOR, contexts)!.system_prompt;
+    if (!withContexts.startsWith(without)) return [mode, `the mode's own prompt changed`];
+    return [mode, withContexts.slice(without.length)];
+  });
+}
+
+/** The teaching built from its parts, as D3 and D3a order them. */
+function taught(...sentences: string[]): string {
+  return `\n\n${CONTEXT_HEADING}` + sentences.map((s) => `\n\n${s}`).join("");
+}
+
+test("D3: Nuclear Notes alone is taught exactly as before, once, at the end of every mode's prompt", () => {
   const complaints: string[] = [];
-  for (const [mode, caps, runtime] of [
-    ["chat", new Set<string>(), undefined],
-    ["agentic", new Set(["chat-uploads"]), undefined],
-    ["workflow", new Set<string>(), undefined],
-    ["execute", new Set<string>(), undefined],
-    ["live", new Set(["live"]), "browser"],
-    ["vibecode", new Set(["vibecode"]), "browser"],
-    ["operator", new Set<string>(), undefined],
-  ] as const) {
-    const without = getZaruInit(mode, caps, runtime, operator)!.system_prompt;
-    const withContext = getZaruInit(mode, caps, runtime, operator, true)!.system_prompt;
-    if (without.includes(CONTEXT_HEADING)) complaints.push(`${mode}: taught with no context`);
-    if (withContext.split(CONTEXT_HEADING).length !== 2) complaints.push(`${mode}: not taught once`);
-    if (!withContext.startsWith(without)) complaints.push(`${mode}: the mode's own prompt changed`);
-    if (!withContext.endsWith("tell the person in one sentence and answer without it.")) {
-      complaints.push(`${mode}: the teaching is not last`);
+  for (const contexts of [{ "nuclear-notes": [BINDING_A] }, { "nuclear-notes": BINDING_A, github: null }] as Contexts[]) {
+    for (const [mode, gained] of teachingsFor(contexts)) {
+      if (gained !== NUCLEAR_NOTES_TEACHING) {
+        complaints.push(`${mode} ${JSON.stringify(contexts)}: taught ${JSON.stringify(gained.slice(0, 120))}`);
+      }
+    }
+  }
+  assert.deepEqual(complaints, []);
+});
+
+test("D3: a chosen github binding appends GitHub's sentence once in every mode; none, null or Nuclear Notes alone does not", () => {
+  const complaints: string[] = [];
+  for (const [mode, gained] of teachingsFor({ github: [BINDING_A] })) {
+    if (gained !== taught(GITHUB_SENTENCE)) complaints.push(`${mode}: GitHub not taught alone, got ${JSON.stringify(gained.slice(0, 160))}`);
+  }
+  for (const contexts of [{}, { github: null }, { "nuclear-notes": [BINDING_A] }] as Contexts[]) {
+    for (const [mode, gained] of teachingsFor(contexts)) {
+      if (gained.includes(GITHUB_SENTENCE)) complaints.push(`${mode} ${JSON.stringify(contexts)}: GitHub taught`);
+    }
+  }
+  assert.deepEqual(complaints, []);
+});
+
+test("D3: both types chosen teach both sentences under one heading, Nuclear Notes first", () => {
+  const complaints: string[] = [];
+  // The header names GitHub first; the teaching's order is the table's.
+  for (const [mode, gained] of teachingsFor({ github: [BINDING_B], "nuclear-notes": [BINDING_A] })) {
+    if (gained !== taught(NUCLEAR_NOTES_SENTENCE, GITHUB_SENTENCE)) {
+      complaints.push(`${mode}: both types not taught in order, got ${JSON.stringify(gained.slice(0, 160))}`);
+    }
+  }
+  assert.deepEqual(complaints, []);
+});
+
+test("D3a: a server with no sentence of its own takes the generic sentence, never Nuclear Notes' paragraph, after the table's servers by name", () => {
+  const complaints: string[] = [];
+  for (const [mode, gained] of teachingsFor({ imap: [BINDING_A] })) {
+    if (gained !== taught(genericSentence("imap"))) {
+      complaints.push(`${mode}: imap not taught the generic sentence, got ${JSON.stringify(gained.slice(0, 160))}`);
+    }
+  }
+  for (const [mode, gained] of teachingsFor({
+    zeta: BINDING_C,
+    imap: [BINDING_B],
+    github: [BINDING_A],
+    "nuclear-notes": BINDING_A,
+  })) {
+    const expected = taught(NUCLEAR_NOTES_SENTENCE, GITHUB_SENTENCE, genericSentence("imap"), genericSentence("zeta"));
+    if (gained !== expected) complaints.push(`${mode}: four servers not taught in the fixed order, got ${JSON.stringify(gained.slice(-200))}`);
+  }
+  assert.deepEqual(complaints, []);
+});
+
+test("D20f: two bindings of one type append the '_context' sentence last; one binding each does not", () => {
+  const complaints: string[] = [];
+  for (const [mode, gained] of teachingsFor({ "nuclear-notes": [BINDING_A, BINDING_B], github: [BINDING_C] })) {
+    if (gained !== taught(NUCLEAR_NOTES_SENTENCE, GITHUB_SENTENCE, SEVERAL_OF_ONE_KIND)) {
+      complaints.push(`${mode}: the several-of-one-kind sentence is not last, got ${JSON.stringify(gained.slice(-200))}`);
+    }
+  }
+  for (const [mode, gained] of teachingsFor({ "nuclear-notes": [BINDING_A], github: BINDING_B })) {
+    if (gained.includes(SEVERAL_OF_ONE_KIND)) complaints.push(`${mode}: one binding each taught '_context'`);
+  }
+  assert.deepEqual(complaints, []);
+});
+
+/** The arguments of the eight pinned prompts above, by name. */
+const PINNED_ARGUMENTS: Array<[string, string, Set<string>, string | undefined, typeof CONTEXT_OPERATOR | undefined]> = [
+  ["agentic", "agentic", new Set(), undefined, undefined],
+  ["agentic+chat-uploads", "agentic", new Set(["chat-uploads"]), undefined, undefined],
+  ["workflow", "workflow", new Set(), undefined, undefined],
+  ["workflow+chat-uploads", "workflow", new Set(["chat-uploads"]), undefined, undefined],
+  ["execute", "execute", new Set(), undefined, undefined],
+  ["live", "live", new Set(["live"]), "browser", undefined],
+  ["vibecode", "vibecode", new Set(["vibecode"]), "browser", undefined],
+  ["operator", "operator", new Set(), undefined, CONTEXT_OPERATOR],
+];
+
+test("D3: with no context chosen ({}, every server null) every pinned prompt is unchanged", () => {
+  const complaints: string[] = [];
+  for (const contexts of [{}, { "nuclear-notes": null, github: null }] as Contexts[]) {
+    for (const [name, mode, caps, runtime, user] of PINNED_ARGUMENTS) {
+      const [, , length, sha256] = UNCHANGED_PROMPTS.find(([pinned]) => pinned === name)!;
+      const prompt = getZaruInit(mode, caps, runtime, user, contexts)!.system_prompt;
+      if (prompt.length !== length || createHash("sha256").update(prompt).digest("hex") !== sha256) {
+        complaints.push(`'${name}' with ${JSON.stringify(contexts)}: the pinned prompt changed (length ${prompt.length})`);
+      }
+    }
+    for (const [mode, gained] of teachingsFor(contexts)) {
+      if (gained !== "") complaints.push(`${mode} with ${JSON.stringify(contexts)}: taught`);
     }
   }
   assert.deepEqual(complaints, []);

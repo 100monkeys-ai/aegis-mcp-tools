@@ -687,7 +687,7 @@ export class OrchestratorClient {
        * the orchestrator calls a chosen context's tool with the chosen
        * binding and the remote server never sees it (AEGIS ADR-132 S7).
        */
-      contexts?: Record<string, string | null>;
+      contexts?: Record<string, string | string[] | null>;
     } = {},
   ): Promise<unknown> {
     const start = process.hrtime.bigint();
@@ -799,7 +799,7 @@ export class OrchestratorClient {
    */
   async listContextTools(
     user: ZaruUser,
-    contexts: Record<string, string | null>,
+    contexts: Record<string, string | string[] | null>,
   ): Promise<AegisToolDefinition[]> {
     const payload: JsonRpcRequest = {
       jsonrpc: "2.0",

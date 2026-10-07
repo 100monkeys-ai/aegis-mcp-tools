@@ -517,15 +517,64 @@ PASS-THROUGH RULES:
 - Do NOT fabricate or hallucinate \`attachments\` entries. You do not see the array; the platform handles it. If a downstream agent surfaces a "what file?" error, that means your dispatch was wrong — do not try to construct fake \`{volume_id, path}\` refs to satisfy it.
 - Do NOT paraphrase the user's intent in ways that lose the attachment signal. A request "summarize this document" with the marker present must reach \`aegis.agent.generate\` as something like "summarize the attached document" — NOT paraphrased into "create a generic text-input agent that summarizes documents."`;
 
-// A conversation's chosen context (AEGIS ADR-132 S7, S8; Zaru ADR-0055
-// D19, D19b): when the person has chosen one above the chat input, its tools
-// are listed in every mode and this teaching is appended to the mode's
-// prompt. Without a chosen context the prompt is exactly what it was.
-const CONTEXT_TEACHING = `
+// A conversation's chosen contexts (AEGIS ADR-132 S7, S8; Zaru ADR-0055
+// D19, D19b, D20f; Zaru ADR-0058 D3, D3a): when the person has chosen
+// bindings above the chat input, their tools are listed in every mode and
+// this teaching is appended to the mode's prompt, under one heading: one
+// sentence per chosen server, in a fixed order (the table's servers, then any
+// other server by name), and the several-of-one-kind sentence last when a
+// server names two or more bindings. With Nuclear Notes alone chosen the
+// teaching is byte for byte what it was with one context type; without a
+// chosen context the prompt is exactly what it was.
 
-# THE PERSON'S CHOSEN CONTEXT
+/** A conversation's choices: server name to a binding id, a list of them, or `null`. */
+export type ChosenContexts = Readonly<Record<string, string | readonly string[] | null>>;
 
-The person has chosen a context above the chat input, and its tools are listed to you under its name (for Nuclear Notes, the tools whose names begin with nuclear-notes.). They reach what the person keeps there, as the person, and nothing else. When a message touches something the person may have written down, search and read it with these tools within this turn before you answer, and name what you read so the person can open it. Read and change only what the message asks for. If a call is refused, tell the person in one sentence and answer without it.`;
+const CONTEXT_HEADING = `
+
+# THE PERSON'S CHOSEN CONTEXT`;
+
+/** The servers with a sentence of their own, in the order they are taught. */
+const CONTEXT_SENTENCES: ReadonlyArray<readonly [string, string]> = [
+  [
+    "nuclear-notes",
+    "The person has chosen a context above the chat input, and its tools are listed to you under its name (for Nuclear Notes, the tools whose names begin with nuclear-notes.). They reach what the person keeps there, as the person, and nothing else. When a message touches something the person may have written down, search and read it with these tools within this turn before you answer, and name what you read so the person can open it. Read and change only what the message asks for. If a call is refused, tell the person in one sentence and answer without it.",
+  ],
+  [
+    "github",
+    "The tools whose names begin with github. reach the person's GitHub repositories, issues and pull requests as their token allows. Read and change only what the message asks for. A merge or a change to a file on GitHub waits for the person's approval; say so when you make one. If a call is refused, tell the person in one sentence and answer without it.",
+  ],
+];
+
+/** The sentence of a chosen server with none of its own. */
+function genericContextSentence(server: string): string {
+  return `The tools whose names begin with ${server}. reach the person's ${server} connection as their credential allows. Read and change only what the message asks for. If a call is refused, tell the person in one sentence and answer without it.`;
+}
+
+const SEVERAL_OF_ONE_KIND =
+  "When you have several contexts of one kind, each of their tools takes '_context': name the one the message means, and say which you used.";
+
+function bindingCount(choice: string | readonly string[] | null): number {
+  if (choice === null) return 0;
+  return typeof choice === "string" ? 1 : choice.length;
+}
+
+/** The teaching for `contexts`, or "" when no server names a binding. */
+function contextTeaching(contexts: ChosenContexts): string {
+  const chosen = Object.entries(contexts).filter(([, choice]) => bindingCount(choice) > 0);
+  if (chosen.length === 0) return "";
+  const servers = new Set(chosen.map(([server]) => server));
+  const known = new Set(CONTEXT_SENTENCES.map(([server]) => server));
+  const sentences = [
+    ...CONTEXT_SENTENCES.filter(([server]) => servers.has(server)).map(([, sentence]) => sentence),
+    ...[...servers]
+      .filter((server) => !known.has(server))
+      .sort()
+      .map(genericContextSentence),
+  ];
+  if (chosen.some(([, choice]) => bindingCount(choice) >= 2)) sentences.push(SEVERAL_OF_ONE_KIND);
+  return CONTEXT_HEADING + sentences.map((sentence) => `\n\n${sentence}`).join("");
+}
 
 /** Modes that accept and forward `attachments` when the chat-uploads capability is active. */
 const CHAT_UPLOADS_MODES = new Set(["agentic", "workflow"]);
@@ -736,7 +785,7 @@ export function getZaruInit(
   capabilities: ReadonlySet<string> = new Set(),
   runtime?: string,
   user?: { isOperator: boolean; tier: string },
-  contextChosen = false,
+  contexts: ChosenContexts = {},
 ): ZaruInitResponse | null {
   const effectiveMode = mode ?? "chat";
 
@@ -777,7 +826,7 @@ export function getZaruInit(
     capabilities.has("chat-uploads") && CHAT_UPLOADS_MODES.has(effectiveMode)
       ? prompt + CHAT_UPLOADS_TEACHING
       : prompt;
-  const augmentedPrompt = contextChosen ? withUploads + CONTEXT_TEACHING : withUploads;
+  const augmentedPrompt = withUploads + contextTeaching(contexts);
 
   return {
     mode: effectiveMode,

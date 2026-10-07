@@ -9,7 +9,8 @@
 // the mode enum, and with and without the Worker's wait ceiling (which adds a
 // sentence to every `.wait` tool); the server's instructions; and every mode's
 // system prompt as `zaru.init` and `zaru.mode` build it (`getZaruInit`, then
-// the empty-memory section). Beside that, the edge-fleet descriptors are read
+// the empty-memory section), with no context chosen and with every context
+// sentence taught. Beside that, the edge-fleet descriptors are read
 // from their module directly: nothing in this repository serves them, and the
 // published package may. Code comments are not facing text and keep their
 // references.
@@ -160,6 +161,24 @@ test("facing text: every mode's system prompt names no decision record", () => {
     ["vibecode", getZaruInit("vibecode", new Set(["vibecode"]), "browser")],
     ["operator", getZaruInit("operator", new Set(), undefined, operator)],
   ];
+  // With every context sentence taught: Nuclear Notes', GitHub's, the generic
+  // one, and the several-of-one-kind sentence.
+  const contexts = {
+    "nuclear-notes": ["3f2a9c1e-7b4d-4e8a-9c21-5d6e7f8a9b0c", "7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f"],
+    github: ["0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d"],
+    imap: "1b2c3d4e-5f6a-4b7c-8d9e-0f1a2b3c4d5e",
+  };
+  for (const [mode, caps, runtime] of [
+    ["chat", new Set<string>(), undefined],
+    ["agentic", new Set(["chat-uploads"]), undefined],
+    ["workflow", new Set<string>(), undefined],
+    ["execute", new Set<string>(), undefined],
+    ["live", new Set(["live"]), "browser"],
+    ["vibecode", new Set(["vibecode"]), "browser"],
+    ["operator", new Set<string>(), undefined],
+  ] as const) {
+    inits.push([`${mode}+contexts`, getZaruInit(mode, caps, runtime, operator, contexts)]);
+  }
   for (const [mode, init] of inits) {
     assert.ok(init, `getZaruInit answers ${mode}`);
     const prompt = appendMemoryToSystemPrompt(init.system_prompt, { content: "" });
