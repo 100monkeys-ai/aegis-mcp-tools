@@ -518,12 +518,15 @@ PASS-THROUGH RULES:
 - Do NOT paraphrase the user's intent in ways that lose the attachment signal. A request "summarize this document" with the marker present must reach \`aegis.agent.generate\` as something like "summarize the attached document" — NOT paraphrased into "create a generic text-input agent that summarizes documents."`;
 
 // A conversation's chosen contexts (AEGIS ADR-132 S7, S8; Zaru ADR-0055
-// D19, D19b, D20f; Zaru ADR-0058 D3, D3a): when the person has chosen
-// bindings above the chat input, their tools are listed in every mode and
-// this teaching is appended to the mode's prompt, under one heading: one
-// sentence per chosen server, in a fixed order (the table's servers, then any
-// other server by name), and the several-of-one-kind sentence last when a
-// server names two or more bindings. With Nuclear Notes alone chosen the
+// D19, D19b, D20f; Zaru ADR-0058 D3, D3a; Zaru ADR-0048 3f): when the person
+// has chosen bindings above the chat input, their tools are listed in every
+// mode and this teaching is appended to the mode's prompt, under one heading:
+// one sentence per chosen server, in a fixed order (the table's servers, then
+// any other server by name), and the several-of-one-kind sentence last when a
+// server whose tools name their binding by '_context' names two or more
+// bindings. The mail tools name their mailbox by their own 'mailbox' argument
+// (Zaru ADR-0048 Update (2) 3c, AEGIS ADR-125 Update (2) clause 2), so
+// mailboxes never add that sentence. With Nuclear Notes alone chosen the
 // teaching is byte for byte what it was with one context type; without a
 // chosen context the prompt is exactly what it was.
 
@@ -534,15 +537,26 @@ const CONTEXT_HEADING = `
 
 # THE PERSON'S CHOSEN CONTEXT`;
 
-/** The servers with a sentence of their own, in the order they are taught. */
-const CONTEXT_SENTENCES: ReadonlyArray<readonly [string, string]> = [
+/**
+ * The servers with a sentence of their own, in the order they are taught:
+ * the server, its sentence, and whether its tools name their binding by
+ * '_context' when several are chosen. A server not in this table does.
+ */
+const CONTEXT_SENTENCES: ReadonlyArray<readonly [string, string, boolean]> = [
   [
     "nuclear-notes",
     "The person has chosen a context above the chat input, and its tools are listed to you under its name (for Nuclear Notes, the tools whose names begin with nuclear-notes.). They reach what the person keeps there, as the person, and nothing else. When a message touches something the person may have written down, search and read it with these tools within this turn before you answer, and name what you read so the person can open it. Read and change only what the message asks for. If a call is refused, tell the person in one sentence and answer without it.",
+    true,
   ],
   [
     "github",
     "The tools whose names begin with github. reach the person's GitHub repositories, issues and pull requests as their token allows. Read and change only what the message asks for. A merge or a change to a file on GitHub waits for the person's approval; say so when you make one. If a call is refused, tell the person in one sentence and answer without it.",
+    true,
+  ],
+  [
+    "imap",
+    "The tools whose names begin with mail. reach the person's mailbox they chose above the chat input: list, read and flag their threads, and nothing else until they ask. A call names which mailbox in 'mailbox' when several are chosen; with one chosen it is set for you. Read only what the message asks for; never send, delete or move mail unless the message asks, and say so when you do. If a call is refused, tell the person in one sentence and answer without it.",
+    false,
   ],
 ];
 
@@ -572,7 +586,12 @@ function contextTeaching(contexts: ChosenContexts): string {
       .sort()
       .map(genericContextSentence),
   ];
-  if (chosen.some(([, choice]) => bindingCount(choice) >= 2)) sentences.push(SEVERAL_OF_ONE_KIND);
+  const namedByOwnArgument = new Set(
+    CONTEXT_SENTENCES.filter(([, , takesContext]) => !takesContext).map(([server]) => server),
+  );
+  if (chosen.some(([server, choice]) => !namedByOwnArgument.has(server) && bindingCount(choice) >= 2)) {
+    sentences.push(SEVERAL_OF_ONE_KIND);
+  }
   return CONTEXT_HEADING + sentences.map((sentence) => `\n\n${sentence}`).join("");
 }
 

@@ -304,7 +304,7 @@ export function registerContextToolsTests(
     assert.deepEqual(complaints, []);
   });
 
-  test(`${label}: zaru.init teaches GitHub's sentence for a github binding, and the generic one for a server with none of its own`, async () => {
+  test(`${label}: zaru.init teaches GitHub's sentence for a github binding, the mailbox sentence for an imap binding, and the generic one for a server with none of its own`, async () => {
     const { post } = context();
     const prompt = async (contexts: string) => {
       const answer = await rpc(post, "tools/call", { name: "zaru.init", arguments: { mode: "chat" } }, contexts);
@@ -312,15 +312,21 @@ export function registerContextToolsTests(
       return (JSON.parse(text) as { system_prompt: string }).system_prompt;
     };
     const github = "The tools whose names begin with github. reach the person's GitHub repositories, issues and pull requests as their token allows.";
-    const generic = "The tools whose names begin with imap. reach the person's imap connection as their credential allows.";
+    const mailbox = "The tools whose names begin with mail. reach the person's mailbox they chose above the chat input";
+    const imapGeneric = "The tools whose names begin with imap.";
+    const generic = "The tools whose names begin with zeta. reach the person's zeta connection as their credential allows.";
     const nuclearNotes = "for Nuclear Notes, the tools whose names begin with nuclear-notes.";
     const complaints: string[] = [];
     const withGithub = await prompt(JSON.stringify({ github: [BINDING], "nuclear-notes": null }));
     if (!withGithub.includes(github)) complaints.push("github: GitHub's sentence not taught");
     if (withGithub.includes(nuclearNotes)) complaints.push("github: Nuclear Notes' paragraph taught");
     const withImap = await prompt(JSON.stringify({ imap: [BINDING] }));
-    if (!withImap.includes(generic)) complaints.push("imap: the generic sentence not taught");
+    if (!withImap.includes(mailbox)) complaints.push("imap: the mailbox sentence not taught");
+    if (withImap.includes(imapGeneric)) complaints.push("imap: the generic sentence taught");
     if (withImap.includes(nuclearNotes)) complaints.push("imap: Nuclear Notes' paragraph taught");
+    const withZeta = await prompt(JSON.stringify({ zeta: [BINDING] }));
+    if (!withZeta.includes(generic)) complaints.push("zeta: the generic sentence not taught");
+    if (withZeta.includes(nuclearNotes)) complaints.push("zeta: Nuclear Notes' paragraph taught");
     assert.deepEqual(complaints, []);
   });
 

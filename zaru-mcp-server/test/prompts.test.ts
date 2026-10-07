@@ -693,11 +693,13 @@ test("ADR-0020 K5, K5a, K5b: Step 5 says a listed file already reaches the user,
 
 // ---------------------------------------------------------------------------
 // A conversation's chosen contexts (AEGIS ADR-132 S7, S8; Zaru ADR-0055 D19b,
-// D20f; Zaru ADR-0058 D3, D3a): with a binding chosen, every mode's prompt ends
-// with the teaching under one heading, one sentence per chosen server in a
-// fixed order (nuclear-notes, github, then any other server by name), and the
-// several-of-one-kind sentence last when a server names two or more bindings;
-// without one, every prompt is byte for byte as pinned above.
+// D20f; Zaru ADR-0058 D3, D3a; Zaru ADR-0048 3f): with a binding chosen, every
+// mode's prompt ends with the teaching under one heading, one sentence per
+// chosen server in a fixed order (nuclear-notes, github, imap, then any other
+// server by name), and the several-of-one-kind sentence last when a server
+// whose tools take '_context' names two or more bindings (a mail tool names its
+// mailbox in 'mailbox', so two mailboxes never add it); without one, every
+// prompt is byte for byte as pinned above.
 // ---------------------------------------------------------------------------
 
 const CONTEXT_HEADING = "# THE PERSON'S CHOSEN CONTEXT";
@@ -710,6 +712,9 @@ const NUCLEAR_NOTES_SENTENCE = NUCLEAR_NOTES_TEACHING.slice(`\n\n${CONTEXT_HEADI
 
 const GITHUB_SENTENCE =
   "The tools whose names begin with github. reach the person's GitHub repositories, issues and pull requests as their token allows. Read and change only what the message asks for. A merge or a change to a file on GitHub waits for the person's approval; say so when you make one. If a call is refused, tell the person in one sentence and answer without it.";
+
+const MAILBOX_SENTENCE =
+  "The tools whose names begin with mail. reach the person's mailbox they chose above the chat input: list, read and flag their threads, and nothing else until they ask. A call names which mailbox in 'mailbox' when several are chosen; with one chosen it is set for you. Read only what the message asks for; never send, delete or move mail unless the message asks, and say so when you do. If a call is refused, tell the person in one sentence and answer without it.";
 
 const genericSentence = (server: string) =>
   `The tools whose names begin with ${server}. reach the person's ${server} connection as their credential allows. Read and change only what the message asks for. If a call is refused, tell the person in one sentence and answer without it.`;
@@ -788,10 +793,13 @@ test("D3: both types chosen teach both sentences under one heading, Nuclear Note
 
 test("D3a: a server with no sentence of its own takes the generic sentence, never Nuclear Notes' paragraph, after the table's servers by name", () => {
   const complaints: string[] = [];
-  for (const [mode, gained] of teachingsFor({ imap: [BINDING_A] })) {
-    if (gained !== taught(genericSentence("imap"))) {
-      complaints.push(`${mode}: imap not taught the generic sentence, got ${JSON.stringify(gained.slice(0, 160))}`);
+  for (const [mode, gained] of teachingsFor({ zeta: [BINDING_A] })) {
+    if (gained !== taught(genericSentence("zeta"))) {
+      complaints.push(`${mode}: zeta not taught the generic sentence, got ${JSON.stringify(gained.slice(0, 160))}`);
     }
+  }
+  for (const [mode, gained] of teachingsFor({ imap: [BINDING_A] })) {
+    if (gained.includes(genericSentence("imap"))) complaints.push(`${mode}: imap taught the generic sentence`);
   }
   for (const [mode, gained] of teachingsFor({
     zeta: BINDING_C,
@@ -799,8 +807,46 @@ test("D3a: a server with no sentence of its own takes the generic sentence, neve
     github: [BINDING_A],
     "nuclear-notes": BINDING_A,
   })) {
-    const expected = taught(NUCLEAR_NOTES_SENTENCE, GITHUB_SENTENCE, genericSentence("imap"), genericSentence("zeta"));
+    const expected = taught(NUCLEAR_NOTES_SENTENCE, GITHUB_SENTENCE, MAILBOX_SENTENCE, genericSentence("zeta"));
     if (gained !== expected) complaints.push(`${mode}: four servers not taught in the fixed order, got ${JSON.stringify(gained.slice(-200))}`);
+  }
+  assert.deepEqual(complaints, []);
+});
+
+test("3f: a chosen imap binding appends the mailbox sentence once in every mode; none, null or another server alone does not", () => {
+  const complaints: string[] = [];
+  for (const contexts of [{ imap: [BINDING_A] }, { imap: BINDING_A, github: null }] as Contexts[]) {
+    for (const [mode, gained] of teachingsFor(contexts)) {
+      if (gained !== taught(MAILBOX_SENTENCE)) {
+        complaints.push(`${mode} ${JSON.stringify(contexts)}: the mailbox sentence not taught alone, got ${JSON.stringify(gained.slice(0, 160))}`);
+      }
+    }
+  }
+  for (const contexts of [{}, { imap: null }, { "nuclear-notes": [BINDING_A] }, { github: [BINDING_A] }] as Contexts[]) {
+    for (const [mode, gained] of teachingsFor(contexts)) {
+      if (gained.includes(MAILBOX_SENTENCE)) complaints.push(`${mode} ${JSON.stringify(contexts)}: the mailbox sentence taught`);
+    }
+  }
+  assert.deepEqual(complaints, []);
+});
+
+test("3f: two chosen mailboxes teach the mailbox sentence without the '_context' sentence", () => {
+  const complaints: string[] = [];
+  for (const contexts of [{ imap: [BINDING_A, BINDING_B] }, { imap: [BINDING_A, BINDING_B], github: [BINDING_C] }] as Contexts[]) {
+    for (const [mode, gained] of teachingsFor(contexts)) {
+      if (gained.includes(SEVERAL_OF_ONE_KIND)) complaints.push(`${mode} ${JSON.stringify(contexts)}: two mailboxes taught '_context'`);
+      if (!gained.includes(MAILBOX_SENTENCE)) complaints.push(`${mode} ${JSON.stringify(contexts)}: the mailbox sentence not taught`);
+    }
+  }
+  assert.deepEqual(complaints, []);
+});
+
+test("3f: a mailbox beside two Nuclear Notes bindings teaches the '_context' sentence last", () => {
+  const complaints: string[] = [];
+  for (const [mode, gained] of teachingsFor({ imap: [BINDING_C], "nuclear-notes": [BINDING_A, BINDING_B] })) {
+    if (gained !== taught(NUCLEAR_NOTES_SENTENCE, MAILBOX_SENTENCE, SEVERAL_OF_ONE_KIND)) {
+      complaints.push(`${mode}: the mailbox and '_context' sentences not taught in order, got ${JSON.stringify(gained.slice(-200))}`);
+    }
   }
   assert.deepEqual(complaints, []);
 });
@@ -832,7 +878,7 @@ const PINNED_ARGUMENTS: Array<[string, string, Set<string>, string | undefined, 
 
 test("D3: with no context chosen ({}, every server null) every pinned prompt is unchanged", () => {
   const complaints: string[] = [];
-  for (const contexts of [{}, { "nuclear-notes": null, github: null }] as Contexts[]) {
+  for (const contexts of [{}, { "nuclear-notes": null, github: null, imap: null }] as Contexts[]) {
     for (const [name, mode, caps, runtime, user] of PINNED_ARGUMENTS) {
       const [, , length, sha256] = UNCHANGED_PROMPTS.find(([pinned]) => pinned === name)!;
       const prompt = getZaruInit(mode, caps, runtime, user, contexts)!.system_prompt;
