@@ -533,16 +533,19 @@ test("W41: after calling zaru.mode the model waits for the person", () => {
 // 2026-10-06 (V2: a deployed agent is fixed in place with aegis.agent.update);
 // the agentic, workflow and execute pins (and their chat-uploads forms) were
 // re-measured for AEGIS ADR-131 U33 (the person's stop: aegis.goal.cancel);
+// the agentic, workflow, execute and operator pins (and their chat-uploads
+// forms) were re-measured for Zaru ADR-0028 W51a (a changed input to a
+// computation is run again; the companion chooses the agent or workflow);
 // every other pin stands as it was.
 const UNCHANGED_PROMPTS: Array<[string, () => ReturnType<typeof getZaruInit>, number, string]> = [
-  ["agentic", () => getZaruInit("agentic"), 11344, "f508986164aba954cd22f86f52620a0a6611e742b29af437d125b74db35f8a81"],
-  ["agentic+chat-uploads", () => getZaruInit("agentic", new Set(["chat-uploads"])), 15154, "1dc48b5caf4f04803afc0fb90bc81a6b68e6056b2731aacd8ce53d2bb5fe7903"],
-  ["workflow", () => getZaruInit("workflow"), 8961, "004c4e13d7459545e5b7383a65793674b16ff6bd71fee64e334b3e75881830ce"],
-  ["workflow+chat-uploads", () => getZaruInit("workflow", new Set(["chat-uploads"])), 12771, "95dda9946813085fc322ab2a777d7bff90366c769b6070ecc80469be63878119"],
-  ["execute", () => getZaruInit("execute"), 10768, "e33841b9d90b44106c324fa60522f6405c8fdd5a2962067610ed08cdb9b6941b"],
+  ["agentic", () => getZaruInit("agentic"), 12634, "700186b7789bd107dea1c29136df5a648be6cea2fc045d2cd05f8c7567626706"],
+  ["agentic+chat-uploads", () => getZaruInit("agentic", new Set(["chat-uploads"])), 16444, "bc2decb34f34df397b4f7992a68f3fe31f3d7f361b469b36b6823590ba5813fb"],
+  ["workflow", () => getZaruInit("workflow"), 9130, "6eb1337c2248b33cc77ee703f8b4f73ffb502f795f7df757fa3d01b3abd7ccef"],
+  ["workflow+chat-uploads", () => getZaruInit("workflow", new Set(["chat-uploads"])), 12940, "6c7c5b769782e8ce94e283ee513fd44c3151761a097373fdd07d7bd5bf035a47"],
+  ["execute", () => getZaruInit("execute"), 10980, "89402024133823cce1ff41918984e9908f0f0b2eb754bda5161a24c32750fe4e"],
   ["live", () => getZaruInit("live", new Set(["live"]), "browser"), 7910, "217f83602b4e3f058945fc6e2e5baada5dd18651c76e3ac269d95ca92cf355a5"],
   ["vibecode", () => getZaruInit("vibecode", new Set(["vibecode"]), "browser"), 11340, "149229a0ab6350a11ac8b68ef858247dedd316882a69ebc2a49711b49456bd83"],
-  ["operator", () => getZaruInit("operator", new Set(), undefined, { isOperator: true, tier: "operator" }), 9902, "e07c1f5f314a71f15932e86342fca8dfc5dc7b4b5e048d654f81a6e52f4f22b3"],
+  ["operator", () => getZaruInit("operator", new Set(), undefined, { isOperator: true, tier: "operator" }), 10071, "42a08a9aa78f13b407254ce9f672e60358e62142ea604d6cc53072ff83b8c216"],
 ];
 
 test("W41: every other mode's prompt is unchanged byte for byte", () => {
@@ -728,4 +731,139 @@ test("D19b: chat mode sends the person's own accounts to Agentic only beyond the
     ),
     "the chat prompt's routing line names the chosen context",
   );
+});
+
+// ---------------------------------------------------------------------------
+// A computation is run, never written in the companion's own text, and the
+// companion, not the person, chooses which agent or workflow serves a request
+// (Zaru ADR-0028 W51a). Asked mid conversation to recalculate an itinerary an
+// agent had solved, from a changed input, nothing in the prompts said a
+// changed input is a new request for a result: Agentic's rule 5 let it pass as
+// talk about "what a result means", Step 3 sent the person's message alone,
+// and Step 1 could find an existing agent only by listing. These tests pin the
+// text; whether the model obeys it is proved on the live page, not here.
+// ---------------------------------------------------------------------------
+
+/** Each mode's changed-input sentence, verbatim from the survey's P1, P5 to P8. */
+const CHANGED_INPUT_SENTENCES: Array<[string, () => ReturnType<typeof getZaruInit>, string]> = [
+  [
+    "agentic",
+    () => getZaruInit("agentic"),
+    "A change to an input of a computation already run in this conversation (a new time, a different number, one more stop or one fewer) is a new request for a result: it is run again with the change, and you never work out the new result in your own text, however small the change looks.",
+  ],
+  [
+    "agentic+chat-uploads",
+    () => getZaruInit("agentic", new Set(["chat-uploads"])),
+    "A change to an input of a computation already run in this conversation (a new time, a different number, one more stop or one fewer) is a new request for a result: it is run again with the change, and you never work out the new result in your own text, however small the change looks.",
+  ],
+  [
+    "execute",
+    () => getZaruInit("execute"),
+    "A change to an input of something already computed in this conversation is a new intent: call aegis.execute.intent with the whole request again, the change made in it, and never work out the new result yourself.",
+  ],
+  [
+    "workflow",
+    () => getZaruInit("workflow"),
+    "A change to an input of a run already made in this conversation is a new run: dispatch it with the change made in its input, and never work out the new result yourself.",
+  ],
+  [
+    "operator",
+    () => getZaruInit("operator", new Set(), undefined, { isOperator: true, tier: "operator" }),
+    "A change to an input of a run already made in this conversation is a new run: dispatch it with the change made in its input, and never work out the new result yourself.",
+  ],
+  [
+    "chat",
+    () => getZaruInit("chat"),
+    "A change to an input of a request that needs Agentic mode still needs it, however small the change.",
+  ],
+];
+
+for (const [name, init, sentence] of CHANGED_INPUT_SENTENCES) {
+  test(`W51a: the ${name} prompt says a changed input to an earlier computation is dispatched again, never worked out in its own text`, () => {
+    const prompt = init()!.system_prompt;
+    assert.ok(prompt.includes(sentence), `the ${name} prompt lacks its changed-input sentence: "${sentence}"`);
+    assert.equal(prompt.split(sentence).length, 2, `the ${name} prompt holds its changed-input sentence once`);
+  });
+}
+
+test("W51a: Agentic's direct answers no longer cover working out what a result means; only a result already given is talked about", () => {
+  const own = agenticOwnText();
+  const failures: string[] = [];
+  if (own.includes("what a result means,")) failures.push('rule 5 still answers "what a result means" directly');
+  if (!own.includes("what a result already given means")) failures.push('rule 5 does not narrow it to "what a result already given means"');
+  assert.deepEqual(failures, [], `Agentic rule 5: ${failures.join("; ")}`);
+});
+
+test("W51a: Agentic's Step 3 sends the earlier request with the change made in it, not the change alone", () => {
+  const own = agenticOwnText();
+  const step3 = own.indexOf("**Step 3");
+  const step4 = own.indexOf("**Step 4", step3);
+  assert.ok(step3 >= 0 && step4 > step3, "the Agentic text has Step 3 then Step 4");
+  const sentence =
+    "When the user's message changes an input of a computation already run, the full request is the earlier request with that change made in it: write it out whole, so the agent has every input and not the change alone.";
+  assert.ok(own.slice(step3, step4).includes(sentence), `Step 3 lacks: "${sentence}"`);
+});
+
+test("W51a: the choice of agent is the companion's: never ask the user which agent, and the agent that ran before is one choice among those found", () => {
+  for (const caps of [undefined, new Set(["chat-uploads"])]) {
+    const own = agenticOwnText(caps);
+    const failures: string[] = [];
+    if (!own.includes("Which of your 100monkeys serves a request is your choice, never the user's."))
+      failures.push("it does not say the choice is the companion's, never the user's");
+    if (!/never ask the user which agent to use/.test(own)) failures.push("it does not say never ask the user which agent to use");
+    if (!/the agent that ran it before is one choice among those you find, never one you must use/.test(own))
+      failures.push("it does not say the agent that ran before is one choice among those found");
+    if (!own.includes("you find the agent, the workflow or the new agent that serves it"))
+      failures.push("it does not name an agent, a workflow or a new agent as what the companion finds");
+    assert.deepEqual(failures, [], `Agentic text (${caps ? "chat-uploads" : "base"}): ${failures.join("; ")}`);
+  }
+});
+
+test("W51a: Step 1 finds agents and workflows by search and runs a matching workflow with its run and wait tools", () => {
+  const own = agenticOwnText();
+  const step1 = own.indexOf("**Step 1");
+  const step2 = own.indexOf("**Step 2", step1);
+  const s1 = own.slice(step1, step2);
+  const failures: string[] = [];
+  for (const tool of ["aegis.agent.search", "aegis.workflow.search", "aegis.workflow.run", "aegis.workflow.wait"]) {
+    if (!s1.includes(tool)) failures.push(`Step 1 does not name ${tool}`);
+  }
+  if (s1.indexOf("aegis.agent.list FIRST") < 0 || s1.indexOf("aegis.agent.list FIRST") > s1.indexOf("aegis.agent.search"))
+    failures.push("Step 1 does not call aegis.agent.list first, before any search");
+  if (!own.includes("Only after aegis.task.wait (or aegis.workflow.wait) returns:"))
+    failures.push("Step 4 does not report after aegis.workflow.wait too");
+  assert.deepEqual(failures, [], failures.join("; "));
+});
+
+test("W51a: every aegis.* tool the Agentic prompt names is in the Agentic tool list, and the list holds the search, run and wait tools", () => {
+  // The base prompt only: the chat-uploads teaching names aegis.attachment.read,
+  // which the dispatched agent calls inside its sandbox, not the companion.
+  const failures: string[] = [];
+  const init = getZaruInit("agentic")!;
+  const named = [...new Set(init.system_prompt.match(/aegis\.[a-z_]+(?:\.[a-z_]+)+/g) ?? [])];
+  const unlisted = named.filter((tool) => !init.available_tools.includes(tool));
+  if (unlisted.length) failures.push(`the Agentic prompt names tools its list lacks: ${unlisted.join(", ")}`);
+  const tools = init.available_tools;
+  const missing = ["aegis.agent.search", "aegis.workflow.search", "aegis.workflow.run", "aegis.workflow.wait"].filter(
+    (tool) => !tools.includes(tool),
+  );
+  if (missing.length) failures.push(`the Agentic tool list lacks ${missing.join(", ")}`);
+  assert.deepEqual(failures, [], failures.join("; "));
+});
+
+/** A sentence that makes rerunning the same agent a rule rather than one choice. */
+const SAME_AGENT_RULE =
+  /\b(?:always|must|should|have to)\b[^.\n]{0,60}\b(?:re-?run|run again|reuse|use)\b[^.\n]{0,30}\bsame agent\b|\bsame agent\b[^.\n]{0,60}\b(?:always|must|every time)\b/i;
+
+test("W51a: no mode's prompt makes rerunning the same agent a rule", () => {
+  const hits: string[] = [];
+  for (const [mode, init] of [
+    ...ALL_MODES,
+    ["agentic+chat-uploads", getZaruInit("agentic", new Set(["chat-uploads"]))] as [string, ReturnType<typeof getZaruInit>],
+    ["workflow+chat-uploads", getZaruInit("workflow", new Set(["chat-uploads"]))] as [string, ReturnType<typeof getZaruInit>],
+  ]) {
+    const hit = init!.system_prompt.match(SAME_AGENT_RULE);
+    if (hit) hits.push(`${mode}: "${hit[0]}"`);
+  }
+  assert.deepEqual(hits, [], `a prompt makes rerunning the same agent a rule: ${hits.join("; ")}`);
 });
