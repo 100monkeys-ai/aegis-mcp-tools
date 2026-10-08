@@ -307,3 +307,53 @@ test("extractScriptsArray returns an empty array for a malformed shape", () => {
     [],
   );
 });
+
+// ---------------------------------------------------------------------------
+// The conversation a script tool is called in reaches each of its orchestrator
+// calls (AEGIS ADR-126 Update of 2026-10-07 (2), clause 2: every tools/call)
+// ---------------------------------------------------------------------------
+
+test("zaru.script.save and zaru.script.run pass the conversation to every orchestrator call, and none when there is none", async () => {
+  const contexts: Array<{ name: string; conversationId: unknown }> = [];
+  const listed = [{ id: "01999999-9999-7999-9999-999999999999", name: "hello" }];
+  const answers: Record<string, unknown> = {
+    "aegis.script.save": sealTextEnvelope({ id: "01999999-9999-7999-9999-999999999999" }),
+    "aegis.script.list": sealTextEnvelope(listed),
+    "aegis.script.get": sealTextEnvelope({ id: "01999999-9999-7999-9999-999999999999", code: "1" }),
+  };
+  const client = {
+    invokeTool: async (
+      _user: ZaruUser,
+      name: string,
+      _args: Record<string, unknown>,
+      _id: string | number | null,
+      context?: { conversationId?: string },
+    ) => {
+      contexts.push({ name, conversationId: context?.conversationId });
+      return answers[name];
+    },
+  };
+  // Called with the conversation as its sixth argument; cast so this file
+  // compiles against a handler that does not take one yet.
+  const handle = handleZaruScriptTool as unknown as (
+    ...args: unknown[]
+  ) => ReturnType<typeof handleZaruScriptTool>;
+  const conversation = "9B2E6F1A-3c4d-4E5F-8a9b-0C1D2E3F4A5B";
+  await handle(client, USER, "zaru.script.save", { name: "hello", code: "1" }, "req-1", conversation);
+  await handle(client, USER, "zaru.script.run", { name: "hello" }, "req-2", conversation);
+  await handle(client, USER, "zaru.script.run", { id: "01999999-9999-7999-9999-999999999999" }, "req-3");
+  const complaints: string[] = [];
+  const expected = [
+    ["aegis.script.save", conversation],
+    ["aegis.script.list", conversation],
+    ["aegis.script.get", conversation],
+    ["aegis.script.get", undefined],
+  ];
+  expected.forEach(([name, want], i) => {
+    const got = contexts[i];
+    if (got?.name !== name || got?.conversationId !== want) {
+      complaints.push(`call ${i + 1}: ${JSON.stringify(got)}, expected ${name} with ${String(want)}`);
+    }
+  });
+  assert.deepEqual(complaints, []);
+});

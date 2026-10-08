@@ -98,17 +98,21 @@ export async function handleZaruScriptTool(
   name: "zaru.script.save" | "zaru.script.run",
   args: unknown,
   requestId?: string,
+  conversationId?: string,
 ): Promise<{
   content: Array<{ type: string; text: string }>;
   isError: boolean;
 }> {
+  // Each orchestrator call is a tools/call made in the request's
+  // conversation, so it names it as the generic forward does.
+  const context = { requestId, conversationId };
   if (name === "zaru.script.save") {
     const result = await client.invokeTool(
       user,
       "aegis.script.save",
       (args as Record<string, unknown>) ?? {},
       null,
-      { requestId },
+      context,
     );
     return normalizeToolResult(result);
   }
@@ -137,7 +141,7 @@ export async function handleZaruScriptTool(
       "aegis.script.list",
       { q: scriptName },
       null,
-      { requestId },
+      context,
     );
     // A refused or failed list is the answer, not an empty list: read as
     // one, it would say "No saved script named" for a refusal.
@@ -184,7 +188,7 @@ export async function handleZaruScriptTool(
     "aegis.script.get",
     { id: resolvedId },
     null,
-    { requestId },
+    context,
   );
   return normalizeToolResult(scriptResult);
 }
@@ -812,12 +816,43 @@ export function contextChosen(contexts: ContextChoices | undefined): boolean {
   );
 }
 
+/**
+ * The header naming the conversation a request was made in: one conversation
+ * id (a UUID). It is forwarded unchanged in the signed payload's
+ * `params._meta.conversation_id` on every `tools/call`, never in the
+ * arguments, so an approval request names the conversation it was made in
+ * (AEGIS ADR-126 Update of 2026-10-07 (2), clause 2; Zaru ADR-0058 D5f).
+ */
+export const ZARU_CONVERSATION_HEADER = "x-zaru-conversation";
+
+/** The refusal of an `x-zaru-conversation` header that is not one UUID. */
+export const CONVERSATION_HEADER_SHAPE =
+  "x-zaru-conversation must be one conversation id (a UUID)";
+
+/**
+ * Parse the `x-zaru-conversation` header: absent is no conversation (`{}`);
+ * one UUID is the conversation, kept exactly as sent; anything else,
+ * repeated headers joined with a comma included, is the refusal
+ * `CONVERSATION_HEADER_SHAPE`, which the entrypoints answer 400.
+ */
+export function parseConversationHeader(
+  headerValue: string | string[] | null | undefined,
+): { conversationId?: string } | { error: string } {
+  if (headerValue === undefined || headerValue === null) return {};
+  if (typeof headerValue !== "string" || !BINDING_ID.test(headerValue)) {
+    return { error: CONVERSATION_HEADER_SHAPE };
+  }
+  return { conversationId: headerValue };
+}
+
 /** What a server learns from its request beyond the user and capabilities. */
 export interface McpRequestContext {
   /** The request carries `x-zaru-turn` (see `carriesZaruTurn`). */
   zaruTurn?: boolean;
   /** The conversation's chosen contexts (`x-zaru-contexts`), if any. */
   contexts?: ContextChoices;
+  /** The conversation the request was made in (`x-zaru-conversation`), if any. */
+  conversationId?: string;
 }
 
 /**
@@ -1158,6 +1193,7 @@ Available modes:
         name,
         args,
         requestId,
+        context.conversationId,
       );
     }
 
@@ -1207,7 +1243,11 @@ Available modes:
         name,
         (args as Record<string, unknown>) ?? {},
         null,
-        { requestId, contexts: context.contexts },
+        {
+          requestId,
+          contexts: context.contexts,
+          conversationId: context.conversationId,
+        },
       );
       return normalizeToolResult(result);
     } catch (error) {
@@ -1249,6 +1289,13 @@ export async function handleStreamableHttp(
     res.status(400).json({ error: chosen.error });
     return;
   }
+  const conversation = parseConversationHeader(
+    req.headers[ZARU_CONVERSATION_HEADER],
+  );
+  if ("error" in conversation) {
+    res.status(400).json({ error: conversation.error });
+    return;
+  }
 
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: undefined,
@@ -1263,6 +1310,7 @@ export async function handleStreamableHttp(
     {
       zaruTurn: carriesZaruTurn(req.headers[ZARU_TURN_HEADER]),
       contexts: chosen.contexts,
+      conversationId: conversation.conversationId,
     },
   );
   await server.connect(transport);

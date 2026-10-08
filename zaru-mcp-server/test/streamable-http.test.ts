@@ -8,6 +8,7 @@ import {
   resolveCapabilities,
   shouldRejectAttachments,
 } from "../src/mcp/streamable-http.js";
+import * as streamableHttp from "../src/mcp/streamable-http.js";
 
 // ADR-113 chat-uploads defence-in-depth gate.
 //
@@ -363,4 +364,29 @@ test("regression for b2cf411: header is read on every request, never stored", ()
     shouldRejectAttachments("aegis.task.execute", args, capsNo),
     true,
   );
+});
+
+// x-zaru-conversation (AEGIS ADR-126 Update of 2026-10-07 (2), clause 2):
+// absent is no conversation; one UUID is the conversation, kept as sent;
+// anything else is the refusal both entrypoints answer 400.
+test("parseConversationHeader: absent is none, one UUID is kept as sent, anything else is refused with its sentence", () => {
+  const parse = (streamableHttp as Record<string, unknown>).parseConversationHeader as
+    | ((value: string | string[] | null | undefined) => { conversationId?: string } | { error: string })
+    | undefined;
+  assert.equal(typeof parse, "function", "parseConversationHeader is not exported");
+  const sentence = "x-zaru-conversation must be one conversation id (a UUID)";
+  const id = "9B2E6F1A-3c4d-4E5F-8a9b-0C1D2E3F4A5B";
+  const complaints: string[] = [];
+  for (const absent of [undefined, null]) {
+    const got = parse!(absent);
+    if (JSON.stringify(got) !== "{}") complaints.push(`${String(absent)}: ${JSON.stringify(got)}`);
+  }
+  const kept = parse!(id);
+  if (JSON.stringify(kept) !== JSON.stringify({ conversationId: id })) complaints.push(`one UUID: ${JSON.stringify(kept)}`);
+  for (const bad of ["", "not-a-uuid", `${id}x`, `${id}, ${id}`, `{"id":"${id}"}`, [id], [id, id]]) {
+    const got = parse!(bad);
+    if (JSON.stringify(got) !== JSON.stringify({ error: sentence })) complaints.push(`${JSON.stringify(bad)}: ${JSON.stringify(got)}`);
+  }
+  assert.equal((streamableHttp as Record<string, unknown>).ZARU_CONVERSATION_HEADER, "x-zaru-conversation");
+  assert.deepEqual(complaints, []);
 });

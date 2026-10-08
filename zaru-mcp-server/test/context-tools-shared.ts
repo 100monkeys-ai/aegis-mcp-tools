@@ -17,6 +17,9 @@ export const CONTEXT_TOOL = "nuclear-notes.search";
 export const BINDING = "3f2a9c1e-7b4d-4e8a-9c21-5d6e7f8a9b0c";
 export const SECOND_BINDING = "7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f";
 export const FAILING_BINDING = "00000000-0000-4000-8000-00000000dead";
+// A conversation id in mixed case: forwarded unchanged means byte for byte.
+export const CONVERSATION = "9B2E6F1A-3c4d-4E5F-8a9b-0C1D2E3F4A5B";
+export const OTHER_CONVERSATION = "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d";
 
 export interface ContextStub {
   url: string;
@@ -327,6 +330,103 @@ export function registerContextToolsTests(
     const withZeta = await prompt(JSON.stringify({ zeta: [BINDING] }));
     if (!withZeta.includes(generic)) complaints.push("zeta: the generic sentence not taught");
     if (withZeta.includes(nuclearNotes)) complaints.push("zeta: Nuclear Notes' paragraph taught");
+    assert.deepEqual(complaints, []);
+  });
+
+  // The conversation a call was made in (AEGIS ADR-126 Update of 2026-10-07
+  // (2), clause 2): `x-zaru-conversation` reaches the orchestrator in the
+  // signed payload's `_meta.conversation_id`, never in the arguments.
+  const conversationHeaders = (conversation?: string, contexts?: string) => ({
+    ...headersFor(contexts),
+    ...(conversation === undefined ? {} : { "x-zaru-conversation": conversation }),
+  });
+  const callWith = async (
+    post: McpPost,
+    name: string,
+    args: Record<string, unknown>,
+    conversation?: string,
+    contexts?: string,
+  ) => {
+    const res = await post(
+      { jsonrpc: "2.0", id: nextId++, method: "tools/call", params: { name, arguments: args } },
+      conversationHeaders(conversation, contexts),
+    );
+    assert.equal(res.status, 200, `HTTP ${res.status}: ${await res.clone().text()}`);
+    return res.json();
+  };
+
+  test(`${label}: x-zaru-conversation is forwarded unchanged in the signed payload's _meta.conversation_id on a call, beside the contexts, never in the arguments; no header sends no key`, async () => {
+    const { post, stub } = context();
+    const before = stub.invoked.length;
+    await callWith(post, NODE_TOOL, { query: "q" }, CONVERSATION);
+    await callWith(post, CONTEXT_TOOL, { query: "q" }, CONVERSATION, chosen);
+    await callWith(post, NODE_TOOL, { query: "q" });
+    await callWith(post, CONTEXT_TOOL, { query: "q" }, undefined, chosen);
+    const [alone, withContexts, none, contextsOnly] = stub.invoked.slice(before) as Array<{
+      params: { name: string; arguments: unknown; _meta?: unknown };
+    }>;
+    const complaints: string[] = [];
+    if (JSON.stringify(alone?.params._meta) !== JSON.stringify({ conversation_id: CONVERSATION })) {
+      complaints.push(`the call's _meta was ${JSON.stringify(alone?.params._meta)}, not the conversation unchanged`);
+    }
+    if (
+      JSON.stringify(withContexts?.params._meta) !==
+      JSON.stringify({ contexts: { "nuclear-notes": BINDING }, conversation_id: CONVERSATION })
+    ) {
+      complaints.push(`the call with contexts carried _meta ${JSON.stringify(withContexts?.params._meta)}`);
+    }
+    for (const [which, call] of [["alone", alone], ["with contexts", withContexts]] as const) {
+      if (JSON.stringify(call?.params.arguments) !== JSON.stringify({ query: "q" })) {
+        complaints.push(`${which}: the arguments were ${JSON.stringify(call?.params.arguments)}`);
+      }
+    }
+    if (none && "_meta" in none.params) {
+      complaints.push(`a call with no header carried _meta ${JSON.stringify(none.params._meta)}`);
+    }
+    if (JSON.stringify(contextsOnly?.params._meta) !== JSON.stringify({ contexts: { "nuclear-notes": BINDING } })) {
+      complaints.push(`a call with contexts and no conversation carried _meta ${JSON.stringify(contextsOnly?.params._meta)}`);
+    }
+    assert.deepEqual(complaints, []);
+  });
+
+  test(`${label}: a malformed x-zaru-conversation is refused 400 with its sentence, and nothing is forwarded`, async () => {
+    const { post, stub } = context();
+    const before = stub.invoked.length;
+    const complaints: string[] = [];
+    for (const header of [
+      "not-a-uuid",
+      `${CONVERSATION}, ${OTHER_CONVERSATION}`,
+      "",
+      `${CONVERSATION}x`,
+      JSON.stringify([CONVERSATION]),
+    ]) {
+      const res = await post(
+        { jsonrpc: "2.0", id: nextId++, method: "tools/call", params: { name: NODE_TOOL, arguments: {} } },
+        conversationHeaders(header),
+      );
+      const body = await res.text();
+      if (res.status !== 400) complaints.push(`${JSON.stringify(header)}: HTTP ${res.status}`);
+      if (!body.includes("x-zaru-conversation must be one conversation id (a UUID)")) {
+        complaints.push(`${JSON.stringify(header)}: answered ${body}`);
+      }
+    }
+    if (stub.invoked.length !== before) complaints.push("a call was forwarded");
+    assert.deepEqual(complaints, []);
+  });
+
+  test(`${label}: a script tool's call to the orchestrator carries the conversation too`, async () => {
+    const { post, stub } = context();
+    const before = stub.invoked.length;
+    await callWith(post, "zaru.script.save", { name: "hello", code: "1" }, CONVERSATION);
+    const call = stub.invoked[before] as { params: { name: string; arguments: unknown; _meta?: unknown } } | undefined;
+    const complaints: string[] = [];
+    if (call?.params.name !== "aegis.script.save") complaints.push(`the call forwarded was ${JSON.stringify(call?.params.name)}`);
+    if (JSON.stringify(call?.params._meta) !== JSON.stringify({ conversation_id: CONVERSATION })) {
+      complaints.push(`aegis.script.save carried _meta ${JSON.stringify(call?.params._meta)}`);
+    }
+    if (JSON.stringify(call?.params.arguments) !== JSON.stringify({ name: "hello", code: "1" })) {
+      complaints.push(`the arguments were ${JSON.stringify(call?.params.arguments)}`);
+    }
     assert.deepEqual(complaints, []);
   });
 

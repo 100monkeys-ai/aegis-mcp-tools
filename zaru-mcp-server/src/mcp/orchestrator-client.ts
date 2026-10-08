@@ -688,6 +688,13 @@ export class OrchestratorClient {
        * binding and the remote server never sees it (AEGIS ADR-132 S7).
        */
       contexts?: Record<string, string | string[] | null>;
+      /**
+       * The conversation the call was made in (`x-zaru-conversation`): sent
+       * unchanged in the signed payload's `params._meta.conversation_id`,
+       * never in the arguments, so the orchestrator's approval request names
+       * it (AEGIS ADR-126 Update of 2026-10-07 (2), clause 2).
+       */
+      conversationId?: string;
     } = {},
   ): Promise<unknown> {
     const start = process.hrtime.bigint();
@@ -709,6 +716,13 @@ export class OrchestratorClient {
         ? boundWaitArguments(args, ceiling)
         : null;
 
+    const meta: Record<string, unknown> = {
+      ...(context.contexts ? { contexts: context.contexts } : {}),
+      ...(context.conversationId !== undefined
+        ? { conversation_id: context.conversationId }
+        : {}),
+    };
+
     try {
       const upstream = await this.invokeJsonRpc(user, {
         jsonrpc: "2.0",
@@ -717,7 +731,7 @@ export class OrchestratorClient {
         params: {
           name,
           arguments: bounded ? bounded.args : args,
-          ...(context.contexts ? { _meta: { contexts: context.contexts } } : {}),
+          ...(Object.keys(meta).length > 0 ? { _meta: meta } : {}),
         },
       });
       const result = bounded
