@@ -195,7 +195,7 @@ test("relay: a 429 RATE_LIMIT_EXCEEDED carries retry_after_seconds from Retry-Af
 
 // ── Internal failures: the server's own sentence ──────────────────────────
 
-test("relay: 500, 502 and 503 SERVICE_UNAVAILABLE are told by their fixed sentence, never the body's message", async () => {
+test("relay: 500 INTERNAL_ERROR, 503 UPSTREAM_UNAVAILABLE and 503 SERVICE_UNAVAILABLE are told by their fixed sentence, never the body's message", async () => {
   const detail =
     "Internal error: Database error: relation \"tenants\" does not exist at /var/lib/aegis/volumes/7/workspace (spec.iam.keycloak_admin)";
   const rows: Array<[string, number, string]> = [
@@ -206,7 +206,7 @@ test("relay: 500, 502 and 503 SERVICE_UNAVAILABLE are told by their fixed senten
     ],
     [
       "UPSTREAM_UNAVAILABLE",
-      502,
+      503,
       "A service this tool depends on did not answer. Try again in a moment.",
     ],
     ["SERVICE_UNAVAILABLE", 503, "This tool is not available right now."],
@@ -220,6 +220,54 @@ test("relay: 500, 502 and 503 SERVICE_UNAVAILABLE are told by their fixed senten
     );
     assert.doesNotMatch(text, /Database|tenants|volumes|keycloak/);
   }
+});
+
+// AEGIS ADR-035 U1 (2026-10-08): an upstream failure is answered 503 with
+// `Retry-After: 5`, because Cloudflare's proxy serves its own body for an
+// origin 502 on a zone that is not Enterprise, and that body never reached
+// this relay in R1's shape.
+test("relay: a 503 UPSTREAM_UNAVAILABLE with Retry-After is told by its own fixed sentence, its request_id and retry_after_seconds", async () => {
+  const detail =
+    "Internal error: upstream https://calendar.example/caldav/x answered 502 (spec.iam.keycloak_admin)";
+  const { text } = await callWith(
+    answer(adr035("UPSTREAM_UNAVAILABLE", detail), 503, { "Retry-After": "5" }),
+  );
+  assert.deepEqual(JSON.parse(text), {
+    error: {
+      code: "UPSTREAM_UNAVAILABLE",
+      message:
+        "A service this tool depends on did not answer. Try again in a moment.",
+    },
+    request_id: REQUEST_ID,
+    retry_after_seconds: 5,
+  });
+  assert.doesNotMatch(text, /calendar\.example|caldav|keycloak/);
+});
+
+test("relay: a 503 UPSTREAM_UNAVAILABLE without Retry-After carries no retry_after_seconds", async () => {
+  const { text } = await callWith(
+    answer(adr035("UPSTREAM_UNAVAILABLE", "Internal error: x"), 503),
+  );
+  assert.deepEqual(JSON.parse(text), {
+    error: {
+      code: "UPSTREAM_UNAVAILABLE",
+      message:
+        "A service this tool depends on did not answer. Try again in a moment.",
+    },
+    request_id: REQUEST_ID,
+  });
+});
+
+test("relay: a 502 UPSTREAM_UNAVAILABLE is no longer a row of R5, so it is invoke_failed with its request_id", async () => {
+  const { text } = await callWith(
+    answer(adr035("UPSTREAM_UNAVAILABLE", "Internal error: /aegis/volumes/x"), 502, {
+      "Retry-After": "5",
+    }),
+  );
+  assert.deepEqual(JSON.parse(text), {
+    error: { code: "invoke_failed", message: "AEGIS invoke failed: 502" },
+    request_id: REQUEST_ID,
+  });
 });
 
 // ── Anything the relay does not trust: invoke_failed ──────────────────────

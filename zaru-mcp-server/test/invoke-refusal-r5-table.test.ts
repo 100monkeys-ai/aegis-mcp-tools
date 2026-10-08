@@ -1,8 +1,10 @@
 // The relay's table of the orchestrator's refusal codes, pinned row by row
-// against AEGIS ADR-035's R5 table (adrs/035-updates at revision 43976: the
+// against AEGIS ADR-035's R5 table (adrs/035-updates at revision 47945: the
 // Update of 2026-10-04 R5, the Update of 2026-10-05 "four R5 rows for the
-// SEAL gateway's refusals" and A3's CONTEXT_NOT_ALLOWED row), and the
-// production report that found a row missing.
+// SEAL gateway's refusals", A3's CONTEXT_NOT_ALLOWED row and the Update of
+// 2026-10-08 U1, under which UPSTREAM_UNAVAILABLE is answered 503 with
+// `Retry-After: 5` because Cloudflare's proxy replaces an origin 502's body),
+// and the production report that found a row missing.
 //
 // The report (2026-10-08, about 17:14Z): Zaru Web called the Nuclear Notes
 // tool `nuclear-notes.pages.read` with `section` "K11"; the remote server
@@ -79,7 +81,8 @@ const ADR_035_R5: readonly R5Row[] = [
   },
   {
     code: "UPSTREAM_UNAVAILABLE",
-    status: 502,
+    // U1 (2026-10-08): 502 until then.
+    status: 503,
     member: "error",
     internal: true,
     sentence: "A service this tool depends on did not answer. Try again in a moment.",
@@ -278,6 +281,8 @@ test("table: a code the table does not list, or a listed code at another status,
     ["REMOTE_TOOL_ERROR", 500],
     ["CREDENTIAL_REJECTED", 401],
     ["CREDENTIAL_CHANNEL_NOT_CONFIDENTIAL", 500],
+    // U1: the row's status before 2026-10-08, now another status.
+    ["UPSTREAM_UNAVAILABLE", 502],
   ] as const) {
     const relayed = relayFailure("invoke", status, shaped(code, "Internal error: /aegis/volumes/x", "error"));
     assert.deepEqual(

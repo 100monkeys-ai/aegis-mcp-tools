@@ -217,12 +217,13 @@ export class OrchestratorInvokeError extends Error {
 }
 
 /**
- * AEGIS ADR-035's R5 table (adrs/035-updates, revision 43976): each code the
+ * AEGIS ADR-035's R5 table (adrs/035-updates, revision 47945): each code the
  * orchestrator answers a refusal with, its HTTP status, and whether it is a
  * caller-facing refusal or an internal failure. The rows are the Update of
  * 2026-10-04 (R5), the Update of 2026-10-05 for the SEAL gateway's refusals
- * (CREDENTIAL_BINDING_REQUIRED to CREDENTIAL_CHANNEL_NOT_CONFIDENTIAL) and
- * that day's A3 (CONTEXT_NOT_ALLOWED, the attest route's refusal). A code is
+ * (CREDENTIAL_BINDING_REQUIRED to CREDENTIAL_CHANNEL_NOT_CONFIDENTIAL), that
+ * day's A3 (CONTEXT_NOT_ALLOWED, the attest route's refusal) and the Update
+ * of 2026-10-08 U1 (UPSTREAM_UNAVAILABLE answered 503, not 502). A code is
  * relayed only at its own status (`aegis-orchestrator` 9907ce69,
  * `orchestrator/core/src/domain/seal_session.rs` 286-462). Exported so that
  * test/invoke-refusal-r5-table.test.ts pins it against the record row by row.
@@ -255,7 +256,7 @@ export const R5_ROWS: Readonly<
   NOT_IMPLEMENTED: { status: 501, internal: false },
   EDGE_UNAVAILABLE: { status: 503, internal: false },
   INTERNAL_ERROR: { status: 500, internal: true },
-  UPSTREAM_UNAVAILABLE: { status: 502, internal: true },
+  UPSTREAM_UNAVAILABLE: { status: 503, internal: true },
   SERVICE_UNAVAILABLE: { status: 503, internal: true },
   CREDENTIAL_BINDING_REQUIRED: { status: 403, internal: false },
   CREDENTIAL_REJECTED: { status: 403, internal: false },
@@ -318,8 +319,9 @@ export interface RelayedFailure {
  * relays the code with the server's own sentence; a 401 row (one that
  * survived the re-attest) is told SESSION_NOT_RENEWED_MESSAGE. Anything else
  * is `invoke_failed` with the route's generic words and the status, and the
- * body's `request_id` only when it is a UUID. A 429's `Retry-After`, when a
- * whole number of seconds, is `retryAfterSeconds`.
+ * body's `request_id` only when it is a UUID. A trusted 429's or 503's
+ * `Retry-After`, when a whole number of seconds, is `retryAfterSeconds`
+ * (ADR-035 U1: an upstream failure is answered 503 with `Retry-After: 5`).
  */
 export function relayFailure(
   route: AegisRoute,
@@ -361,16 +363,26 @@ export function relayFailure(
       ...upstream,
     };
   }
+  const retryAfterSeconds =
+    (httpStatus === 429 || httpStatus === 503) &&
+    retryAfter !== null &&
+    /^\d+$/.test(retryAfter.trim())
+      ? Number(retryAfter.trim())
+      : undefined;
+  const retry = retryAfterSeconds !== undefined ? { retryAfterSeconds } : {};
   if (row.internal) {
-    // An internal failure is told by its class's fixed sentence, and its
-    // class is its status (R4: 500, 502 or 503), so a code of the
+    // An internal failure is told by its class's fixed sentence (R4). A code
+    // that is itself a class (INTERNAL_ERROR, UPSTREAM_UNAVAILABLE,
+    // SERVICE_UNAVAILABLE) is told by its own sentence; a code of the
     // SERVICE_UNAVAILABLE family (CREDENTIAL_CHANNEL_NOT_CONFIDENTIAL) is
-    // told as SERVICE_UNAVAILABLE is.
+    // told as SERVICE_UNAVAILABLE is. Since ADR-035 U1, UPSTREAM_UNAVAILABLE
+    // and SERVICE_UNAVAILABLE share 503, so the status alone no longer
+    // names the class.
     const internalClass =
-      httpStatus === 500
-        ? "INTERNAL_ERROR"
-        : httpStatus === 502
-          ? "UPSTREAM_UNAVAILABLE"
+      code in INTERNAL_SENTENCES
+        ? code
+        : httpStatus === 500
+          ? "INTERNAL_ERROR"
           : "SERVICE_UNAVAILABLE";
     return {
       kind: "internal",
@@ -378,6 +390,7 @@ export function relayFailure(
       code,
       message: INTERNAL_SENTENCES[internalClass]!,
       requestId,
+      ...retry,
       ...upstream,
     };
   }
@@ -391,17 +404,13 @@ export function relayFailure(
       ...upstream,
     };
   }
-  const retryAfterSeconds =
-    httpStatus === 429 && retryAfter !== null && /^\d+$/.test(retryAfter.trim())
-      ? Number(retryAfter.trim())
-      : undefined;
   return {
     kind: "refused",
     policy: record!.status === "policy_violation",
     code,
     message: error!.message as string,
     requestId,
-    ...(retryAfterSeconds !== undefined ? { retryAfterSeconds } : {}),
+    ...retry,
     ...upstream,
   };
 }
