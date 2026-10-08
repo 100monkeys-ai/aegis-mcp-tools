@@ -558,6 +558,11 @@ const CONTEXT_SENTENCES: ReadonlyArray<readonly [string, string, boolean]> = [
     "The tools whose names begin with mail. reach the person's mailbox they chose above the chat input: list, read and flag their threads, and nothing else until they ask. A call names which mailbox in 'mailbox' when several are chosen; with one chosen it is set for you. Read only what the message asks for; never send, delete or move mail unless the message asks, and say so when you do. If a call is refused, tell the person in one sentence and answer without it.",
     false,
   ],
+  [
+    "caldav",
+    "The tools whose names begin with calendar. reach the calendars the person chose above the chat input: list their calendars, list events in a window, and read one event. Creating, changing, deleting or answering an event waits for the person's approval; do it only when the message asks, and say so when you do. A call names which account in 'account' when several are chosen; with one chosen it is set for you. If a call is refused, tell the person in one sentence and answer without it.",
+    false,
+  ],
 ];
 
 /** The sentence of a chosen server with none of its own. */

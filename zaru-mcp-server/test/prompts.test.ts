@@ -695,10 +695,11 @@ test("ADR-0020 K5, K5a, K5b: Step 5 says a listed file already reaches the user,
 // A conversation's chosen contexts (AEGIS ADR-132 S7, S8; Zaru ADR-0055 D19b,
 // D20f; Zaru ADR-0058 D3, D3a; Zaru ADR-0048 3f): with a binding chosen, every
 // mode's prompt ends with the teaching under one heading, one sentence per
-// chosen server in a fixed order (nuclear-notes, github, imap, then any other
-// server by name), and the several-of-one-kind sentence last when a server
-// whose tools take '_context' names two or more bindings (a mail tool names its
-// mailbox in 'mailbox', so two mailboxes never add it); without one, every
+// chosen server in a fixed order (nuclear-notes, github, imap, caldav, then
+// any other server by name), and the several-of-one-kind sentence last when a
+// server whose tools take '_context' names two or more bindings (a mail tool
+// names its mailbox in 'mailbox' and a calendar tool its account in 'account',
+// so two mailboxes or two calendar accounts never add it); without one, every
 // prompt is byte for byte as pinned above.
 // ---------------------------------------------------------------------------
 
@@ -878,7 +879,7 @@ const PINNED_ARGUMENTS: Array<[string, string, Set<string>, string | undefined, 
 
 test("D3: with no context chosen ({}, every server null) every pinned prompt is unchanged", () => {
   const complaints: string[] = [];
-  for (const contexts of [{}, { "nuclear-notes": null, github: null, imap: null }] as Contexts[]) {
+  for (const contexts of [{}, { "nuclear-notes": null, github: null, imap: null, caldav: null }] as Contexts[]) {
     for (const [name, mode, caps, runtime, user] of PINNED_ARGUMENTS) {
       const [, , length, sha256] = UNCHANGED_PROMPTS.find(([pinned]) => pinned === name)!;
       const prompt = getZaruInit(mode, caps, runtime, user, contexts)!.system_prompt;
@@ -888,6 +889,97 @@ test("D3: with no context chosen ({}, every server null) every pinned prompt is 
     }
     for (const [mode, gained] of teachingsFor(contexts)) {
       if (gained !== "") complaints.push(`${mode} with ${JSON.stringify(contexts)}: taught`);
+    }
+  }
+  assert.deepEqual(complaints, []);
+});
+
+// AEGIS ADR-138 K12 and K13: a chosen calendar account (the service `caldav`)
+// has its own sentence, after the mailbox's, in place of the generic one; a
+// calendar tool names its account in 'account', so two calendar accounts never
+// add the '_context' sentence; the sentence names no decision record.
+
+const CALENDAR_SENTENCE =
+  "The tools whose names begin with calendar. reach the calendars the person chose above the chat input: list their calendars, list events in a window, and read one event. Creating, changing, deleting or answering an event waits for the person's approval; do it only when the message asks, and say so when you do. A call names which account in 'account' when several are chosen; with one chosen it is set for you. If a call is refused, tell the person in one sentence and answer without it.";
+
+test("K12: a chosen caldav binding appends the calendar sentence once in every mode, never the generic one; none, null or another server alone does not", () => {
+  const complaints: string[] = [];
+  for (const contexts of [{ caldav: [BINDING_A] }, { caldav: BINDING_A, imap: null }] as Contexts[]) {
+    for (const [mode, gained] of teachingsFor(contexts)) {
+      if (gained !== taught(CALENDAR_SENTENCE)) {
+        complaints.push(`${mode} ${JSON.stringify(contexts)}: the calendar sentence not taught alone, got ${JSON.stringify(gained.slice(0, 160))}`);
+      }
+      if (gained.includes(genericSentence("caldav"))) complaints.push(`${mode} ${JSON.stringify(contexts)}: caldav taught the generic sentence`);
+    }
+  }
+  for (const contexts of [{}, { caldav: null }, { "nuclear-notes": [BINDING_A] }, { github: [BINDING_A] }, { imap: [BINDING_A] }] as Contexts[]) {
+    for (const [mode, gained] of teachingsFor(contexts)) {
+      if (gained.includes(CALENDAR_SENTENCE)) complaints.push(`${mode} ${JSON.stringify(contexts)}: the calendar sentence taught`);
+    }
+  }
+  assert.deepEqual(complaints, []);
+});
+
+test("K12: the calendar sentence follows the mailbox's in the fixed order, with Nuclear Notes', GitHub's and the mailbox's sentences byte for byte", () => {
+  const complaints: string[] = [];
+  for (const [mode, gained] of teachingsFor({
+    zeta: BINDING_C,
+    caldav: [BINDING_C],
+    imap: [BINDING_B],
+    github: [BINDING_A],
+    "nuclear-notes": BINDING_A,
+  })) {
+    const expected = taught(NUCLEAR_NOTES_SENTENCE, GITHUB_SENTENCE, MAILBOX_SENTENCE, CALENDAR_SENTENCE, genericSentence("zeta"));
+    if (gained !== expected) complaints.push(`${mode}: five servers not taught in the fixed order, got ${JSON.stringify(gained.slice(-200))}`);
+  }
+  for (const [mode, gained] of teachingsFor({ caldav: [BINDING_B], imap: [BINDING_A] })) {
+    if (gained !== taught(MAILBOX_SENTENCE, CALENDAR_SENTENCE)) {
+      complaints.push(`${mode}: the mailbox's and the calendar sentences not taught in order, got ${JSON.stringify(gained.slice(-200))}`);
+    }
+  }
+  assert.deepEqual(complaints, []);
+});
+
+test("K12: two chosen calendar accounts teach the calendar sentence without the '_context' sentence; beside two Nuclear Notes bindings it comes last", () => {
+  const complaints: string[] = [];
+  for (const contexts of [{ caldav: [BINDING_A, BINDING_B] }, { caldav: [BINDING_A, BINDING_B], imap: [BINDING_C] }] as Contexts[]) {
+    for (const [mode, gained] of teachingsFor(contexts)) {
+      if (gained.includes(SEVERAL_OF_ONE_KIND)) complaints.push(`${mode} ${JSON.stringify(contexts)}: two calendar accounts taught '_context'`);
+      if (!gained.includes(CALENDAR_SENTENCE)) complaints.push(`${mode} ${JSON.stringify(contexts)}: the calendar sentence not taught`);
+    }
+  }
+  for (const [mode, gained] of teachingsFor({ caldav: [BINDING_C], "nuclear-notes": [BINDING_A, BINDING_B] })) {
+    if (gained !== taught(NUCLEAR_NOTES_SENTENCE, CALENDAR_SENTENCE, SEVERAL_OF_ONE_KIND)) {
+      complaints.push(`${mode}: the calendar and '_context' sentences not taught in order, got ${JSON.stringify(gained.slice(-200))}`);
+    }
+  }
+  assert.deepEqual(complaints, []);
+});
+
+test("K12: with a calendar account chosen, each of the eight pinned prompts is unchanged and only gains the calendar teaching", () => {
+  const complaints: string[] = [];
+  for (const [name, mode, caps, runtime, user] of PINNED_ARGUMENTS) {
+    const [, , length, sha256] = UNCHANGED_PROMPTS.find(([pinned]) => pinned === name)!;
+    const prompt = getZaruInit(mode, caps, runtime, user, { caldav: [BINDING_A] })!.system_prompt;
+    const own = prompt.slice(0, length);
+    if (createHash("sha256").update(own).digest("hex") !== sha256) {
+      complaints.push(`'${name}': the pinned prompt changed before the teaching`);
+    }
+    if (prompt.slice(length) !== taught(CALENDAR_SENTENCE)) {
+      complaints.push(`'${name}': gained ${JSON.stringify(prompt.slice(length, length + 160))}, not the calendar teaching`);
+    }
+  }
+  assert.deepEqual(complaints, []);
+});
+
+test("K13: the calendar teaching, as taught, names no decision record", () => {
+  // The facing-text test's pattern (test/facing-text-no-record-refs.test.ts).
+  const RECORD_REFERENCE = /ADR-[0-9]|CD-[0-9]|ADR [0-9]|[Dd]ecision record|security audit 0|audit 0[0-9][0-9]|§[0-9]/;
+  const complaints: string[] = [];
+  for (const [mode, gained] of teachingsFor({ caldav: [BINDING_A, BINDING_B] })) {
+    if (!gained.includes(CALENDAR_SENTENCE)) complaints.push(`${mode}: the calendar sentence not taught`);
+    for (const line of gained.split("\n")) {
+      if (RECORD_REFERENCE.test(line)) complaints.push(`${mode}: a taught line names a decision record: ${JSON.stringify(line)}`);
     }
   }
   assert.deepEqual(complaints, []);
