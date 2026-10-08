@@ -217,13 +217,17 @@ export class OrchestratorInvokeError extends Error {
 }
 
 /**
- * AEGIS ADR-035, Update R1 to R8 (adrs/035-updates, revision 43571), R5's
- * table: each code of `POST /v1/seal/invoke` with its HTTP status and
- * whether it is a caller-facing refusal or an internal failure. A code is
- * relayed only at its own status (`aegis-orchestrator` 0c60875b,
- * `orchestrator/core/src/domain/seal_session.rs` 300-400).
+ * AEGIS ADR-035's R5 table (adrs/035-updates, revision 43976): each code the
+ * orchestrator answers a refusal with, its HTTP status, and whether it is a
+ * caller-facing refusal or an internal failure. The rows are the Update of
+ * 2026-10-04 (R5), the Update of 2026-10-05 for the SEAL gateway's refusals
+ * (CREDENTIAL_BINDING_REQUIRED to CREDENTIAL_CHANNEL_NOT_CONFIDENTIAL) and
+ * that day's A3 (CONTEXT_NOT_ALLOWED, the attest route's refusal). A code is
+ * relayed only at its own status (`aegis-orchestrator` 9907ce69,
+ * `orchestrator/core/src/domain/seal_session.rs` 286-462). Exported so that
+ * test/invoke-refusal-r5-table.test.ts pins it against the record row by row.
  */
-const R5_ROWS: Readonly<
+export const R5_ROWS: Readonly<
   Record<string, { status: number; internal: boolean }>
 > = {
   MALFORMED_ENVELOPE: { status: 400, internal: false },
@@ -253,6 +257,11 @@ const R5_ROWS: Readonly<
   INTERNAL_ERROR: { status: 500, internal: true },
   UPSTREAM_UNAVAILABLE: { status: 502, internal: true },
   SERVICE_UNAVAILABLE: { status: 503, internal: true },
+  CREDENTIAL_BINDING_REQUIRED: { status: 403, internal: false },
+  CREDENTIAL_REJECTED: { status: 403, internal: false },
+  REMOTE_TOOL_ERROR: { status: 422, internal: false },
+  CREDENTIAL_CHANNEL_NOT_CONFIDENTIAL: { status: 503, internal: true },
+  CONTEXT_NOT_ALLOWED: { status: 403, internal: false },
 };
 
 /**
@@ -353,11 +362,21 @@ export function relayFailure(
     };
   }
   if (row.internal) {
+    // An internal failure is told by its class's fixed sentence, and its
+    // class is its status (R4: 500, 502 or 503), so a code of the
+    // SERVICE_UNAVAILABLE family (CREDENTIAL_CHANNEL_NOT_CONFIDENTIAL) is
+    // told as SERVICE_UNAVAILABLE is.
+    const internalClass =
+      httpStatus === 500
+        ? "INTERNAL_ERROR"
+        : httpStatus === 502
+          ? "UPSTREAM_UNAVAILABLE"
+          : "SERVICE_UNAVAILABLE";
     return {
       kind: "internal",
       policy: false,
       code,
-      message: INTERNAL_SENTENCES[code]!,
+      message: INTERNAL_SENTENCES[internalClass]!,
       requestId,
       ...upstream,
     };
