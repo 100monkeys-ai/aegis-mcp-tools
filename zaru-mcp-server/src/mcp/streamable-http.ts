@@ -855,6 +855,265 @@ export interface McpRequestContext {
   conversationId?: string;
 }
 
+// ---------------------------------------------------------------------------
+// zaru.schedule (AEGIS ADR-139 N17): a schedule proposed to the person as a
+// card. The bounds and refusal sentences are N2's, so a proposal the card
+// carries is one aegis.schedule.create accepts on timing; the orchestrator
+// remains the authority when the person presses Schedule.
+// ---------------------------------------------------------------------------
+
+/** What the model is told after a proposal; its turn ends there. */
+export const SCHEDULE_PROPOSAL_ANSWER =
+  "A Schedule this card was shown to the person; the turn ends here.";
+
+/** N2's bounds (numbers nobody has set; the record carries their reasons). */
+const SCHEDULE_MIN_GAP_MINUTES = 5;
+const SCHEDULE_JITTER_CAP_SECONDS = 3600;
+const SCHEDULE_AT_MIN_AHEAD_MS = 60_000;
+const SCHEDULE_AT_MAX_AHEAD_MS = 366 * 24 * 60 * 60 * 1000;
+
+const SCHEDULE_REFUSALS = {
+  targetKind: "'target_kind' must be agent or workflow.",
+  target: "'target' must be the name of an agent or workflow, or empty.",
+  intent: "'intent' must say what the run is for.",
+  input: "'input' must be an object.",
+  reason: "'reason' must be one sentence for the person.",
+  oneTiming:
+    "A schedule takes exactly one of 'at' (one run) or 'recurrence' (a repeating run).",
+  at: "'at' must be a time at least one minute from now and at most a year ahead.",
+  recurrence:
+    "'recurrence' must be an object with 'cron', and optionally 'timezone' and 'jitter_seconds'.",
+  cron: "'cron' must be five fields: minute, hour, day of month, month and day of week.",
+  timezone: "'timezone' must be a time zone name such as Europe/Berlin.",
+  gap: `A schedule runs at most once every ${SCHEDULE_MIN_GAP_MINUTES} minutes.`,
+  jitter: `'jitter_seconds' must be between 0 and ${SCHEDULE_JITTER_CAP_SECONDS}.`,
+} as const;
+
+export interface ScheduleProposal {
+  target_kind: "agent" | "workflow";
+  target: string;
+  intent: string;
+  input: Record<string, unknown>;
+  at?: string;
+  recurrence?: { cron: string; timezone: string; jitter_seconds: number };
+  reason: string;
+}
+
+export type ScheduleProposalCheck =
+  | { ok: true; proposal: ScheduleProposal }
+  | { ok: false; error: string };
+
+const RFC3339 =
+  /^\d{4}-\d{2}-\d{2}[Tt]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:[Zz]|[+-]\d{2}:\d{2})$/;
+
+const CRON_MONTHS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
+const CRON_DAYS = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
+
+/** The values one cron field selects, or null when the field is not valid. */
+function cronFieldValues(
+  field: string,
+  min: number,
+  max: number,
+  names: readonly string[] = [],
+  namesStartAt = min,
+): Set<number> | null {
+  const value = (token: string): number | null => {
+    const named = names.indexOf(token.toUpperCase());
+    if (named >= 0) return named + namesStartAt;
+    if (!/^\d+$/.test(token)) return null;
+    const n = Number(token);
+    return n >= min && n <= max ? n : null;
+  };
+  const values = new Set<number>();
+  for (const item of field.split(",")) {
+    const [range, stepText, extra] = item.split("/");
+    if (extra !== undefined) return null;
+    let step = 1;
+    if (stepText !== undefined) {
+      if (!/^\d+$/.test(stepText) || Number(stepText) < 1) return null;
+      step = Number(stepText);
+    }
+    let from: number | null;
+    let to: number | null;
+    if (range === "*") {
+      from = min;
+      to = max;
+    } else if (range.includes("-")) {
+      const [a, b, more] = range.split("-");
+      if (more !== undefined) return null;
+      from = value(a);
+      to = value(b);
+    } else {
+      from = value(range);
+      to = stepText === undefined ? from : max;
+    }
+    if (from === null || to === null || from > to) return null;
+    for (let n = from; n <= to; n += step) values.add(n);
+  }
+  return values;
+}
+
+/**
+ * The shortest gap, in minutes, between two runs of a five-field cron, or
+ * null when the expression is not valid. Within a day the runs are every
+ * selected hour at every selected minute; across midnight the gap is from
+ * the day's last run to the next day's first, which is the shortest a day
+ * boundary can give whatever the day fields select.
+ */
+function cronShortestGapMinutes(cron: string): number | null {
+  const fields = cron.trim().split(/\s+/);
+  if (fields.length !== 5) return null;
+  const minutes = cronFieldValues(fields[0], 0, 59);
+  const hours = cronFieldValues(fields[1], 0, 23);
+  const days = cronFieldValues(fields[2], 1, 31);
+  const months = cronFieldValues(fields[3], 1, 12, CRON_MONTHS, 1);
+  const weekdays = cronFieldValues(fields[4], 0, 7, CRON_DAYS, 0);
+  if (!minutes || !hours || !days || !months || !weekdays) return null;
+  const times = [...hours]
+    .flatMap((h) => [...minutes].map((m) => h * 60 + m))
+    .sort((a, b) => a - b);
+  let gap = 24 * 60 - times[times.length - 1] + times[0];
+  for (let i = 1; i < times.length; i++) gap = Math.min(gap, times[i] - times[i - 1]);
+  return gap;
+}
+
+function isTimeZoneName(name: string): boolean {
+  if (!/^[A-Za-z][A-Za-z0-9_+-]*(?:\/[A-Za-z0-9_+-]+)*$/.test(name)) return false;
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: name });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Checks a `zaru.schedule` proposal's shape against N2's bounds, at `now`,
+ * and returns it with N2's defaults filled in (`timezone` UTC,
+ * `jitter_seconds` 0), or the first refusal's sentence.
+ */
+export function validateScheduleProposal(
+  args: unknown,
+  now: Date,
+): ScheduleProposalCheck {
+  const a = (args && typeof args === "object" ? args : {}) as Record<string, unknown>;
+  const refuse = (error: string): ScheduleProposalCheck => ({ ok: false, error });
+  const isObject = (v: unknown): v is Record<string, unknown> =>
+    !!v && typeof v === "object" && !Array.isArray(v);
+
+  if (a.target_kind !== "agent" && a.target_kind !== "workflow")
+    return refuse(SCHEDULE_REFUSALS.targetKind);
+  if (typeof a.target !== "string") return refuse(SCHEDULE_REFUSALS.target);
+  if (typeof a.intent !== "string" || !a.intent.trim()) return refuse(SCHEDULE_REFUSALS.intent);
+  if (!isObject(a.input)) return refuse(SCHEDULE_REFUSALS.input);
+  if (typeof a.reason !== "string" || !a.reason.trim()) return refuse(SCHEDULE_REFUSALS.reason);
+
+  const hasAt = a.at !== undefined && a.at !== null;
+  const hasRecurrence = a.recurrence !== undefined && a.recurrence !== null;
+  if (hasAt === hasRecurrence) return refuse(SCHEDULE_REFUSALS.oneTiming);
+
+  const proposal: ScheduleProposal = {
+    target_kind: a.target_kind,
+    target: a.target,
+    intent: a.intent,
+    input: a.input,
+    reason: a.reason,
+  };
+
+  if (hasAt) {
+    if (typeof a.at !== "string" || !RFC3339.test(a.at)) return refuse(SCHEDULE_REFUSALS.at);
+    const ahead = Date.parse(a.at) - now.getTime();
+    if (
+      Number.isNaN(ahead) ||
+      ahead < SCHEDULE_AT_MIN_AHEAD_MS ||
+      ahead > SCHEDULE_AT_MAX_AHEAD_MS
+    )
+      return refuse(SCHEDULE_REFUSALS.at);
+    proposal.at = a.at;
+    return { ok: true, proposal };
+  }
+
+  if (!isObject(a.recurrence)) return refuse(SCHEDULE_REFUSALS.recurrence);
+  const { cron, timezone = "UTC", jitter_seconds = 0 } = a.recurrence;
+  if (typeof cron !== "string") return refuse(SCHEDULE_REFUSALS.cron);
+  const gap = cronShortestGapMinutes(cron);
+  if (gap === null) return refuse(SCHEDULE_REFUSALS.cron);
+  if (typeof timezone !== "string" || !isTimeZoneName(timezone))
+    return refuse(SCHEDULE_REFUSALS.timezone);
+  if (gap < SCHEDULE_MIN_GAP_MINUTES) return refuse(SCHEDULE_REFUSALS.gap);
+  if (
+    typeof jitter_seconds !== "number" ||
+    !Number.isInteger(jitter_seconds) ||
+    jitter_seconds < 0 ||
+    jitter_seconds > SCHEDULE_JITTER_CAP_SECONDS
+  )
+    return refuse(SCHEDULE_REFUSALS.jitter);
+  proposal.recurrence = { cron, timezone, jitter_seconds };
+  return { ok: true, proposal };
+}
+
+const ZARU_SCHEDULE_TOOL = {
+  name: "zaru.schedule",
+  description:
+    "Propose a schedule to the person: an agent or a workflow of theirs run later, once or again and again. The person sees the proposal with its details filled in and decides whether to make it; this call creates nothing. Use it instead of offering in words to keep an eye on something, check back, follow up or do something again later. Give exactly one of 'at' or 'recurrence'. After calling it, stop: the person chooses.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      target_kind: {
+        type: "string",
+        enum: ["agent", "workflow"],
+        description: "Whether the schedule runs an agent or a workflow.",
+      },
+      target: {
+        type: "string",
+        description:
+          "The name of the person's agent or workflow to run, or an empty string when none exists yet and one would be made for this intent.",
+      },
+      intent: {
+        type: "string",
+        description: "What each run is for, in the person's words.",
+      },
+      input: {
+        type: "object",
+        description: "The input each run starts with.",
+      },
+      at: {
+        type: "string",
+        description:
+          "For one run: the time, in RFC 3339 (for example 2026-10-10T09:00:00Z), at least one minute from now and at most a year ahead.",
+      },
+      recurrence: {
+        type: "object",
+        description: `For a repeating run. Runs at most once every ${SCHEDULE_MIN_GAP_MINUTES} minutes.`,
+        properties: {
+          cron: {
+            type: "string",
+            description:
+              "Five fields: minute, hour, day of month, month and day of week. For example '0 9 * * 1-5' is every weekday at 09:00.",
+          },
+          timezone: {
+            type: "string",
+            description: "A time zone name such as Europe/Berlin. Defaults to UTC.",
+          },
+          jitter_seconds: {
+            type: "integer",
+            minimum: 0,
+            maximum: SCHEDULE_JITTER_CAP_SECONDS,
+            description: "Up to this many seconds of random delay for each run. Defaults to 0.",
+          },
+        },
+        required: ["cron"],
+      },
+      reason: {
+        type: "string",
+        description:
+          "One plain sentence, shown to the person, saying what the schedule will do for them.",
+      },
+    },
+    required: ["target_kind", "target", "intent", "input", "reason"],
+  },
+};
+
 /**
  * `client` is the orchestrator client the server's tools go through. The
  * Worker's entrypoint passes its own, built with the wait ceiling; the
@@ -987,6 +1246,7 @@ Available modes:
             required: ["mode"],
           },
         },
+        ZARU_SCHEDULE_TOOL,
         {
           name: "zaru.script.save",
           description:
@@ -1169,6 +1429,28 @@ Available modes:
         reason,
         action: "mode_switch_requested",
       });
+    }
+
+    // AEGIS ADR-139 N17: a proposal, never a schedule. Nothing is created or
+    // recorded here; Zaru Web renders the structured content as the
+    // "Schedule this" card, and the person's press makes the schedule through
+    // aegis.schedule.create. The answer tells the model its turn ends, as a
+    // mode switch's does (Zaru ADR-0028 W42).
+    if (name === "zaru.schedule") {
+      const checked = validateScheduleProposal(args, new Date());
+      if (!checked.ok) {
+        return {
+          content: [
+            { type: "text", text: JSON.stringify({ error: checked.error }) },
+          ],
+          isError: true,
+        };
+      }
+      return {
+        content: [{ type: "text", text: SCHEDULE_PROPOSAL_ANSWER }],
+        structuredContent: { action: "schedule_proposed", ...checked.proposal },
+        isError: false,
+      };
     }
 
     if (name === "zaru.execute_typescript") {

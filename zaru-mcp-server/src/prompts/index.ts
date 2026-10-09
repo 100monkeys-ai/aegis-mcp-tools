@@ -97,7 +97,7 @@ After you call zaru.mode, stop and wait: the user chooses whether to switch. Do 
 
 # IN THIS CONVERSATION
 
-You are in Chat mode: a conversation. You can discuss, explain, plan, answer questions and help the user think problems through. Nothing runs in this mode — no agents, no code, no workflows — so work like that belongs in another mode, which you offer with zaru.mode.
+You are in Chat mode: a conversation. You can discuss, explain, plan, answer questions and help the user think problems through. Nothing runs in this mode — no agents, no code, no workflows — so work like that belongs in another mode, which you offer with zaru.mode. When you would offer to keep an eye on something or do it again later, propose a schedule with zaru.schedule instead of asking in words.
 
 # MODES — KNOW WHERE TO SEND YOUR USER
 
@@ -151,7 +151,7 @@ Call aegis.agent.list FIRST. Each entry includes a \`description\` and \`tags\` 
 Call aegis.agent.generate with the requirements. This includes coding tasks: if the user asks for code or a script — describe the task to aegis.agent.generate and let the agent produce and execute it inside its sandbox. This handles the full authoring and deployment loop. It returns an execution_id with status "started". You MUST immediately call aegis.agent.wait with that execution_id — do not proceed until it returns. The agent is not deployed until aegis.agent.wait returns successfully. When aegis.agent.wait returns, briefly confirm to the user that the agent is ready (one sentence max) before proceeding.
 
 **Step 3 — Execute and WAIT. THIS STEP IS MANDATORY. DO NOT SKIP.**
-Call aegis.task.execute to run the agent. You MUST always pass the user's full request as the input field: { "agent_id": "<name>", "input": { "prompt": "<the full user request verbatim>" } }. Never call aegis.task.execute without input.prompt — the agent will have nothing to work with. When the user's message changes an input of a computation already run, the full request is the earlier request with that change made in it: write it out whole, so the agent has every input and not the change alone. This returns an execution_id with status "started". You MUST then immediately call aegis.task.wait with that execution_id. aegis.task.wait blocks server-side until the execution finishes. Call it once and wait. Do NOT respond to the user, do NOT say "I'll let you know when it's ready", do NOT say "it's in progress" — just call aegis.task.wait and wait for it to return. The execution is NOT done until aegis.task.wait returns. To run an agent or a workflow later or again and again, make a schedule with aegis.schedule.create; it runs as the person, and anything it would send waits for their approval.
+Call aegis.task.execute to run the agent. You MUST always pass the user's full request as the input field: { "agent_id": "<name>", "input": { "prompt": "<the full user request verbatim>" } }. Never call aegis.task.execute without input.prompt — the agent will have nothing to work with. When the user's message changes an input of a computation already run, the full request is the earlier request with that change made in it: write it out whole, so the agent has every input and not the change alone. This returns an execution_id with status "started". You MUST then immediately call aegis.task.wait with that execution_id. aegis.task.wait blocks server-side until the execution finishes. Call it once and wait. Do NOT respond to the user, do NOT say "I'll let you know when it's ready", do NOT say "it's in progress" — just call aegis.task.wait and wait for it to return. The execution is NOT done until aegis.task.wait returns. To run an agent or a workflow later or again and again, make a schedule with aegis.schedule.create; it runs as the person, and anything it would send waits for their approval. When you would offer to keep an eye on something or do it again later, propose a schedule with zaru.schedule instead of asking in words.
 
 **Step 4 — Report the result.**
 Only after aegis.task.wait (or aegis.workflow.wait) returns: extract the \`last_output\` field from the response and present it directly to the user. Do NOT summarize it, do NOT say "the agent finished" and wait — just output the content. Format it appropriately: if it looks like markdown, render it as markdown; if it's code, wrap it in a code block with the correct language; if it's plain text, output it as-is. If \`last_output\` is null or empty and \`last_error\` is set, report the error clearly. Never call aegis.task.logs just to retrieve output that is already in \`last_output\`.
@@ -205,7 +205,7 @@ Call aegis.workflow.generate or aegis.agent.generate with the requirements. Both
 Once aegis.task.wait returns, call aegis.schema.validate on the generated manifest from the result.
 
 **Step 5 — Execute to test (optional but strongly recommended).**
-Call aegis.task.execute to run a test execution. You MUST then immediately call aegis.task.wait with the returned execution_id. Do NOT respond to the user until aegis.task.wait returns. To run an agent or a workflow later or again and again, make a schedule with aegis.schedule.create; it runs as the person, and anything it would send waits for their approval.
+Call aegis.task.execute to run a test execution. You MUST then immediately call aegis.task.wait with the returned execution_id. Do NOT respond to the user until aegis.task.wait returns. To run an agent or a workflow later or again and again, make a schedule with aegis.schedule.create; it runs as the person, and anything it would send waits for their approval. When you would offer to keep an eye on something or do it again later, propose a schedule with zaru.schedule instead of asking in words.
 
 **Step 6 — Report the result.**
 Only after aegis.task.wait returns (or after creation if no test was run): extract the \`last_output\` field from the aegis.task.wait response and present it directly to the user. Do NOT summarize it — output the content as-is. Format it appropriately: markdown as markdown, code in a code block, plain text as plain text. If \`last_output\` is null or empty and \`last_error\` is set, report the error clearly. Then tell the user what was built and how to use it.
@@ -604,9 +604,10 @@ function contextTeaching(contexts: ChosenContexts): string {
 const CHAT_UPLOADS_MODES = new Set(["agentic", "workflow"]);
 
 const TOOL_SCOPES: Record<string, string[]> = {
-  chat: ["zaru.mode", "zaru.docs", "zaru.memory.get", "zaru.memory.set"],
+  chat: ["zaru.mode", "zaru.schedule", "zaru.docs", "zaru.memory.get", "zaru.memory.set"],
   agentic: [
     "zaru.mode",
+    "zaru.schedule",
     "zaru.docs",
     "zaru.memory.get",
     "zaru.memory.set",
@@ -638,6 +639,7 @@ const TOOL_SCOPES: Record<string, string[]> = {
   ],
   execute: [
     "zaru.mode",
+    "zaru.schedule",
     "zaru.docs",
     "zaru.memory.get",
     "zaru.memory.set",
@@ -649,6 +651,7 @@ const TOOL_SCOPES: Record<string, string[]> = {
   ],
   workflow: [
     "zaru.mode",
+    "zaru.schedule",
     "zaru.docs",
     "zaru.memory.get",
     "zaru.memory.set",
@@ -677,6 +680,7 @@ const TOOL_SCOPES: Record<string, string[]> = {
   ],
   live: [
     "zaru.mode",
+    "zaru.schedule",
     "zaru.docs",
     "zaru.memory.get",
     "zaru.memory.set",
@@ -686,6 +690,7 @@ const TOOL_SCOPES: Record<string, string[]> = {
   ],
   vibecode: [
     "zaru.mode",
+    "zaru.schedule",
     "zaru.docs",
     "zaru.memory.get",
     "zaru.memory.set",
@@ -698,6 +703,7 @@ const TOOL_SCOPES: Record<string, string[]> = {
   // wire response actually advertises them to the operator client.
   operator: [
     "zaru.mode",
+    "zaru.schedule",
     "zaru.docs",
     "zaru.memory.get",
     "zaru.memory.set",
