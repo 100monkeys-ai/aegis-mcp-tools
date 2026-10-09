@@ -4,8 +4,11 @@
 // with the orchestrator replaced by a loopback stub: API-key validation, SEAL
 // tool discovery, attest, invoke and the context-tools listing. The stub
 // lists `nuclear-notes.search` when the listing's `_meta.contexts` names a
-// binding id, or a list of them, for `nuclear-notes` (Zaru ADR-0055 D20f),
-// and refuses a listing naming FAILING_BINDING.
+// binding id, or a list of them, for `nuclear-notes` (Zaru ADR-0055 D20f), or
+// when its `_meta.profile` is PROFILE (AEGIS ADR-140 D12), and refuses a
+// listing naming FAILING_BINDING. It answers `GET /v1/profiles/{id}` as the
+// orchestrator does to the profile's owner: PROFILE whole, NO_SUCH_PROFILE
+// 404 and FORBIDDEN_PROFILE 403.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createServer, type IncomingMessage, type Server } from "node:http";
@@ -20,6 +23,12 @@ export const FAILING_BINDING = "00000000-0000-4000-8000-00000000dead";
 // A conversation id in mixed case: forwarded unchanged means byte for byte.
 export const CONVERSATION = "9B2E6F1A-3c4d-4E5F-8a9b-0C1D2E3F4A5B";
 export const OTHER_CONVERSATION = "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d";
+export const PROFILE = "5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a";
+export const SECOND_PROFILE = "6e5d4c3b-2a1f-4e0d-9c8b-7a6f5e4d3c2b";
+export const NO_SUCH_PROFILE = "00000000-0000-4000-8000-0000000000aa";
+export const FORBIDDEN_PROFILE = "00000000-0000-4000-8000-0000000000bb";
+export const PROFILE_NOTES_WORKSPACE = "fundraising-notes";
+export const PROFILE_INSTRUCTIONS = "Answer investors in two short paragraphs and never attach a file.";
 
 export interface ContextStub {
   url: string;
@@ -27,6 +36,8 @@ export interface ContextStub {
   invoked: Array<Record<string, unknown>>;
   /** The payload of every POST /v1/seal/context-tools, in order. */
   listings: Array<Record<string, unknown>>;
+  /** Every GET /v1/profiles/{id}: the id and the Authorization header, in order. */
+  profileReads: Array<{ id: string; authorization: string | undefined }>;
   close(): Promise<void>;
 }
 
@@ -39,6 +50,7 @@ async function readBody(req: IncomingMessage): Promise<string> {
 export async function startContextStub(): Promise<ContextStub> {
   const invoked: Array<Record<string, unknown>> = [];
   const listings: Array<Record<string, unknown>> = [];
+  const profileReads: Array<{ id: string; authorization: string | undefined }> = [];
   const server: Server = createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", "http://stub");
     const sendJson = (status: number, body: unknown) => {
@@ -88,16 +100,46 @@ export async function startContextStub(): Promise<ContextStub> {
       });
       return;
     }
+    const profileRoute = /^\/v1\/profiles\/([^/]+)$/.exec(url.pathname);
+    if (profileRoute && req.method === "GET") {
+      const id = decodeURIComponent(profileRoute[1]!);
+      profileReads.push({ id, authorization: req.headers.authorization });
+      if (req.headers.authorization !== `Bearer ${API_KEY}` || id === FORBIDDEN_PROFILE) {
+        sendJson(403, { error: "insufficient_scope" });
+        return;
+      }
+      if (id !== PROFILE) {
+        sendJson(404, { error: "Not found" });
+        return;
+      }
+      sendJson(200, {
+        profile: {
+          id: PROFILE,
+          name: "Fundraising",
+          bindings: [{ binding_id: BINDING, state: "active", label: "Notes" }],
+          tools: ["nuclear-notes.*"],
+          repository: null,
+          notes_workspace: PROFILE_NOTES_WORKSPACE,
+          instructions: PROFILE_INSTRUCTIONS,
+          created_at: "2026-10-09T08:00:00Z",
+          updated_at: "2026-10-09T08:00:00Z",
+        },
+      });
+      return;
+    }
     if (url.pathname === "/v1/seal/context-tools" && req.method === "POST") {
       const envelope = JSON.parse(await readBody(req)) as {
         payload: Record<string, unknown>;
       };
       listings.push(envelope.payload);
       const params = envelope.payload.params as
-        | { _meta?: { contexts?: Record<string, unknown> } }
+        | { _meta?: { contexts?: Record<string, unknown>; profile?: unknown } }
         | undefined;
       const choice = params?._meta?.contexts?.["nuclear-notes"];
-      const named = typeof choice === "string" ? [choice] : Array.isArray(choice) ? choice : [];
+      const named =
+        params?._meta?.profile === PROFILE
+          ? [BINDING]
+          : typeof choice === "string" ? [choice] : Array.isArray(choice) ? choice : [];
       if (named.includes(FAILING_BINDING)) {
         sendJson(403, {
           protocol: "seal/v1",
@@ -135,6 +177,7 @@ export async function startContextStub(): Promise<ContextStub> {
     url: `http://127.0.0.1:${port}`,
     invoked,
     listings,
+    profileReads,
     close: () =>
       new Promise<void>((resolve) => {
         server.closeAllConnections();
@@ -183,6 +226,18 @@ async function listedNames(post: McpPost, contexts?: string): Promise<string[]> 
 }
 
 const chosen = JSON.stringify({ "nuclear-notes": BINDING });
+
+/** The header naming one profile (AEGIS ADR-140 D12). */
+const profileChosen = JSON.stringify({ "@profile": PROFILE });
+
+/** The refusal of a header of any other shape (D12). */
+const CONTEXTS_SHAPE =
+  "x-zaru-contexts must be a JSON object naming one profile as @profile, or, for each server, a binding id, a list of binding ids, or null";
+
+/** The refusal of two profiles, or a profile beside connections (D10). */
+const ONE_PROFILE = "Choose one profile, or choose connections without a profile; not both.";
+
+const PROFILE_HEADING = "# THE PERSON'S CHOSEN PROFILE";
 
 /**
  * Registers the tests of the chosen context's tools against one entrypoint.
@@ -270,6 +325,10 @@ export function registerContextToolsTests(
       JSON.stringify({ "nuclear-notes": [BINDING, BINDING.toUpperCase()] }),
       JSON.stringify({ "nuclear-notes": [BINDING, "not-a-uuid"] }),
       JSON.stringify({ "nuclear-notes": [BINDING, null] }),
+      // One profile is one profile id, a string (AEGIS ADR-140 D12).
+      JSON.stringify({ "@profile": "not-a-uuid" }),
+      JSON.stringify({ "@profile": null }),
+      JSON.stringify({ "@profile": 7 }),
     ]) {
       const res = await post(
         { jsonrpc: "2.0", id: nextId++, method: "tools/list", params: {} },
@@ -277,7 +336,7 @@ export function registerContextToolsTests(
       );
       const body = await res.text();
       if (res.status !== 400) complaints.push(`${header}: HTTP ${res.status}`);
-      if (!body.includes("x-zaru-contexts must be a JSON object naming, for each server, a binding id, a list of binding ids, or null")) {
+      if (!body.includes(CONTEXTS_SHAPE)) {
         complaints.push(`${header}: answered ${body}`);
       }
     }
@@ -442,6 +501,123 @@ export function registerContextToolsTests(
     if (!(await prompt(chosen)).includes(heading)) complaints.push("chosen: no teaching");
     if ((await prompt()).includes(heading)) complaints.push("no header: taught");
     if ((await prompt(JSON.stringify({ "nuclear-notes": null }))).includes(heading)) complaints.push("none: taught");
+    assert.deepEqual(complaints, []);
+  });
+
+  // One profile per conversation (AEGIS ADR-140 D10, D12): `{"@profile": id}`
+  // alone, forwarded in the signed payload's `_meta.profile` on every call and
+  // on the listing, never in the arguments and never in `_meta.contexts`.
+  test(`${label}: {"@profile": id} is accepted; the listing and every call carry it in _meta.profile alone, the arguments unchanged`, async () => {
+    const { post, stub } = context();
+    const listingsBefore = stub.listings.length;
+    const invokedBefore = stub.invoked.length;
+    const names = await listedNames(post, profileChosen);
+    await callWith(post, CONTEXT_TOOL, { query: "q" }, undefined, profileChosen);
+    await callWith(post, NODE_TOOL, { query: "q" }, CONVERSATION, profileChosen);
+    await callWith(post, "zaru.script.save", { name: "hello", code: "1" }, CONVERSATION, profileChosen);
+    const complaints: string[] = [];
+    if (!names.includes(CONTEXT_TOOL)) complaints.push(`not listed: ${CONTEXT_TOOL} in ${names.join(", ")}`);
+    if (!names.includes(NODE_TOOL)) complaints.push(`not listed: ${NODE_TOOL}`);
+    const listing = stub.listings[listingsBefore];
+    const listingMeta = (listing?.params as { _meta?: unknown } | undefined)?._meta;
+    if (JSON.stringify(listingMeta) !== JSON.stringify({ profile: PROFILE })) {
+      complaints.push(`the listing's _meta was ${JSON.stringify(listingMeta)}`);
+    }
+    const [alone, withConversation, script] = stub.invoked.slice(invokedBefore) as Array<{
+      params: { name: string; arguments: unknown; _meta?: unknown };
+    }>;
+    if (JSON.stringify(alone?.params._meta) !== JSON.stringify({ profile: PROFILE })) {
+      complaints.push(`the call's _meta was ${JSON.stringify(alone?.params._meta)}`);
+    }
+    if (JSON.stringify(withConversation?.params._meta) !== JSON.stringify({ conversation_id: CONVERSATION, profile: PROFILE })) {
+      complaints.push(`the call in a conversation carried _meta ${JSON.stringify(withConversation?.params._meta)}`);
+    }
+    if (script?.params.name !== "aegis.script.save" || JSON.stringify(script?.params._meta) !== JSON.stringify({ conversation_id: CONVERSATION, profile: PROFILE })) {
+      complaints.push(`the script tool's call carried ${JSON.stringify(script?.params.name)} with _meta ${JSON.stringify(script?.params._meta)}`);
+    }
+    for (const [which, call] of [["alone", alone], ["in a conversation", withConversation]] as const) {
+      if (JSON.stringify(call?.params.arguments) !== JSON.stringify({ query: "q" })) {
+        complaints.push(`${which}: the arguments were ${JSON.stringify(call?.params.arguments)}`);
+      }
+    }
+    assert.deepEqual(complaints, []);
+  });
+
+  test(`${label}: a list under @profile, @profile beside a server, and any other @ key are refused 400 with the one-profile sentence, and nothing is forwarded`, async () => {
+    const { post, stub } = context();
+    const invokedBefore = stub.invoked.length;
+    const listingsBefore = stub.listings.length;
+    const complaints: string[] = [];
+    for (const header of [
+      JSON.stringify({ "@profile": [PROFILE] }),
+      JSON.stringify({ "@profile": [PROFILE, SECOND_PROFILE] }),
+      JSON.stringify({ "@profile": PROFILE, "nuclear-notes": BINDING }),
+      JSON.stringify({ "nuclear-notes": [BINDING], "@profile": PROFILE }),
+      JSON.stringify({ "@profile": PROFILE, github: null }),
+      JSON.stringify({ "@profile": PROFILE, "@workspace": "x" }),
+      JSON.stringify({ "@profiles": PROFILE }),
+      JSON.stringify({ "@": BINDING }),
+    ]) {
+      for (const method of ["tools/list", "tools/call"] as const) {
+        const params = method === "tools/list" ? {} : { name: NODE_TOOL, arguments: {} };
+        const res = await post({ jsonrpc: "2.0", id: nextId++, method, params }, headersFor(header));
+        const body = await res.text();
+        if (res.status !== 400) complaints.push(`${header} ${method}: HTTP ${res.status}`);
+        if (!body.includes(ONE_PROFILE)) complaints.push(`${header} ${method}: answered ${body}`);
+      }
+    }
+    if (stub.invoked.length !== invokedBefore) complaints.push("a call was forwarded");
+    if (stub.listings.length !== listingsBefore) complaints.push("a listing was asked for");
+    assert.deepEqual(complaints, []);
+  });
+
+  test(`${label}: zaru.init and zaru.mode read the chosen profile once with the caller's token and teach its workspace and instructions under one heading; without a profile nothing is read or taught`, async () => {
+    const { post, stub } = context();
+    const promptOf = async (tool: string, contexts?: string) => {
+      const answer = await rpc(post, "tools/call", { name: tool, arguments: { mode: "chat" } }, contexts);
+      const text = (answer.result as { content: Array<{ text: string }> }).content[0]!.text;
+      return (JSON.parse(text) as { system_prompt: string }).system_prompt;
+    };
+    const complaints: string[] = [];
+    for (const tool of ["zaru.init", "zaru.mode"]) {
+      const readsBefore = stub.profileReads.length;
+      const prompt = await promptOf(tool, profileChosen);
+      const reads = stub.profileReads.slice(readsBefore);
+      if (reads.length !== 1 || reads[0]!.id !== PROFILE || reads[0]!.authorization !== `Bearer ${API_KEY}`) {
+        complaints.push(`${tool}: the profile was read as ${JSON.stringify(reads)}`);
+      }
+      const at = prompt.indexOf(PROFILE_HEADING);
+      if (at < 0 || prompt.indexOf(PROFILE_HEADING, at + 1) >= 0) complaints.push(`${tool}: the heading was not taught once`);
+      const section = prompt.slice(at);
+      if (!section.includes(PROFILE_INSTRUCTIONS)) complaints.push(`${tool}: the instructions were not taught under the heading`);
+      if (!section.includes(PROFILE_NOTES_WORKSPACE)) complaints.push(`${tool}: the notes workspace was not taught under the heading`);
+      if (prompt.includes("# THE PERSON'S CHOSEN CONTEXT")) complaints.push(`${tool}: the contexts' heading was taught for a profile`);
+      const plainBefore = stub.profileReads.length;
+      for (const header of [undefined, chosen]) {
+        if ((await promptOf(tool, header)).includes(PROFILE_HEADING)) complaints.push(`${tool} ${header}: the profile heading was taught`);
+      }
+      if (stub.profileReads.length !== plainBefore) complaints.push(`${tool}: a profile was read with none chosen`);
+    }
+    assert.deepEqual(complaints, []);
+  });
+
+  test(`${label}: a profile the route refuses (404, 403) teaches no profile heading, and a call still carries _meta.profile`, async () => {
+    const { post, stub } = context();
+    const complaints: string[] = [];
+    for (const profile of [NO_SUCH_PROFILE, FORBIDDEN_PROFILE]) {
+      const header = JSON.stringify({ "@profile": profile });
+      const answer = await rpc(post, "tools/call", { name: "zaru.init", arguments: { mode: "chat" } }, header);
+      const text = (answer.result as { content: Array<{ text: string }> }).content[0]!.text;
+      const prompt = (JSON.parse(text) as { system_prompt?: string }).system_prompt;
+      if (typeof prompt !== "string") complaints.push(`${profile}: zaru.init answered ${text.slice(0, 200)}`);
+      else if (prompt.includes(PROFILE_HEADING)) complaints.push(`${profile}: the profile heading was taught`);
+      const before = stub.invoked.length;
+      await callWith(post, NODE_TOOL, { query: "q" }, undefined, header);
+      const call = stub.invoked[before] as { params: { _meta?: unknown } } | undefined;
+      if (JSON.stringify(call?.params._meta) !== JSON.stringify({ profile })) {
+        complaints.push(`${profile}: the call carried _meta ${JSON.stringify(call?.params._meta)}`);
+      }
+    }
     assert.deepEqual(complaints, []);
   });
 }

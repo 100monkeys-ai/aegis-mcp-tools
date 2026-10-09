@@ -47,6 +47,16 @@ export interface OrchestratorClientOptions {
  */
 export const WAIT_CEILING_SECONDS = 45;
 
+/** How long the read of a chosen profile may take before it is given up. */
+const PROFILE_READ_TIMEOUT_MS = 10_000;
+
+/** A chosen profile as the model is taught it (AEGIS ADR-140 D12). */
+export interface ChosenProfileAnswer {
+  name: string;
+  notes_workspace: string | null;
+  instructions: string | null;
+}
+
 export function isWaitTool(name: string): boolean {
   return name.endsWith(".wait");
 }
@@ -723,6 +733,13 @@ export class OrchestratorClient {
        * it (AEGIS ADR-126 Update of 2026-10-07 (2), clause 2).
        */
       conversationId?: string;
+      /**
+       * The conversation's chosen profile (`x-zaru-contexts`'s `@profile`):
+       * sent in the signed payload's `params._meta.profile`, never in the
+       * arguments and never in `_meta.contexts`, so the orchestrator holds
+       * the call to the profile (AEGIS ADR-140 D7, D12).
+       */
+      profile?: string;
     } = {},
   ): Promise<unknown> {
     const start = process.hrtime.bigint();
@@ -749,6 +766,7 @@ export class OrchestratorClient {
       ...(context.conversationId !== undefined
         ? { conversation_id: context.conversationId }
         : {}),
+      ...(context.profile !== undefined ? { profile: context.profile } : {}),
     };
 
     try {
@@ -836,18 +854,28 @@ export class OrchestratorClient {
    * (AEGIS ADR-132 S8): a signed `tools/list` with `params._meta.contexts`
    * to `POST /v1/seal/context-tools`, under the person's SEAL session. The
    * orchestrator lists each chosen server with the chosen binding and
-   * filters by the session's context. A refusal or failure is thrown as
-   * `OrchestratorInvokeError`; the caller decides what to list instead.
+   * filters by the session's context. A conversation on a profile sends
+   * `params._meta.profile` alone instead, and the orchestrator lists the
+   * profile's bindings, only the tools the profile allows (AEGIS ADR-140
+   * D7, D12). A refusal or failure is thrown as `OrchestratorInvokeError`;
+   * the caller decides what to list instead.
    */
   async listContextTools(
     user: ZaruUser,
-    contexts: Record<string, string | string[] | null>,
+    choice:
+      | { contexts: Record<string, string | string[] | null> }
+      | { profile: string },
   ): Promise<AegisToolDefinition[]> {
     const payload: JsonRpcRequest = {
       jsonrpc: "2.0",
       id: null,
       method: "tools/list",
-      params: { _meta: { contexts } },
+      params: {
+        _meta:
+          "profile" in choice
+            ? { profile: choice.profile }
+            : { contexts: choice.contexts },
+      },
     };
     const post = async (session: ZaruSealSession) =>
       this.fetchImpl(resolveUrl(this.baseUrl, "/v1/seal/context-tools"), {
@@ -878,6 +906,61 @@ export class OrchestratorClient {
       );
     }
     return normalizeToolList(await response.json());
+  }
+
+  /**
+   * The conversation's chosen profile, read once as the caller: `GET
+   * /v1/profiles/{id}` with the caller's own token (AEGIS ADR-140 D3, D12),
+   * answered `{"profile": {...}}` to its owner. Its name, default Nuclear
+   * Notes workspace and instructions are what the model is taught. A refusal
+   * (404 for a profile not the caller's, 403 without `profile:read`), a
+   * failure or an answer of another shape is null and logged: the model is
+   * taught no profile, and the calls still carry it, for the orchestrator to
+   * refuse.
+   */
+  async getProfile(
+    user: ZaruUser,
+    profileId: string,
+  ): Promise<ChosenProfileAnswer | null> {
+    let response: globalThis.Response;
+    let text: string;
+    try {
+      response = await this.fetchImpl(
+        resolveUrl(this.baseUrl, `/v1/profiles/${encodeURIComponent(profileId)}`),
+        {
+          method: "GET",
+          headers: {
+            Accept: "application/json",
+            Authorization: `Bearer ${user.token}`,
+          },
+          signal: AbortSignal.timeout(PROFILE_READ_TIMEOUT_MS),
+        },
+      );
+      text = await response.text();
+    } catch (error) {
+      log("warn", "profile.read.failed", {
+        profile_id: profileId,
+        error: error instanceof Error ? error : { message: String(error) },
+      });
+      return null;
+    }
+    const body = tryParseJson(text);
+    const profile = isPlainObject(body) ? body.profile : undefined;
+    if (!response.ok || !isPlainObject(profile) || typeof profile.name !== "string") {
+      log("warn", "profile.read.failed", {
+        profile_id: profileId,
+        upstream_status: response.status,
+        upstream_body: body,
+      });
+      return null;
+    }
+    const optional = (value: unknown): string | null =>
+      typeof value === "string" && value.length > 0 ? value : null;
+    return {
+      name: profile.name,
+      notes_workspace: optional(profile.notes_workspace),
+      instructions: optional(profile.instructions),
+    };
   }
 
   private async invokeJsonRpc(

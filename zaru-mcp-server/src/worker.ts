@@ -107,6 +107,7 @@ async function handleMcpPost(
     {
       zaruTurn: carriesZaruTurn(request.headers.get(ZARU_TURN_HEADER)),
       contexts: chosen.contexts,
+      profile: chosen.profile,
       conversationId: conversation.conversationId,
     },
   );

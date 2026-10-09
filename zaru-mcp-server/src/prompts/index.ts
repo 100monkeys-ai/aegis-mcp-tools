@@ -604,6 +604,42 @@ function contextTeaching(contexts: ChosenContexts): string {
   return CONTEXT_HEADING + sentences.map((sentence) => `\n\n${sentence}`).join("");
 }
 
+// A conversation's chosen profile (AEGIS ADR-140 D12): read by the server as
+// the person, it is taught after everything else under one heading of its
+// own, naming the profile, then its default Nuclear Notes workspace and the
+// person's instructions for it, each only when the profile has one. Without a
+// profile chosen, or with one the server could not read, nothing is added.
+
+/** The parts of a chosen profile the model is taught, as the orchestrator answers them to its owner. */
+export interface ChosenProfile {
+  readonly name: string;
+  readonly notes_workspace?: string | null;
+  readonly instructions?: string | null;
+}
+
+const PROFILE_HEADING = `
+
+# THE PERSON'S CHOSEN PROFILE`;
+
+/** The teaching for `profile`, or "" when none is chosen. */
+function profileTeaching(profile: ChosenProfile | undefined): string {
+  if (!profile) return "";
+  const sentences = [
+    `The person has chosen the profile "${profile.name}" above the chat input. The tools of its connections are listed to you, only those it allows, and a call it does not allow is refused: tell the person in one sentence and answer without it.`,
+  ];
+  if (profile.notes_workspace) {
+    sentences.push(
+      `When a Nuclear Notes call needs a workspace and the message names none, use this profile's workspace: ${profile.notes_workspace}.`,
+    );
+  }
+  if (profile.instructions) {
+    sentences.push(
+      `The person wrote these instructions for this profile; follow them in this conversation wherever they apply:\n\n${profile.instructions}`,
+    );
+  }
+  return PROFILE_HEADING + sentences.map((sentence) => `\n\n${sentence}`).join("");
+}
+
 /** Modes that accept and forward `attachments` when the chat-uploads capability is active. */
 const CHAT_UPLOADS_MODES = new Set(["agentic", "workflow"]);
 
@@ -863,6 +899,7 @@ export function getZaruInit(
   runtime?: string,
   user?: { isOperator: boolean; tier: string },
   contexts: ChosenContexts = {},
+  profile?: ChosenProfile,
 ): ZaruInitResponse | null {
   const effectiveMode = mode ?? "chat";
 
@@ -903,7 +940,8 @@ export function getZaruInit(
     capabilities.has("chat-uploads") && CHAT_UPLOADS_MODES.has(effectiveMode)
       ? prompt + CHAT_UPLOADS_TEACHING
       : prompt;
-  const augmentedPrompt = withUploads + contextTeaching(contexts);
+  const augmentedPrompt =
+    withUploads + contextTeaching(contexts) + profileTeaching(profile);
 
   return {
     mode: effectiveMode,

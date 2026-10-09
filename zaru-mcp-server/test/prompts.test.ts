@@ -1368,3 +1368,71 @@ test("C9: every mode's tool list holds the three conversation tools once each, r
   }
   assert.deepEqual(failures, [], failures.join("; "));
 });
+
+// AEGIS ADR-140 D12: a chosen profile, read by the server as the person,
+// appends its own heading after everything else, naming the profile, its
+// default Nuclear Notes workspace and the person's instructions for it, each
+// only when the profile has one; with no profile every prompt is unchanged.
+
+const PROFILE_HEADING = "# THE PERSON'S CHOSEN PROFILE";
+
+const FULL_PROFILE = {
+  name: "Fundraising",
+  notes_workspace: "fundraising-notes",
+  instructions: "Answer investors in two short paragraphs.\nNever attach a file.",
+};
+
+const BARE_PROFILE = { name: "Reading only", notes_workspace: null, instructions: null };
+
+test("D12: a chosen profile appends one heading at the end of each pinned prompt, with its name, notes workspace and instructions, the prompt's own bytes unchanged", () => {
+  const complaints: string[] = [];
+  for (const [name, mode, caps, runtime, user] of PINNED_ARGUMENTS) {
+    const [, , length, sha256] = UNCHANGED_PROMPTS.find(([pinned]) => pinned === name)!;
+    const prompt = getZaruInit(mode, caps, runtime, user, {}, FULL_PROFILE)!.system_prompt;
+    if (createHash("sha256").update(prompt.slice(0, length)).digest("hex") !== sha256) {
+      complaints.push(`'${name}': the pinned prompt changed before the profile`);
+    }
+    const gained = prompt.slice(length);
+    if (!gained.startsWith(`\n\n${PROFILE_HEADING}\n\n`)) complaints.push(`'${name}': gained ${JSON.stringify(gained.slice(0, 80))}`);
+    if (gained.split(PROFILE_HEADING).length !== 2) complaints.push(`'${name}': the heading was not taught once`);
+    for (const part of [FULL_PROFILE.name, FULL_PROFILE.notes_workspace, FULL_PROFILE.instructions]) {
+      if (!gained.includes(part)) complaints.push(`'${name}': ${JSON.stringify(part)} not taught`);
+    }
+  }
+  for (const [mode, caps, runtime] of CONTEXT_MODES) {
+    const without = getZaruInit(mode, caps, runtime, CONTEXT_OPERATOR)!.system_prompt;
+    const withProfile = getZaruInit(mode, caps, runtime, CONTEXT_OPERATOR, {}, FULL_PROFILE)!.system_prompt;
+    if (!withProfile.startsWith(without) || !withProfile.slice(without.length).startsWith(`\n\n${PROFILE_HEADING}`)) {
+      complaints.push(`${mode}: the profile was not appended to the mode's own prompt`);
+    }
+  }
+  assert.deepEqual(complaints, []);
+});
+
+test("D12: a profile with no notes workspace and no instructions teaches its heading and name and neither of them", () => {
+  const complaints: string[] = [];
+  for (const [mode, caps, runtime] of CONTEXT_MODES) {
+    const without = getZaruInit(mode, caps, runtime, CONTEXT_OPERATOR)!.system_prompt;
+    const full = getZaruInit(mode, caps, runtime, CONTEXT_OPERATOR, {}, FULL_PROFILE)!.system_prompt.slice(without.length);
+    const bare = getZaruInit(mode, caps, runtime, CONTEXT_OPERATOR, {}, BARE_PROFILE)!.system_prompt.slice(without.length);
+    if (!bare.startsWith(`\n\n${PROFILE_HEADING}\n\n`) || !bare.includes(BARE_PROFILE.name)) complaints.push(`${mode}: bare taught ${JSON.stringify(bare)}`);
+    if (bare.split("\n\n").length >= full.split("\n\n").length) complaints.push(`${mode}: the bare profile taught as many paragraphs as the full one`);
+    if (bare.includes("null") || bare.includes("undefined")) complaints.push(`${mode}: the bare profile taught ${JSON.stringify(bare)}`);
+  }
+  assert.deepEqual(complaints, []);
+});
+
+test("D12: with no profile chosen every pinned prompt is unchanged, and the profile heading appears nowhere", () => {
+  const complaints: string[] = [];
+  for (const [name, mode, caps, runtime, user] of PINNED_ARGUMENTS) {
+    const [, , length, sha256] = UNCHANGED_PROMPTS.find(([pinned]) => pinned === name)!;
+    for (const contexts of [{}, { "nuclear-notes": [BINDING_A] }] as Contexts[]) {
+      const prompt = getZaruInit(mode, caps, runtime, user, contexts, undefined)!.system_prompt;
+      if (prompt.includes(PROFILE_HEADING)) complaints.push(`'${name}' ${JSON.stringify(contexts)}: the profile heading taught`);
+      if (Object.keys(contexts).length === 0 && (prompt.length !== length || createHash("sha256").update(prompt).digest("hex") !== sha256)) {
+        complaints.push(`'${name}': the pinned prompt changed`);
+      }
+    }
+  }
+  assert.deepEqual(complaints, []);
+});

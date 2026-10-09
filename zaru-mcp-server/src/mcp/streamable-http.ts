@@ -12,6 +12,7 @@ import {
 } from "../middleware/auth.js";
 import {
   OrchestratorClient,
+  type ChosenProfileAnswer,
   type OperatorEscalationAnswer,
 } from "./orchestrator-client.js";
 import {
@@ -104,13 +105,15 @@ export async function handleZaruScriptTool(
   args: unknown,
   requestId?: string,
   conversationId?: string,
+  profile?: string,
 ): Promise<{
   content: Array<{ type: string; text: string }>;
   isError: boolean;
 }> {
   // Each orchestrator call is a tools/call made in the request's
-  // conversation, so it names it as the generic forward does.
-  const context = { requestId, conversationId };
+  // conversation, so it names it, and its profile, as the generic forward
+  // does.
+  const context = { requestId, conversationId, profile };
   if (name === "zaru.script.save") {
     const result = await client.invokeTool(
       user,
@@ -996,16 +999,28 @@ export function parseCapabilitiesHeader(
  * bindings (a non-empty list of distinct ids), or `null` for none (Zaru
  * ADR-0055 D20f). The orchestrator lists and calls that server's tools with the
  * chosen binding; the model never sees it (AEGIS ADR-132 S7, S8; Zaru
- * ADR-0055 D19b).
+ * ADR-0055 D19b). Or, in place of the servers, one profile: the reserved key
+ * `@profile` alone, naming one profile id (AEGIS ADR-140 D10, D12); a server
+ * name never begins with `@`.
  */
 export const ZARU_CONTEXTS_HEADER = "x-zaru-contexts";
 
 /** A conversation's choices: server name to a binding id, a list of them, or `null` for none. */
 export type ContextChoices = Record<string, string | string[] | null>;
 
-/** The refusal of an `x-zaru-contexts` header of any other shape. */
+/** The refusal of an `x-zaru-contexts` header of any other shape (AEGIS ADR-140 D12). */
 export const CONTEXTS_HEADER_SHAPE =
-  "x-zaru-contexts must be a JSON object naming, for each server, a binding id, a list of binding ids, or null";
+  "x-zaru-contexts must be a JSON object naming one profile as @profile, or, for each server, a binding id, a list of binding ids, or null";
+
+/**
+ * The refusal of two profiles, of a profile beside servers' bindings, and of
+ * any other `@` key (AEGIS ADR-140 D10).
+ */
+export const ONE_PROFILE_REFUSAL =
+  "Choose one profile, or choose connections without a profile; not both.";
+
+/** The reserved key naming the conversation's one profile. */
+export const PROFILE_KEY = "@profile";
 
 const BINDING_ID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -1014,12 +1029,15 @@ const BINDING_ID =
  * Parse the `x-zaru-contexts` header: absent is no choice (`{}`); a JSON
  * object whose every value is a binding id (a UUID), a non-empty list of
  * binding ids with none named twice (compared without regard to case), or
- * `null` is the choices, kept as sent; anything else is the refusal `CONTEXTS_HEADER_SHAPE`, which the
- * entrypoints answer 400.
+ * `null` is the choices, kept as sent; `{"@profile": "<id>"}` alone is the
+ * profile, its id kept as sent. A list under `@profile`, `@profile` beside any
+ * other key, and any other key beginning with `@` are the refusal
+ * `ONE_PROFILE_REFUSAL`; anything else is the refusal `CONTEXTS_HEADER_SHAPE`.
+ * The entrypoints answer either 400.
  */
 export function parseContextsHeader(
   headerValue: string | string[] | null | undefined,
-): { contexts?: ContextChoices } | { error: string } {
+): { contexts?: ContextChoices; profile?: string } | { error: string } {
   if (headerValue === undefined || headerValue === null) return {};
   if (Array.isArray(headerValue)) return { error: CONTEXTS_HEADER_SHAPE };
   let parsed: unknown;
@@ -1031,8 +1049,20 @@ export function parseContextsHeader(
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
     return { error: CONTEXTS_HEADER_SHAPE };
   }
+  const entries = Object.entries(parsed);
+  const reserved = entries.filter(([key]) => key.startsWith("@"));
+  if (reserved.length > 0) {
+    const [key, profile] = reserved[0]!;
+    if (key !== PROFILE_KEY || entries.length !== 1 || Array.isArray(profile)) {
+      return { error: ONE_PROFILE_REFUSAL };
+    }
+    if (typeof profile !== "string" || !BINDING_ID.test(profile)) {
+      return { error: CONTEXTS_HEADER_SHAPE };
+    }
+    return { profile };
+  }
   const contexts: ContextChoices = {};
-  for (const [server, choice] of Object.entries(parsed)) {
+  for (const [server, choice] of entries) {
     if (choice === null) {
       contexts[server] = null;
     } else if (typeof choice === "string" && BINDING_ID.test(choice)) {
@@ -1096,6 +1126,8 @@ export interface McpRequestContext {
   zaruTurn?: boolean;
   /** The conversation's chosen contexts (`x-zaru-contexts`), if any. */
   contexts?: ContextChoices;
+  /** The conversation's one chosen profile (`x-zaru-contexts`'s `@profile`), if any. */
+  profile?: string;
   /** The conversation the request was made in (`x-zaru-conversation`), if any. */
   conversationId?: string;
 }
@@ -1464,14 +1496,30 @@ export function createMcpServerForUser(
     },
   );
 
+  // The chosen profile, read once as the caller when a prompt is built
+  // (AEGIS ADR-140 D12); one it cannot read is taught as none.
+  let profileRead: Promise<ChosenProfileAnswer | null> | undefined;
+  const chosenProfile = async (): Promise<ChosenProfileAnswer | undefined> => {
+    if (context.profile === undefined) return undefined;
+    profileRead ??= client.getProfile(user, context.profile);
+    return (await profileRead) ?? undefined;
+  };
+
   mcpServer.server.setRequestHandler(ListToolsRequestSchema, async () => {
     const listed = await client.listTools(user);
     // The chosen contexts' tools, listed by the orchestrator with the chosen
     // binding; best effort: a failure lists none of them and is logged.
+    // A chosen profile is listed by its id alone (AEGIS ADR-140 D12).
     let contextTools: Awaited<ReturnType<OrchestratorClient["listContextTools"]>> = [];
-    if (contextChosen(context.contexts)) {
+    const listingChoice =
+      context.profile !== undefined
+        ? { profile: context.profile }
+        : contextChosen(context.contexts)
+          ? { contexts: context.contexts! }
+          : null;
+    if (listingChoice) {
       try {
-        contextTools = await client.listContextTools(user, context.contexts!);
+        contextTools = await client.listContextTools(user, listingChoice);
       } catch (error) {
         logError("context.tools.failed", {
           error: error instanceof Error ? error : { message: String(error) },
@@ -1679,6 +1727,7 @@ Available modes:
         client?.runtime,
         user,
         context.contexts ?? {},
+        await chosenProfile(),
       );
       if (!result) {
         return {
@@ -1739,6 +1788,7 @@ Available modes:
         client?.runtime,
         user,
         context.contexts ?? {},
+        await chosenProfile(),
       );
       if (!result) {
         return {
@@ -1805,6 +1855,7 @@ Available modes:
         args,
         requestId,
         context.conversationId,
+        context.profile,
       );
     }
 
@@ -1885,6 +1936,7 @@ Available modes:
           requestId,
           contexts: context.contexts,
           conversationId: context.conversationId,
+          profile: context.profile,
         },
       );
       return normalizeToolResult(result);
@@ -1948,6 +2000,7 @@ export async function handleStreamableHttp(
     {
       zaruTurn: carriesZaruTurn(req.headers[ZARU_TURN_HEADER]),
       contexts: chosen.contexts,
+      profile: chosen.profile,
       conversationId: conversation.conversationId,
     },
   );

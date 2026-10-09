@@ -9,8 +9,8 @@
 // the mode enum, and with and without the Worker's wait ceiling (which adds a
 // sentence to every `.wait` tool); the server's instructions; and every mode's
 // system prompt as `zaru.init` and `zaru.mode` build it (`getZaruInit`, then
-// the empty-memory section), with no context chosen and with every context
-// sentence taught. Beside that, the edge-fleet descriptors are read
+// the empty-memory section), with no context chosen, with every context
+// sentence taught, and with a profile chosen. Beside that, the edge-fleet descriptors are read
 // from their module directly: nothing in this repository serves them, and the
 // published package may. Code comments are not facing text and keep their
 // references.
@@ -179,6 +179,14 @@ test("facing text: every mode's system prompt names no decision record", () => {
     ["operator", new Set<string>(), undefined],
   ] as const) {
     inits.push([`${mode}+contexts`, getZaruInit(mode, caps, runtime, operator, contexts)]);
+    inits.push([
+      `${mode}+profile`,
+      getZaruInit(mode, caps, runtime, operator, {}, {
+        name: "Fundraising",
+        notes_workspace: "fundraising-notes",
+        instructions: "Answer investors in two short paragraphs.",
+      }),
+    ]);
   }
   for (const [mode, init] of inits) {
     assert.ok(init, `getZaruInit answers ${mode}`);
