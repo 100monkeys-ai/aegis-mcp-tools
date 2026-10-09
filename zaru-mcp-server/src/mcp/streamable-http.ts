@@ -14,7 +14,12 @@ import {
   OrchestratorClient,
   type OperatorEscalationAnswer,
 } from "./orchestrator-client.js";
-import { ZaruClient, VersionConflictError } from "../clients/zaru-client.js";
+import {
+  CONVERSATION_REFUSAL_MESSAGES,
+  ZaruClient,
+  VersionConflictError,
+  type ZaruConversationsAnswer,
+} from "../clients/zaru-client.js";
 import {
   getZaruInit,
   appendMemoryToSystemPrompt,
@@ -492,6 +497,246 @@ export async function handleZaruChat(
       }`,
     });
   }
+}
+
+// ---------------------------------------------------------------------------
+// zaru.conversations.* (Zaru ADR-0059 C1, C2, C6): the person's own Zaru
+// conversations, read through Zaru Web's read-only routes with the caller's
+// own token, answered here and never forwarded to the orchestrator.
+// ---------------------------------------------------------------------------
+
+/** C1's bounds (numbers nobody measured; the record carries them). */
+export const CONVERSATIONS_LIMIT = { min: 1, max: 50, default: 20 } as const;
+export const CONVERSATION_PAGE_SIZE = { min: 1, max: 100, default: 50 } as const;
+export const CONVERSATIONS_QUERY_LENGTH = { min: 3, max: 200 } as const;
+
+const CONVERSATIONS_REFUSAL_LIST =
+  "A refusal is an error whose text is { error, message }, the error one of";
+
+/** The listing of `zaru.conversations.list`, C1's input schema. */
+export const ZARU_CONVERSATIONS_LIST_TOOL = {
+  name: "zaru.conversations.list",
+  description: `List this person's own Zaru conversations with you, newest first by their last message: the ones held on Zaru and the ones held through their other apps. Returns { conversations: [{ id, title, mode, updated_at, message_count, archived, current }], more }; current is true for the conversation this call is made in, and more is true when there are more than were returned. Read one with zaru.conversations.read. ${CONVERSATIONS_REFUSAL_LIST} unauthorized, invalid_request, unavailable.`,
+  inputSchema: {
+    type: "object",
+    properties: {
+      limit: {
+        type: "integer",
+        minimum: CONVERSATIONS_LIMIT.min,
+        maximum: CONVERSATIONS_LIMIT.max,
+        default: CONVERSATIONS_LIMIT.default,
+        description: `How many conversations to return, ${CONVERSATIONS_LIMIT.min} to ${CONVERSATIONS_LIMIT.max}. Absent: ${CONVERSATIONS_LIMIT.default}.`,
+      },
+    },
+  },
+};
+
+/** The listing of `zaru.conversations.read`, C1's input schema. */
+export const ZARU_CONVERSATIONS_READ_TOOL = {
+  name: "zaru.conversations.read",
+  description: `Read one of this person's own Zaru conversations with you, a page of messages at a time, oldest first. Returns { conversation: { id, title, mode, updated_at }, messages, next_cursor }. Each message is { id, role, text, created_at } for something the person or you said (a message the person sent through another app carries channel "api"; a text cut at 4,000 characters carries truncated: true), or { id, role: "tool_call", tool, outcome, created_at } for a tool you called, outcome ok, error or aborted; tool arguments and results are not returned. Pass next_cursor as cursor to read the next page; it is null at the end. The conversation this call is made in is refused with current_conversation: it is already in front of you. ${CONVERSATIONS_REFUSAL_LIST} unauthorized, conversation_not_found, current_conversation, invalid_request, unavailable.`,
+  inputSchema: {
+    type: "object",
+    properties: {
+      conversation_id: {
+        type: "string",
+        format: "uuid",
+        description:
+          "The conversation to read: an id from zaru.conversations.list or zaru.conversations.search.",
+      },
+      cursor: {
+        type: "string",
+        description:
+          "The next_cursor of the page read before. Absent: the conversation's first page.",
+      },
+      page_size: {
+        type: "integer",
+        minimum: CONVERSATION_PAGE_SIZE.min,
+        maximum: CONVERSATION_PAGE_SIZE.max,
+        default: CONVERSATION_PAGE_SIZE.default,
+        description: `How many stored messages to read, ${CONVERSATION_PAGE_SIZE.min} to ${CONVERSATION_PAGE_SIZE.max}. Absent: ${CONVERSATION_PAGE_SIZE.default}.`,
+      },
+    },
+    required: ["conversation_id"],
+  },
+};
+
+/** The listing of `zaru.conversations.search`, C1's input schema. */
+export const ZARU_CONVERSATIONS_SEARCH_TOOL = {
+  name: "zaru.conversations.search",
+  description: `Find this person's own Zaru conversations with you that mention some words: a literal, case-insensitive match of the whole query over conversation titles and the text of what the person and you said, newest first. Returns { hits: [{ conversation_id, title, message_id, role, created_at, snippet, current }], more }; message_id is null for a match in a title, snippet is up to 200 characters around the match, and current is true for the conversation this call is made in. Read a hit's conversation with zaru.conversations.read. ${CONVERSATIONS_REFUSAL_LIST} unauthorized, invalid_request, unavailable.`,
+  inputSchema: {
+    type: "object",
+    properties: {
+      query: {
+        type: "string",
+        minLength: CONVERSATIONS_QUERY_LENGTH.min,
+        maxLength: CONVERSATIONS_QUERY_LENGTH.max,
+        description: `The words to find, matched as written, ${CONVERSATIONS_QUERY_LENGTH.min} to ${CONVERSATIONS_QUERY_LENGTH.max} characters.`,
+      },
+      limit: {
+        type: "integer",
+        minimum: CONVERSATIONS_LIMIT.min,
+        maximum: CONVERSATIONS_LIMIT.max,
+        default: CONVERSATIONS_LIMIT.default,
+        description: `How many hits to return, ${CONVERSATIONS_LIMIT.min} to ${CONVERSATIONS_LIMIT.max}. Absent: ${CONVERSATIONS_LIMIT.default}.`,
+      },
+    },
+    required: ["query"],
+  },
+};
+
+type ConversationsResult = ZaruChatResult;
+
+function invalidConversationsRequest(message: string): ConversationsResult {
+  return zaruChatRefusal({ error: "invalid_request", message });
+}
+
+/**
+ * An optional whole-number argument within its bounds: `undefined` when
+ * absent, the number when it fits, else the refusal sentence.
+ */
+function boundedIntegerArgument(
+  value: unknown,
+  name: string,
+  bounds: { min: number; max: number },
+): { value?: number } | { error: string } {
+  if (value === undefined || value === null) return {};
+  if (
+    typeof value !== "number" ||
+    !Number.isInteger(value) ||
+    value < bounds.min ||
+    value > bounds.max
+  ) {
+    return {
+      error: `${name} must be a whole number from ${bounds.min} to ${bounds.max}.`,
+    };
+  }
+  return { value };
+}
+
+/**
+ * Run one conversation read: C1's output on success, as one text item and as
+ * `structuredContent`; Zaru Web's refusal as a tool error whose text is its
+ * `{ error, message }`; Zaru Web unreachable, or a 2xx that is not a JSON
+ * object, as `unavailable`.
+ */
+async function answerConversationsRead(
+  tool: string,
+  read: () => Promise<ZaruConversationsAnswer>,
+): Promise<ConversationsResult> {
+  try {
+    const answer = await read();
+    if (!answer.ok) {
+      logWarn("zaru.conversations.refused", {
+        tool_name: tool,
+        upstream_status: answer.status,
+        code: answer.refusal.error,
+      });
+      return zaruChatRefusal(answer.refusal);
+    }
+    return {
+      content: [{ type: "text", text: JSON.stringify(answer.output) }],
+      structuredContent: answer.output,
+      isError: false,
+    };
+  } catch (error) {
+    logError("zaru.conversations.failed", {
+      tool_name: tool,
+      error: error instanceof Error ? error : { message: String(error) },
+    });
+    return zaruChatRefusal({
+      error: "unavailable",
+      message: CONVERSATION_REFUSAL_MESSAGES.unavailable,
+    });
+  }
+}
+
+/**
+ * Dispatch `zaru.conversations.list` (Zaru ADR-0059 C1). `currentConversation`
+ * is the request's `x-zaru-conversation`, passed to Zaru Web as `current`
+ * only when the request carried it (C6). Exported for unit testing.
+ */
+export async function handleZaruConversationsList(
+  client: Pick<ZaruClient, "listConversations">,
+  user: ZaruUser,
+  args: unknown,
+  currentConversation?: string,
+): Promise<ConversationsResult> {
+  const a = (args as Record<string, unknown>) ?? {};
+  const limit = boundedIntegerArgument(a.limit, "limit", CONVERSATIONS_LIMIT);
+  if ("error" in limit) return invalidConversationsRequest(limit.error);
+  return answerConversationsRead(ZARU_CONVERSATIONS_LIST_TOOL.name, () =>
+    client.listConversations(user, {
+      limit: limit.value,
+      current: currentConversation,
+    }),
+  );
+}
+
+/** Dispatch `zaru.conversations.read` (C1, C6, C8). Exported for unit testing. */
+export async function handleZaruConversationsRead(
+  client: Pick<ZaruClient, "readConversation">,
+  user: ZaruUser,
+  args: unknown,
+  currentConversation?: string,
+): Promise<ConversationsResult> {
+  const a = (args as Record<string, unknown>) ?? {};
+  if (typeof a.conversation_id !== "string" || !BINDING_ID.test(a.conversation_id)) {
+    return invalidConversationsRequest(
+      "conversation_id must be a conversation id (a UUID).",
+    );
+  }
+  if (a.cursor !== undefined && a.cursor !== null && (typeof a.cursor !== "string" || a.cursor === "")) {
+    return invalidConversationsRequest(
+      "cursor must be the next_cursor of the page read before.",
+    );
+  }
+  const pageSize = boundedIntegerArgument(
+    a.page_size,
+    "page_size",
+    CONVERSATION_PAGE_SIZE,
+  );
+  if ("error" in pageSize) return invalidConversationsRequest(pageSize.error);
+  const conversationId = a.conversation_id;
+  const cursor = typeof a.cursor === "string" ? a.cursor : undefined;
+  return answerConversationsRead(ZARU_CONVERSATIONS_READ_TOOL.name, () =>
+    client.readConversation(user, {
+      conversationId,
+      cursor,
+      pageSize: pageSize.value,
+      current: currentConversation,
+    }),
+  );
+}
+
+/** Dispatch `zaru.conversations.search` (C1, C6). Exported for unit testing. */
+export async function handleZaruConversationsSearch(
+  client: Pick<ZaruClient, "searchConversations">,
+  user: ZaruUser,
+  args: unknown,
+  currentConversation?: string,
+): Promise<ConversationsResult> {
+  const a = (args as Record<string, unknown>) ?? {};
+  if (
+    typeof a.query !== "string" ||
+    a.query.length < CONVERSATIONS_QUERY_LENGTH.min ||
+    a.query.length > CONVERSATIONS_QUERY_LENGTH.max
+  ) {
+    return invalidConversationsRequest(
+      `query must be ${CONVERSATIONS_QUERY_LENGTH.min} to ${CONVERSATIONS_QUERY_LENGTH.max} characters.`,
+    );
+  }
+  const limit = boundedIntegerArgument(a.limit, "limit", CONVERSATIONS_LIMIT);
+  if ("error" in limit) return invalidConversationsRequest(limit.error);
+  const query = a.query;
+  return answerConversationsRead(ZARU_CONVERSATIONS_SEARCH_TOOL.name, () =>
+    client.searchConversations(user, {
+      query,
+      limit: limit.value,
+      current: currentConversation,
+    }),
+  );
 }
 
 /** D3's code: six decimal digits (Zaru ADR-0050). */
@@ -1323,6 +1568,9 @@ Available modes:
             required: ["content", "version"],
           },
         },
+        ZARU_CONVERSATIONS_LIST_TOOL,
+        ZARU_CONVERSATIONS_READ_TOOL,
+        ZARU_CONVERSATIONS_SEARCH_TOOL,
         ZARU_CHAT_TOOL,
         // Zaru ADR-0050 D3 and D4: escalate to every API-key caller; release
         // only while the presented key holds an escalation.
@@ -1490,6 +1738,33 @@ Available modes:
 
     if (name === "zaru.memory.set") {
       return handleZaruMemorySet(zaruClient, user, args);
+    }
+
+    if (name === ZARU_CONVERSATIONS_LIST_TOOL.name) {
+      return handleZaruConversationsList(
+        zaruClient,
+        user,
+        args,
+        context.conversationId,
+      );
+    }
+
+    if (name === ZARU_CONVERSATIONS_READ_TOOL.name) {
+      return handleZaruConversationsRead(
+        zaruClient,
+        user,
+        args,
+        context.conversationId,
+      );
+    }
+
+    if (name === ZARU_CONVERSATIONS_SEARCH_TOOL.name) {
+      return handleZaruConversationsSearch(
+        zaruClient,
+        user,
+        args,
+        context.conversationId,
+      );
     }
 
     if (name === ZARU_CHAT_TOOL.name) {

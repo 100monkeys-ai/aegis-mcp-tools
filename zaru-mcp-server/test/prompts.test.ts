@@ -25,6 +25,9 @@ test("getZaruInit('vibecode') returns a full response for a browser client with 
     "zaru.docs",
     "zaru.memory.get",
     "zaru.memory.set",
+    "zaru.conversations.list",
+    "zaru.conversations.read",
+    "zaru.conversations.search",
     "zaru.execute_typescript",
     "zaru.script.save",
     "zaru.script.run",
@@ -68,6 +71,9 @@ test("getZaruInit('live') returns a full response for a browser client with the 
     "zaru.docs",
     "zaru.memory.get",
     "zaru.memory.set",
+    "zaru.conversations.list",
+    "zaru.conversations.read",
+    "zaru.conversations.search",
     "zaru.execute_typescript",
     "zaru.script.save",
     "zaru.script.run",
@@ -542,16 +548,18 @@ test("W41: after calling zaru.mode the model waits for the person", () => {
 // re-measured for AEGIS ADR-139 N13 (one sentence teaching aegis.schedule.create);
 // the agentic and workflow pins (and their chat-uploads forms) were
 // re-measured for AEGIS ADR-139 N17 (one sentence teaching zaru.schedule);
+// every pin was re-measured for Zaru ADR-0059 C10 (the shared personality's
+// section on the person's other conversations, 648 characters in each);
 // every other pin stands as it was.
 const UNCHANGED_PROMPTS: Array<[string, () => ReturnType<typeof getZaruInit>, number, string]> = [
-  ["agentic", () => getZaruInit("agentic"), 12947, "2269ea383d88dfa90aaf0de0e8910232140ffe3f5c7869432e7e1aad61e71028"],
-  ["agentic+chat-uploads", () => getZaruInit("agentic", new Set(["chat-uploads"])), 16757, "f3fa9cc8ea0bea0436afbd7848b8811a2242615847ef0eb08c86a0efb0e47b1f"],
-  ["workflow", () => getZaruInit("workflow"), 9443, "d6836886b1a40a571f563ab931fb2687f2357109dc921f9a3f7dbe73ee0ccd4b"],
-  ["workflow+chat-uploads", () => getZaruInit("workflow", new Set(["chat-uploads"])), 13253, "d83528ddbfd35608415f31f237401e88ce20589fece498653e54fd6afbd5afc9"],
-  ["execute", () => getZaruInit("execute"), 10980, "89402024133823cce1ff41918984e9908f0f0b2eb754bda5161a24c32750fe4e"],
-  ["live", () => getZaruInit("live", new Set(["live"]), "browser"), 7910, "217f83602b4e3f058945fc6e2e5baada5dd18651c76e3ac269d95ca92cf355a5"],
-  ["vibecode", () => getZaruInit("vibecode", new Set(["vibecode"]), "browser"), 11340, "149229a0ab6350a11ac8b68ef858247dedd316882a69ebc2a49711b49456bd83"],
-  ["operator", () => getZaruInit("operator", new Set(), undefined, { isOperator: true, tier: "operator" }), 10071, "42a08a9aa78f13b407254ce9f672e60358e62142ea604d6cc53072ff83b8c216"],
+  ["agentic", () => getZaruInit("agentic"), 13595, "fc20293db51bf31226b4b67c5c0b5d19cfc134275237f11f53d4a29af30768eb"],
+  ["agentic+chat-uploads", () => getZaruInit("agentic", new Set(["chat-uploads"])), 17405, "1bdb2363b67762d1af368d1d3738539ff1958a7891daeaea877a50302bbc283e"],
+  ["workflow", () => getZaruInit("workflow"), 10091, "de283acbf52c646bb2802a89e224690c892d2143596fef95ac30ceef3eb0cf85"],
+  ["workflow+chat-uploads", () => getZaruInit("workflow", new Set(["chat-uploads"])), 13901, "d6833424b0e01613bc5231e78e0996d6742854a552f91b2b253f004f39d62a93"],
+  ["execute", () => getZaruInit("execute"), 11628, "51f8fb63d247f277a04c96c07c654dd70a578fbce737bd50f9848ae559c2ea5b"],
+  ["live", () => getZaruInit("live", new Set(["live"]), "browser"), 8558, "f5affbdef392ee3aa57500ba914bb95b5e6a18a584e7d8c784e861c5234a2633"],
+  ["vibecode", () => getZaruInit("vibecode", new Set(["vibecode"]), "browser"), 11988, "07c06d98d3ed02aa2092e81317541b2692a545c1960d90fc4fe2ddc2f0f547d7"],
+  ["operator", () => getZaruInit("operator", new Set(), undefined, { isOperator: true, tier: "operator" }), 10719, "a8815cc691f8e296b4703fde20e6a7bdb372ed9ea856478a4e505312be6a49d5"],
 ];
 
 test("W41: every other mode's prompt is unchanged byte for byte", () => {
@@ -1256,6 +1264,68 @@ test("N17: the chat, agentic and workflow prompts hold the proposal sentence onc
   for (const [mode, init] of ALL_MODES) {
     if (mode === "chat" || mode === "agentic" || mode === "workflow") continue;
     if (init!.system_prompt.includes("zaru.schedule")) failures.push(`the ${mode} prompt names zaru.schedule`);
+  }
+  assert.deepEqual(failures, [], failures.join("; "));
+});
+
+// ---------------------------------------------------------------------------
+// The person's other conversations (Zaru ADR-0059 C9, C10). Jeshua, asking
+// Zaru Web "Do you have access to our other conversations?", was told no:
+// the prompt taught memory alone, and no mode listed a conversation tool.
+// Every mode's prompt now carries the teaching section after the memory
+// section, and every mode's list the three tools after zaru.memory.set.
+// ---------------------------------------------------------------------------
+
+const CONVERSATIONS_SECTION = `# YOUR CONVERSATIONS WITH THIS USER
+
+You can read this person's other conversations with you, the ones on Zaru and the ones through their other apps: zaru.conversations.list lists them newest first, zaru.conversations.search finds the ones that mention some words, and zaru.conversations.read reads one, a page at a time. When they ask about an earlier conversation, or whether you can see your past conversations, say yes and read before you answer; never guess what was said. The conversation you are in is already in front of you. Memory stays the short profile you keep; a conversation is read when it is needed and is not copied into memory.`;
+
+const CONVERSATION_TOOLS = ["zaru.conversations.list", "zaru.conversations.read", "zaru.conversations.search"];
+
+const EVERY_PROMPT: Array<[string, ReturnType<typeof getZaruInit>]> = [
+  ...ALL_MODES,
+  ["agentic+chat-uploads", getZaruInit("agentic", new Set(["chat-uploads"]))],
+  ["workflow+chat-uploads", getZaruInit("workflow", new Set(["chat-uploads"]))],
+];
+
+test("C10: every mode's prompt holds the conversations section verbatim, once, right after the memory section", () => {
+  const failures: string[] = [];
+  const memoryEnd = "what you write here is what every future session sees.\n\n";
+  for (const [name, init] of EVERY_PROMPT) {
+    const prompt = init!.system_prompt;
+    const count = prompt.split(CONVERSATIONS_SECTION).length - 1;
+    if (count !== 1) {
+      failures.push(`the ${name} prompt holds the conversations section ${count} times, not once`);
+      continue;
+    }
+    const at = prompt.indexOf(CONVERSATIONS_SECTION);
+    if (prompt.slice(at - memoryEnd.length, at) !== memoryEnd)
+      failures.push(`the ${name} prompt's conversations section does not follow the memory section`);
+  }
+  assert.deepEqual(failures, [], failures.join("; "));
+});
+
+test("C10: the memory section still calls memory a curated profile, not a chat transcript log", () => {
+  for (const [name, init] of EVERY_PROMPT) {
+    assert.ok(
+      init!.system_prompt.includes("it is a curated profile, not a chat transcript log"),
+      `the ${name} prompt keeps the memory sentence`,
+    );
+  }
+});
+
+test("C9: every mode's tool list holds the three conversation tools once each, right after zaru.memory.set", () => {
+  const failures: string[] = [];
+  for (const [mode, init] of ALL_MODES) {
+    const tools = init!.available_tools;
+    const at = tools.indexOf("zaru.memory.set");
+    const after = tools.slice(at + 1, at + 1 + CONVERSATION_TOOLS.length);
+    if (at < 0 || JSON.stringify(after) !== JSON.stringify(CONVERSATION_TOOLS))
+      failures.push(`the ${mode} list holds ${JSON.stringify(after)} after zaru.memory.set`);
+    for (const tool of CONVERSATION_TOOLS) {
+      const count = tools.filter((t) => t === tool).length;
+      if (count !== 1) failures.push(`the ${mode} list holds ${tool} ${count} times`);
+    }
   }
   assert.deepEqual(failures, [], failures.join("; "));
 });

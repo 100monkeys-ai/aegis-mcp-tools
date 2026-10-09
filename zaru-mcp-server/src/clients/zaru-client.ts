@@ -64,13 +64,51 @@ export type ZaruChatAnswer =
   | { ok: true; output: Record<string, unknown> }
   | { ok: false; status: number; refusal: ZaruChatRefusal };
 
+/** C1's refusal sentences for the conversation reads, where Zaru Web sent no code. */
+export const CONVERSATION_REFUSAL_MESSAGES = {
+  unauthorized: "Sign in, or use a valid API key, to read your conversations.",
+  conversation_not_found: "There is no conversation of yours with that id.",
+  unavailable:
+    "Your conversations can't be read right now. Please try again in a moment.",
+} as const;
+
+/**
+ * Zaru Web's answer to one conversation read (Zaru ADR-0059 C1, C3): C1's
+ * output object on a 2xx, or the coded refusal it answered with its status.
+ */
+export type ZaruConversationsAnswer =
+  | { ok: true; output: Record<string, unknown> }
+  | { ok: false; status: number; refusal: ZaruChatRefusal };
+
+/** `GET /api/zaru-conversations/`: `current` only when the request named one. */
+export interface ZaruConversationsListRequest {
+  limit?: number;
+  current?: string;
+}
+
+/** `GET /api/zaru-conversations/<id>`. */
+export interface ZaruConversationReadRequest {
+  conversationId: string;
+  cursor?: string;
+  pageSize?: number;
+  current?: string;
+}
+
+/** `GET /api/zaru-conversations/search`. */
+export interface ZaruConversationsSearchRequest {
+  query: string;
+  limit?: number;
+  current?: string;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /**
- * HTTP client for the zaru-client `/api/zaru-memory` REST surface (ADR-118)
- * and its turn route `/api/chat/turn` (Zaru ADR-0049).
+ * HTTP client for the zaru-client `/api/zaru-memory` REST surface (ADR-118),
+ * its turn route `/api/chat/turn` (Zaru ADR-0049) and its read-only
+ * conversation routes under `/api/zaru-conversations/` (Zaru ADR-0059).
  *
  * Mirrors the auth-forwarding pattern used by `OrchestratorClient` —
  * each call propagates the consumer user's own Bearer token (Keycloak JWT
@@ -216,6 +254,122 @@ export class ZaruClient {
         error: response.status === 401 ? "unauthorized" : "turn_failed",
         message: `Zaru Web answered ${response.status}: ${text.slice(0, 500)}`,
       },
+    };
+  }
+
+  /**
+   * The person's own conversations, newest first (Zaru ADR-0059 C1, C3):
+   * `GET /api/zaru-conversations/` with the caller's own token, as the memory
+   * calls make theirs (C2).
+   */
+  async listConversations(
+    user: ZaruUser,
+    request: ZaruConversationsListRequest,
+  ): Promise<ZaruConversationsAnswer> {
+    return this.readConversations(user, "/api/zaru-conversations/", {
+      limit: request.limit,
+      current: request.current,
+    });
+  }
+
+  /** One conversation, a page of messages from `cursor` (C1, C3, C8). */
+  async readConversation(
+    user: ZaruUser,
+    request: ZaruConversationReadRequest,
+  ): Promise<ZaruConversationsAnswer> {
+    return this.readConversations(
+      user,
+      `/api/zaru-conversations/${encodeURIComponent(request.conversationId)}`,
+      {
+        cursor: request.cursor,
+        page_size: request.pageSize,
+        current: request.current,
+      },
+    );
+  }
+
+  /** A literal, case-insensitive search of the person's conversations (C1, C3). */
+  async searchConversations(
+    user: ZaruUser,
+    request: ZaruConversationsSearchRequest,
+  ): Promise<ZaruConversationsAnswer> {
+    return this.readConversations(user, "/api/zaru-conversations/search", {
+      q: request.query,
+      limit: request.limit,
+      current: request.current,
+    });
+  }
+
+  /**
+   * One GET of a conversation route. Only the parameters given are sent. A
+   * 2xx JSON object is C1's output. Any other status is a refusal: its
+   * `{ error, message }` body as Zaru Web sent it, or, when the body carries
+   * no code, `unauthorized` for a 401, `conversation_not_found` for a 404 and
+   * `unavailable` otherwise. A failed fetch (Zaru Web unreachable) and a 2xx
+   * body that is not a JSON object throw.
+   */
+  private async readConversations(
+    user: ZaruUser,
+    path: string,
+    params: Record<string, string | number | undefined>,
+  ): Promise<ZaruConversationsAnswer> {
+    const query = new URLSearchParams();
+    for (const [name, value] of Object.entries(params)) {
+      if (value !== undefined) query.set(name, String(value));
+    }
+    const search = query.toString();
+    const response = await this.fetchImpl(
+      resolveUrl(this.baseUrl, search ? `${path}?${search}` : path),
+      {
+        method: "GET",
+        headers: {
+          Accept: "application/json",
+          Authorization: `Bearer ${user.token}`,
+        },
+      },
+    );
+
+    const text = await response.text();
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      parsed = undefined;
+    }
+
+    if (response.ok) {
+      if (!isRecord(parsed)) {
+        throw new Error(
+          `zaru-client ${path} answered ${response.status} without a JSON object`,
+        );
+      }
+      return { ok: true, output: parsed };
+    }
+
+    if (isRecord(parsed) && typeof parsed.error === "string") {
+      return {
+        ok: false,
+        status: response.status,
+        refusal: {
+          ...parsed,
+          error: parsed.error,
+          message:
+            typeof parsed.message === "string"
+              ? parsed.message
+              : CONVERSATION_REFUSAL_MESSAGES.unavailable,
+        },
+      };
+    }
+    const error =
+      response.status === 401
+        ? "unauthorized"
+        : response.status === 404
+          ? "conversation_not_found"
+          : "unavailable";
+    return {
+      ok: false,
+      status: response.status,
+      refusal: { error, message: CONVERSATION_REFUSAL_MESSAGES[error] },
     };
   }
 }

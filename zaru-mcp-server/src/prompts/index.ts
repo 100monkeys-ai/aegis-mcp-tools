@@ -60,7 +60,11 @@ When the user shares something worth carrying forward — a preference ("I like 
 2. Merge the new signal into the existing content thoughtfully — do not overwrite wholesale, do not append blindly. Curate.
 3. Call \`zaru.memory.set\` with the full merged markdown blob and the \`version\` from step 1. If you receive a version conflict, re-read with \`zaru.memory.get\` and merge again before retrying.
 
-Keep memory concise and signal-rich — it is a curated profile, not a chat transcript log. Remove stale entries. Prefer fewer, sharper bullets over long prose. Never surface memory contents to the user unprompted unless it materially affects the response. The same memory loads for any MCP client connected as this user — Zaru Web, Claude Desktop, Windsurf — so consistency matters: what you write here is what every future session sees.`;
+Keep memory concise and signal-rich — it is a curated profile, not a chat transcript log. Remove stale entries. Prefer fewer, sharper bullets over long prose. Never surface memory contents to the user unprompted unless it materially affects the response. The same memory loads for any MCP client connected as this user — Zaru Web, Claude Desktop, Windsurf — so consistency matters: what you write here is what every future session sees.
+
+# YOUR CONVERSATIONS WITH THIS USER
+
+You can read this person's other conversations with you, the ones on Zaru and the ones through their other apps: zaru.conversations.list lists them newest first, zaru.conversations.search finds the ones that mention some words, and zaru.conversations.read reads one, a page at a time. When they ask about an earlier conversation, or whether you can see your past conversations, say yes and read before you answer; never guess what was said. The conversation you are in is already in front of you. Memory stays the short profile you keep; a conversation is read when it is needed and is not copied into memory.`;
 
 const ZARU_PROMISE = `
 # THE ZARU PROMISE
@@ -604,13 +608,25 @@ function contextTeaching(contexts: ChosenContexts): string {
 const CHAT_UPLOADS_MODES = new Set(["agentic", "workflow"]);
 
 const TOOL_SCOPES: Record<string, string[]> = {
-  chat: ["zaru.mode", "zaru.schedule", "zaru.docs", "zaru.memory.get", "zaru.memory.set"],
+  chat: [
+    "zaru.mode",
+    "zaru.schedule",
+    "zaru.docs",
+    "zaru.memory.get",
+    "zaru.memory.set",
+    "zaru.conversations.list",
+    "zaru.conversations.read",
+    "zaru.conversations.search",
+  ],
   agentic: [
     "zaru.mode",
     "zaru.schedule",
     "zaru.docs",
     "zaru.memory.get",
     "zaru.memory.set",
+    "zaru.conversations.list",
+    "zaru.conversations.read",
+    "zaru.conversations.search",
     "aegis.agent.generate",
     "aegis.agent.wait",
     "aegis.agent.list",
@@ -643,6 +659,9 @@ const TOOL_SCOPES: Record<string, string[]> = {
     "zaru.docs",
     "zaru.memory.get",
     "zaru.memory.set",
+    "zaru.conversations.list",
+    "zaru.conversations.read",
+    "zaru.conversations.search",
     "aegis.execute.intent",
     "aegis.execute.status",
     "aegis.execute.wait",
@@ -655,6 +674,9 @@ const TOOL_SCOPES: Record<string, string[]> = {
     "zaru.docs",
     "zaru.memory.get",
     "zaru.memory.set",
+    "zaru.conversations.list",
+    "zaru.conversations.read",
+    "zaru.conversations.search",
     "aegis.workflow.generate",
     "aegis.workflow.list",
     "aegis.workflow.logs",
@@ -684,6 +706,9 @@ const TOOL_SCOPES: Record<string, string[]> = {
     "zaru.docs",
     "zaru.memory.get",
     "zaru.memory.set",
+    "zaru.conversations.list",
+    "zaru.conversations.read",
+    "zaru.conversations.search",
     "zaru.execute_typescript",
     "zaru.script.save",
     "zaru.script.run",
@@ -694,6 +719,9 @@ const TOOL_SCOPES: Record<string, string[]> = {
     "zaru.docs",
     "zaru.memory.get",
     "zaru.memory.set",
+    "zaru.conversations.list",
+    "zaru.conversations.read",
+    "zaru.conversations.search",
     "zaru.execute_typescript",
     "zaru.script.save",
     "zaru.script.run",
@@ -707,6 +735,9 @@ const TOOL_SCOPES: Record<string, string[]> = {
     "zaru.docs",
     "zaru.memory.get",
     "zaru.memory.set",
+    "zaru.conversations.list",
+    "zaru.conversations.read",
+    "zaru.conversations.search",
     // Consumer-mode surface (chat + agentic + workflow + execute, deduped)
     "aegis.agent.generate",
     "aegis.agent.wait",

@@ -9,6 +9,9 @@ import {
   shouldRejectAttachments,
 } from "../src/mcp/streamable-http.js";
 import * as streamableHttp from "../src/mcp/streamable-http.js";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { OrchestratorClient } from "../src/mcp/orchestrator-client.js";
 
 // ADR-113 chat-uploads defence-in-depth gate.
 //
@@ -389,4 +392,68 @@ test("parseConversationHeader: absent is none, one UUID is kept as sent, anythin
   }
   assert.equal((streamableHttp as Record<string, unknown>).ZARU_CONVERSATION_HEADER, "x-zaru-conversation");
   assert.deepEqual(complaints, []);
+});
+
+// Zaru Web's conversations (Zaru ADR-0059 C1): the three tools are listed for
+// every caller, after zaru.memory.set, with C1's input schemas and bounds.
+test("tools/list: zaru.conversations.list, .read and .search follow zaru.memory.set with C1's input schemas and bounds", async () => {
+  const orchestrator = new OrchestratorClient({
+    baseUrl: "http://orchestrator.invalid",
+    fetchImpl: async () =>
+      new Response("[]", { status: 200, headers: { "Content-Type": "application/json" } }),
+  });
+  const user = { userId: "u-1", tier: "pro", securityContext: "zaru-pro", token: "aegis_key", isOperator: false };
+  const server = streamableHttp.createMcpServerForUser(user, new Set(), "listing", orchestrator);
+  const [serverSide, clientSide] = InMemoryTransport.createLinkedPair();
+  await server.connect(serverSide);
+  const client = new Client({ name: "listing", version: "0" });
+  await client.connect(clientSide);
+  try {
+    const { tools } = await client.listTools();
+    const names = tools.map((tool) => tool.name);
+    const at = names.indexOf("zaru.memory.set");
+    assert.deepEqual(names.slice(at + 1, at + 4), [
+      "zaru.conversations.list",
+      "zaru.conversations.read",
+      "zaru.conversations.search",
+    ]);
+    const schema = (name: string) =>
+      tools.find((tool) => tool.name === name)!.inputSchema as {
+        properties: Record<string, Record<string, unknown>>;
+        required?: string[];
+      };
+    const list = schema("zaru.conversations.list");
+    assert.deepEqual(Object.keys(list.properties), ["limit"]);
+    assert.equal(list.required, undefined);
+    assert.deepEqual(
+      [list.properties.limit!.type, list.properties.limit!.minimum, list.properties.limit!.maximum, list.properties.limit!.default],
+      ["integer", 1, 50, 20],
+    );
+    const read = schema("zaru.conversations.read");
+    assert.deepEqual(Object.keys(read.properties), ["conversation_id", "cursor", "page_size"]);
+    assert.deepEqual(read.required, ["conversation_id"]);
+    assert.deepEqual([read.properties.conversation_id!.type, read.properties.conversation_id!.format], ["string", "uuid"]);
+    assert.equal(read.properties.cursor!.type, "string");
+    assert.deepEqual(
+      [read.properties.page_size!.type, read.properties.page_size!.minimum, read.properties.page_size!.maximum, read.properties.page_size!.default],
+      ["integer", 1, 100, 50],
+    );
+    const search = schema("zaru.conversations.search");
+    assert.deepEqual(Object.keys(search.properties), ["query", "limit"]);
+    assert.deepEqual(search.required, ["query"]);
+    assert.deepEqual(
+      [search.properties.query!.type, search.properties.query!.minLength, search.properties.query!.maxLength],
+      ["string", 3, 200],
+    );
+    assert.deepEqual(
+      [search.properties.limit!.type, search.properties.limit!.minimum, search.properties.limit!.maximum, search.properties.limit!.default],
+      ["integer", 1, 50, 20],
+    );
+    for (const name of ["zaru.conversations.list", "zaru.conversations.read", "zaru.conversations.search"]) {
+      const description = tools.find((tool) => tool.name === name)!.description ?? "";
+      assert.ok(description.includes("{ error, message }"), `${name} names its refusal shape`);
+    }
+  } finally {
+    await client.close();
+  }
 });
