@@ -559,7 +559,7 @@ const CONTEXT_SENTENCES: ReadonlyArray<readonly [string, string, boolean]> = [
   ],
   [
     "imap",
-    "The tools whose names begin with mail. reach the person's mailbox they chose above the chat input: list, read and flag their threads, and nothing else until they ask. A call names which mailbox in 'mailbox' when several are chosen; with one chosen it is set for you. Read only what the message asks for; never send, delete or move mail unless the message asks, and say so when you do. If a call is refused, tell the person in one sentence and answer without it.",
+    "The tools whose names begin with mail. reach the person's mailbox they chose above the chat input: list and read their threads in the inbox, Sent, Drafts, Trash, Archive or all their mail by 'folder', save an attachment to their files, flag threads and mark them read or unread, and nothing else until they ask. A call names which mailbox in 'mailbox' when several are chosen; with one chosen it is set for you. Read only what the message asks for; never send, forward, archive, delete or move mail unless the message asks, and say so when you do. If a call is refused, tell the person in one sentence and answer without it.",
     false,
   ],
   [
