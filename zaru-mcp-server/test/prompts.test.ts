@@ -536,12 +536,14 @@ test("W41: after calling zaru.mode the model waits for the person", () => {
 // the agentic, workflow, execute and operator pins (and their chat-uploads
 // forms) were re-measured for Zaru ADR-0028 W51a (a changed input to a
 // computation is run again; the companion chooses the agent or workflow);
+// the agentic and workflow pins (and their chat-uploads forms) were
+// re-measured for AEGIS ADR-139 N13 (one sentence teaching aegis.schedule.create);
 // every other pin stands as it was.
 const UNCHANGED_PROMPTS: Array<[string, () => ReturnType<typeof getZaruInit>, number, string]> = [
-  ["agentic", () => getZaruInit("agentic"), 12634, "700186b7789bd107dea1c29136df5a648be6cea2fc045d2cd05f8c7567626706"],
-  ["agentic+chat-uploads", () => getZaruInit("agentic", new Set(["chat-uploads"])), 16444, "bc2decb34f34df397b4f7992a68f3fe31f3d7f361b469b36b6823590ba5813fb"],
-  ["workflow", () => getZaruInit("workflow"), 9130, "6eb1337c2248b33cc77ee703f8b4f73ffb502f795f7df757fa3d01b3abd7ccef"],
-  ["workflow+chat-uploads", () => getZaruInit("workflow", new Set(["chat-uploads"])), 12940, "6c7c5b769782e8ce94e283ee513fd44c3151761a097373fdd07d7bd5bf035a47"],
+  ["agentic", () => getZaruInit("agentic"), 12810, "d055affeeff4bfe963672efecea666565f8d689d2e92ea17ba375a2cd5faf83e"],
+  ["agentic+chat-uploads", () => getZaruInit("agentic", new Set(["chat-uploads"])), 16620, "59432b9aff1fcdc88b9e4d55299b925a4b1aefe1f89dd94472064300739ecf55"],
+  ["workflow", () => getZaruInit("workflow"), 9306, "ae527cca5ced81adc8e88f2d202d6244605346e4ed6891e2e91574d8eecc1759"],
+  ["workflow+chat-uploads", () => getZaruInit("workflow", new Set(["chat-uploads"])), 13116, "7a14c1f4d03bcecb7f69e8c50a90f26a00f514992f259c54f36bd88342f7f07f"],
   ["execute", () => getZaruInit("execute"), 10980, "89402024133823cce1ff41918984e9908f0f0b2eb754bda5161a24c32750fe4e"],
   ["live", () => getZaruInit("live", new Set(["live"]), "browser"), 7910, "217f83602b4e3f058945fc6e2e5baada5dd18651c76e3ac269d95ca92cf355a5"],
   ["vibecode", () => getZaruInit("vibecode", new Set(["vibecode"]), "browser"), 11340, "149229a0ab6350a11ac8b68ef858247dedd316882a69ebc2a49711b49456bd83"],
@@ -1128,4 +1130,74 @@ test("W51a: no mode's prompt makes rerunning the same agent a rule", () => {
     if (hit) hits.push(`${mode}: "${hit[0]}"`);
   }
   assert.deepEqual(hits, [], `a prompt makes rerunning the same agent a rule: ${hits.join("; ")}`);
+});
+
+// ---------------------------------------------------------------------------
+// AEGIS ADR-139 N13: a person can schedule an agent or a workflow from their
+// MCP client. The aegis.schedule.* tools reach the client through the
+// orchestrator's listing once the person's context admits them; the agentic
+// and workflow teachings gain one sentence, verbatim from the record, where
+// each names its starting tool, and no other mode's prompt holds it.
+// ---------------------------------------------------------------------------
+
+const SCHEDULE_SENTENCE =
+  "To run an agent or a workflow later or again and again, make a schedule with aegis.schedule.create; it runs as the person, and anything it would send waits for their approval.";
+
+test("N13: the agentic and workflow prompts hold the schedule sentence once, beside their starting tool; no other mode's prompt holds it", () => {
+  const failures: string[] = [];
+  const holders: Array<[string, Set<string>, string, string, string]> = [
+    ["agentic", new Set(), "**Step 3", "**Step 4", "The execution is NOT done until aegis.task.wait returns. "],
+    ["agentic", new Set(["chat-uploads"]), "**Step 3", "**Step 4", "The execution is NOT done until aegis.task.wait returns. "],
+    ["workflow", new Set(), "**Step 5", "**Step 6", "Do NOT respond to the user until aegis.task.wait returns. "],
+    ["workflow", new Set(["chat-uploads"]), "**Step 5", "**Step 6", "Do NOT respond to the user until aegis.task.wait returns. "],
+  ];
+  for (const [mode, caps, from, to, before] of holders) {
+    const name = caps.size ? `${mode}+chat-uploads` : mode;
+    const prompt = getZaruInit(mode, caps)!.system_prompt;
+    const count = prompt.split(SCHEDULE_SENTENCE).length - 1;
+    if (count !== 1) {
+      failures.push(`the ${name} prompt holds the schedule sentence ${count} times, not once`);
+      continue;
+    }
+    const start = prompt.indexOf(from);
+    const end = prompt.indexOf(to, start);
+    const at = prompt.indexOf(SCHEDULE_SENTENCE);
+    if (!(start >= 0 && start < at && at < end)) failures.push(`the ${name} prompt's schedule sentence is not in its ${from.slice(2)}`);
+    if (prompt.slice(at - before.length, at) !== before) failures.push(`the ${name} prompt's schedule sentence does not follow "${before.trim()}"`);
+    if (prompt.slice(at + SCHEDULE_SENTENCE.length, at + SCHEDULE_SENTENCE.length + 2) !== "\n\n")
+      failures.push(`the ${name} prompt's schedule sentence does not end its paragraph`);
+  }
+  for (const [mode, init] of ALL_MODES) {
+    if (mode === "agentic" || mode === "workflow") continue;
+    if (init!.system_prompt.includes("aegis.schedule.")) failures.push(`the ${mode} prompt names a schedule tool`);
+  }
+  assert.deepEqual(failures, [], failures.join("; "));
+});
+
+const SCHEDULE_TOOLS = [
+  "aegis.schedule.create",
+  "aegis.schedule.list",
+  "aegis.schedule.get",
+  "aegis.schedule.update",
+  "aegis.schedule.pause",
+  "aegis.schedule.resume",
+  "aegis.schedule.delete",
+  "aegis.schedule.runs",
+];
+
+test("N13: the agentic and workflow tool lists hold the eight schedule tools after aegis.workflow.wait; no other mode's list holds one", () => {
+  const failures: string[] = [];
+  for (const [mode, init] of ALL_MODES) {
+    const tools = init!.available_tools;
+    if (mode === "agentic" || mode === "workflow") {
+      const at = tools.indexOf("aegis.workflow.wait");
+      const after = tools.slice(at + 1, at + 1 + SCHEDULE_TOOLS.length);
+      if (at < 0 || JSON.stringify(after) !== JSON.stringify(SCHEDULE_TOOLS))
+        failures.push(`the ${mode} list does not hold the eight schedule tools after aegis.workflow.wait, got ${JSON.stringify(after)}`);
+    } else {
+      const held = tools.filter((tool) => tool.startsWith("aegis.schedule."));
+      if (held.length) failures.push(`the ${mode} list holds ${held.join(", ")}`);
+    }
+  }
+  assert.deepEqual(failures, [], failures.join("; "));
 });
