@@ -1104,7 +1104,9 @@ export interface McpRequestContext {
 // zaru.schedule (AEGIS ADR-139 N17): a schedule proposed to the person as a
 // card. The bounds and refusal sentences are N2's, so a proposal the card
 // carries is one aegis.schedule.create accepts on timing; the orchestrator
-// remains the authority when the person presses Schedule.
+// remains the authority when the person presses Schedule. Its target is one
+// of the person's own agents or workflows, read from the orchestrator's
+// listing before the card is shown (N18).
 // ---------------------------------------------------------------------------
 
 /** What the model is told after a proposal; its turn ends there. */
@@ -1119,7 +1121,8 @@ const SCHEDULE_AT_MAX_AHEAD_MS = 366 * 24 * 60 * 60 * 1000;
 
 const SCHEDULE_REFUSALS = {
   targetKind: "'target_kind' must be agent or workflow.",
-  target: "'target' must be the name of an agent or workflow, or empty.",
+  target:
+    "'target' must name one of your agents or workflows. Find or make the one that does this, run it once, then propose the schedule naming it.",
   intent: "'intent' must say what the run is for.",
   input: "'input' must be an object.",
   reason: "'reason' must be one sentence for the person.",
@@ -1132,6 +1135,15 @@ const SCHEDULE_REFUSALS = {
   timezone: "'timezone' must be a time zone name such as Europe/Berlin.",
   gap: `A schedule runs at most once every ${SCHEDULE_MIN_GAP_MINUTES} minutes.`,
   jitter: `'jitter_seconds' must be between 0 and ${SCHEDULE_JITTER_CAP_SECONDS}.`,
+} as const;
+
+/** N18's refusals of a target the person's own listing does not hold. */
+const SCHEDULE_TARGET_REFUSALS = {
+  agent: (target: string) =>
+    `You have no agent named '${target}'. Find or make the one that does this, run it once, then propose the schedule naming it.`,
+  workflow: (target: string) =>
+    `You have no workflow named '${target}'. Find or make the one that does this, run it once, then propose the schedule naming it.`,
+  unreadable: "Your agents and workflows could not be read just now, so nothing was proposed.",
 } as const;
 
 export interface ScheduleProposal {
@@ -1248,7 +1260,7 @@ export function validateScheduleProposal(
 
   if (a.target_kind !== "agent" && a.target_kind !== "workflow")
     return refuse(SCHEDULE_REFUSALS.targetKind);
-  if (typeof a.target !== "string") return refuse(SCHEDULE_REFUSALS.target);
+  if (typeof a.target !== "string" || !a.target.trim()) return refuse(SCHEDULE_REFUSALS.target);
   if (typeof a.intent !== "string" || !a.intent.trim()) return refuse(SCHEDULE_REFUSALS.intent);
   // A string input is the run's prompt, carried in the shape
   // `aegis.task.execute` takes for an agent; an object is carried as it is.
@@ -1301,6 +1313,66 @@ export function validateScheduleProposal(
   return { ok: true, proposal };
 }
 
+/** The listing each target kind is read from, and the key its entries are under. */
+const SCHEDULE_TARGET_LISTINGS = {
+  agent: { tool: "aegis.agent.list", key: "agents" },
+  workflow: { tool: "aegis.workflow.list", key: "workflows" },
+} as const;
+
+/**
+ * The entries of a listing's answer: `{ <key>: [...] }` as the orchestrator
+ * answers it, or that object as a tool result's JSON text; null when the
+ * answer is a failure or holds no list under the key.
+ */
+function scheduleTargetEntries(answer: unknown, key: string): unknown[] | null {
+  if (!answer || typeof answer !== "object") return null;
+  const r = answer as Record<string, unknown>;
+  if (r.isError === true) return null;
+  if (Array.isArray(r[key])) return r[key] as unknown[];
+  const first = Array.isArray(r.content) ? (r.content[0] as Record<string, unknown> | undefined) : undefined;
+  if (first?.type !== "text" || typeof first.text !== "string") return null;
+  try {
+    const parsed = JSON.parse(first.text) as Record<string, unknown> | null;
+    return parsed && Array.isArray(parsed[key]) ? (parsed[key] as unknown[]) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * AEGIS ADR-139 N18: a proposal whose shape passed names one of the person's
+ * own agents or workflows. The listing of its kind is read through `client`
+ * under the person's session, and `target` must equal an entry's name or id
+ * exactly. Returns null when it does, or the refusal's sentence.
+ */
+export async function resolveScheduleTarget(
+  client: Pick<OrchestratorClient, "invokeTool">,
+  user: ZaruUser,
+  proposal: Pick<ScheduleProposal, "target_kind" | "target">,
+  requestId?: string,
+): Promise<string | null> {
+  const { tool, key } = SCHEDULE_TARGET_LISTINGS[proposal.target_kind];
+  let answer: unknown;
+  try {
+    answer = await client.invokeTool(user, tool, {}, null, { requestId });
+  } catch (error) {
+    logError("zaru.schedule.listing_failed", {
+      request_id: requestId,
+      tool_name: tool,
+      error: error instanceof Error ? error : { message: String(error) },
+    });
+    return SCHEDULE_TARGET_REFUSALS.unreadable;
+  }
+  const entries = scheduleTargetEntries(answer, key);
+  if (entries === null) return SCHEDULE_TARGET_REFUSALS.unreadable;
+  const named = entries.some((entry) => {
+    if (!entry || typeof entry !== "object") return false;
+    const { name, id } = entry as Record<string, unknown>;
+    return name === proposal.target || id === proposal.target;
+  });
+  return named ? null : SCHEDULE_TARGET_REFUSALS[proposal.target_kind](proposal.target);
+}
+
 const ZARU_SCHEDULE_TOOL = {
   name: "zaru.schedule",
   description:
@@ -1316,7 +1388,7 @@ const ZARU_SCHEDULE_TOOL = {
       target: {
         type: "string",
         description:
-          "The name of the person's agent or workflow to run, or an empty string when none exists yet and one would be made for this intent.",
+          "The name of one of the person's agents or workflows that does this. It must already exist.",
       },
       intent: {
         type: "string",
@@ -1688,13 +1760,17 @@ Available modes:
     // recorded here; Zaru Web renders the structured content as the
     // "Schedule this" card, and the person's press makes the schedule through
     // aegis.schedule.create. The answer tells the model its turn ends, as a
-    // mode switch's does (Zaru ADR-0028 W42).
+    // mode switch's does (Zaru ADR-0028 W42). Its shape is checked first, and
+    // only then its target against the person's own listing (N18).
     if (name === "zaru.schedule") {
       const checked = validateScheduleProposal(args, new Date());
-      if (!checked.ok) {
+      const refusal = checked.ok
+        ? await resolveScheduleTarget(client, user, checked.proposal, requestId)
+        : checked.error;
+      if (!checked.ok || refusal !== null) {
         return {
           content: [
-            { type: "text", text: JSON.stringify({ error: checked.error }) },
+            { type: "text", text: JSON.stringify({ error: refusal }) },
           ],
           isError: true,
         };

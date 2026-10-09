@@ -550,12 +550,15 @@ test("W41: after calling zaru.mode the model waits for the person", () => {
 // re-measured for AEGIS ADR-139 N17 (one sentence teaching zaru.schedule);
 // every pin was re-measured for Zaru ADR-0059 C10 (the shared personality's
 // section on the person's other conversations, 648 characters in each);
+// the agentic and workflow pins (and their chat-uploads forms) were
+// re-measured for AEGIS ADR-139 N20 (one sentence naming the proposal's
+// target, 85 characters in each);
 // every other pin stands as it was.
 const UNCHANGED_PROMPTS: Array<[string, () => ReturnType<typeof getZaruInit>, number, string]> = [
-  ["agentic", () => getZaruInit("agentic"), 13595, "fc20293db51bf31226b4b67c5c0b5d19cfc134275237f11f53d4a29af30768eb"],
-  ["agentic+chat-uploads", () => getZaruInit("agentic", new Set(["chat-uploads"])), 17405, "1bdb2363b67762d1af368d1d3738539ff1958a7891daeaea877a50302bbc283e"],
-  ["workflow", () => getZaruInit("workflow"), 10091, "de283acbf52c646bb2802a89e224690c892d2143596fef95ac30ceef3eb0cf85"],
-  ["workflow+chat-uploads", () => getZaruInit("workflow", new Set(["chat-uploads"])), 13901, "d6833424b0e01613bc5231e78e0996d6742854a552f91b2b253f004f39d62a93"],
+  ["agentic", () => getZaruInit("agentic"), 13680, "728835416a2ce47d67102f883fd21e0b121ca616fda34e67f90d27530241a56c"],
+  ["agentic+chat-uploads", () => getZaruInit("agentic", new Set(["chat-uploads"])), 17490, "f9370b254ea92d1641a6047e8bc3aae1cf28b4b7101bb78a60c862779fbdcb61"],
+  ["workflow", () => getZaruInit("workflow"), 10176, "64f7cc093755483d36ae00b143233f40891325958ec7dd07242e67ad649cd83a"],
+  ["workflow+chat-uploads", () => getZaruInit("workflow", new Set(["chat-uploads"])), 13986, "593f8d1ef6d1ea29cb329c1293fdf5acb23bac92ae0c4adc466ab7292095218d"],
   ["execute", () => getZaruInit("execute"), 11628, "51f8fb63d247f277a04c96c07c654dd70a578fbce737bd50f9848ae559c2ea5b"],
   ["live", () => getZaruInit("live", new Set(["live"]), "browser"), 8558, "f5affbdef392ee3aa57500ba914bb95b5e6a18a584e7d8c784e861c5234a2633"],
   ["vibecode", () => getZaruInit("vibecode", new Set(["vibecode"]), "browser"), 11988, "07c06d98d3ed02aa2092e81317541b2692a545c1960d90fc4fe2ddc2f0f547d7"],
@@ -1176,10 +1179,11 @@ test("N13: the agentic and workflow prompts hold the schedule sentence once, bes
     const at = prompt.indexOf(SCHEDULE_SENTENCE);
     if (!(start >= 0 && start < at && at < end)) failures.push(`the ${name} prompt's schedule sentence is not in its ${from.slice(2)}`);
     if (prompt.slice(at - before.length, at) !== before) failures.push(`the ${name} prompt's schedule sentence does not follow "${before.trim()}"`);
-    // N17's proposal sentence follows N13's in the same paragraph and ends it.
-    const ending = ` ${PROPOSE_SENTENCE}\n\n`;
+    // N17's proposal sentence follows N13's in the same paragraph, and N18's
+    // sentence on its target (N20) follows it and ends the paragraph.
+    const ending = ` ${PROPOSE_SENTENCE} ${PROPOSAL_TARGET_SENTENCE}\n\n`;
     if (prompt.slice(at + SCHEDULE_SENTENCE.length, at + SCHEDULE_SENTENCE.length + ending.length) !== ending)
-      failures.push(`the ${name} prompt's schedule sentence is not followed by the proposal sentence, ending its paragraph`);
+      failures.push(`the ${name} prompt's schedule sentence is not followed by the proposal sentence and its target sentence, ending its paragraph`);
   }
   for (const [mode, init] of ALL_MODES) {
     if (mode === "agentic" || mode === "workflow") continue;
@@ -1219,12 +1223,22 @@ test("N13: the agentic and workflow tool lists hold the eight schedule tools aft
 // ---------------------------------------------------------------------------
 // AEGIS ADR-139 N17: an offer to keep watching is a schedule proposed as a
 // card. `zaru.schedule` is available in every mode as `zaru.mode` is, and the
-// chat, agentic and workflow prompts each hold one sentence, verbatim from the
+// agentic and workflow prompts each hold one sentence, verbatim from the
 // record, telling the model to propose a schedule instead of asking in words.
+// N19 replaces the chat prompt's: there a proposal names an agent or workflow
+// the conversation already named or ran, and otherwise the model offers
+// Agentic mode. N20 follows the agentic and workflow prompts' sentence with
+// one naming the target that was found or made and ran.
 // ---------------------------------------------------------------------------
 
 const PROPOSE_SENTENCE =
   "When you would offer to keep an eye on something or do it again later, propose a schedule with zaru.schedule instead of asking in words.";
+
+const CHAT_SCHEDULE_SENTENCES =
+  'When the person asks you to keep an eye on something, check back or do something again later, propose a schedule with zaru.schedule only for an agent or workflow of theirs that this conversation has already named or run, and name it as the target. Otherwise call zaru.mode with mode "agentic": there the one that does it is found or made and run once, and the schedule is proposed from that run. Never propose a schedule with no target.';
+
+const PROPOSAL_TARGET_SENTENCE =
+  "Name as its target the agent or workflow you found or made and ran for this request.";
 
 test("N17: every mode's tool list holds zaru.schedule once, right after zaru.mode", () => {
   const failures: string[] = [];
@@ -1238,32 +1252,57 @@ test("N17: every mode's tool list holds zaru.schedule once, right after zaru.mod
   assert.deepEqual(failures, [], failures.join("; "));
 });
 
-test("N17: the chat, agentic and workflow prompts hold the proposal sentence once, where each teaches its offers; no other mode's prompt holds it", () => {
+test("N17, N20: the agentic and workflow prompts hold the proposal sentence once, followed by the target sentence ending its paragraph; no other mode's prompt holds either", () => {
   const failures: string[] = [];
-  const holders: Array<[string, Set<string>, string]> = [
-    ["chat", new Set(), "which you offer with zaru.mode. "],
-    ["chat", new Set(["chat-uploads"]), "which you offer with zaru.mode. "],
-    ["agentic", new Set(), `${SCHEDULE_SENTENCE} `],
-    ["agentic", new Set(["chat-uploads"]), `${SCHEDULE_SENTENCE} `],
-    ["workflow", new Set(), `${SCHEDULE_SENTENCE} `],
-    ["workflow", new Set(["chat-uploads"]), `${SCHEDULE_SENTENCE} `],
+  const holders: Array<[string, Set<string>]> = [
+    ["agentic", new Set()],
+    ["agentic", new Set(["chat-uploads"])],
+    ["workflow", new Set()],
+    ["workflow", new Set(["chat-uploads"])],
   ];
-  for (const [mode, caps, before] of holders) {
+  const before = `${SCHEDULE_SENTENCE} `;
+  for (const [mode, caps] of holders) {
     const name = caps.size ? `${mode}+chat-uploads` : mode;
     const prompt = getZaruInit(mode, caps)!.system_prompt;
-    const count = prompt.split(PROPOSE_SENTENCE).length - 1;
-    if (count !== 1) {
-      failures.push(`the ${name} prompt holds the proposal sentence ${count} times, not once`);
-      continue;
+    for (const [what, sentence] of [["proposal", PROPOSE_SENTENCE], ["target", PROPOSAL_TARGET_SENTENCE]]) {
+      const count = prompt.split(sentence).length - 1;
+      if (count !== 1) failures.push(`the ${name} prompt holds the ${what} sentence ${count} times, not once`);
     }
     const at = prompt.indexOf(PROPOSE_SENTENCE);
+    if (at < 0) continue;
     if (prompt.slice(at - before.length, at) !== before) failures.push(`the ${name} prompt's proposal sentence does not follow "${before.trim()}"`);
-    if (prompt.slice(at + PROPOSE_SENTENCE.length, at + PROPOSE_SENTENCE.length + 2) !== "\n\n")
-      failures.push(`the ${name} prompt's proposal sentence does not end its paragraph`);
+    const after = ` ${PROPOSAL_TARGET_SENTENCE}\n\n`;
+    if (prompt.slice(at + PROPOSE_SENTENCE.length, at + PROPOSE_SENTENCE.length + after.length) !== after)
+      failures.push(`the ${name} prompt's proposal sentence is not followed by the target sentence, ending its paragraph`);
   }
   for (const [mode, init] of ALL_MODES) {
-    if (mode === "chat" || mode === "agentic" || mode === "workflow") continue;
-    if (init!.system_prompt.includes("zaru.schedule")) failures.push(`the ${mode} prompt names zaru.schedule`);
+    if (mode === "agentic" || mode === "workflow") continue;
+    for (const [what, sentence] of [["proposal", PROPOSE_SENTENCE], ["target", PROPOSAL_TARGET_SENTENCE]])
+      if (init!.system_prompt.includes(sentence)) failures.push(`the ${mode} prompt holds the ${what} sentence`);
+  }
+  assert.deepEqual(failures, [], failures.join("; "));
+});
+
+test("N19: the chat prompt holds its schedule sentences once, after the mode offer and ending its paragraph; no other mode's prompt holds them, and only chat, agentic and workflow name zaru.schedule", () => {
+  const failures: string[] = [];
+  const before = "which you offer with zaru.mode. ";
+  for (const caps of [new Set<string>(), new Set(["chat-uploads"])]) {
+    const name = caps.size ? "chat+chat-uploads" : "chat";
+    const prompt = getZaruInit("chat", caps)!.system_prompt;
+    const count = prompt.split(CHAT_SCHEDULE_SENTENCES).length - 1;
+    if (count !== 1) {
+      failures.push(`the ${name} prompt holds its schedule sentences ${count} times, not once`);
+      continue;
+    }
+    const at = prompt.indexOf(CHAT_SCHEDULE_SENTENCES);
+    if (prompt.slice(at - before.length, at) !== before) failures.push(`the ${name} prompt's schedule sentences do not follow "${before.trim()}"`);
+    if (prompt.slice(at + CHAT_SCHEDULE_SENTENCES.length, at + CHAT_SCHEDULE_SENTENCES.length + 2) !== "\n\n")
+      failures.push(`the ${name} prompt's schedule sentences do not end their paragraph`);
+  }
+  for (const [mode, init] of ALL_MODES) {
+    if (mode !== "chat" && init!.system_prompt.includes(CHAT_SCHEDULE_SENTENCES)) failures.push(`the ${mode} prompt holds the chat schedule sentences`);
+    if (mode !== "chat" && mode !== "agentic" && mode !== "workflow" && init!.system_prompt.includes("zaru.schedule"))
+      failures.push(`the ${mode} prompt names zaru.schedule`);
   }
   assert.deepEqual(failures, [], failures.join("; "));
 });
