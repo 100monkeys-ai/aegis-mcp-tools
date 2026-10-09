@@ -10,6 +10,7 @@
 // tested through the exported validator with a fixed `now`.
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
+import { isDeepStrictEqual } from "node:util";
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
@@ -166,6 +167,47 @@ test("N17: 'at' is one RFC 3339 time from one minute to 366 days ahead", () => {
   for (const at of ["2026-10-09T02:00:59Z", "2026-10-09T01:00:00Z", "2027-10-10T02:00:01Z", "tomorrow", "2026-10-10", 1760000000]) {
     const checked = once(at);
     if (checked.ok || checked.error !== AT_BOUNDS) failures.push(`${String(at)} answered ${JSON.stringify(checked)}`);
+  }
+  assert.deepEqual(failures, [], failures.join("; "));
+});
+
+// A model may give `input` as one string (the production turn of 2026-10-09
+// answered "'input' must be an object." before its retry drew the card). The
+// string is carried as `{prompt: <the string>}`, the shape `aegis.task.execute`
+// takes for an agent; an object is carried as it is; anything else is refused.
+test("N17: a string input is carried as its prompt, an object as it is, and a number is refused", async () => {
+  const failures: string[] = [];
+  const client = await connected();
+  try {
+    const { tools } = await client.listTools();
+    const schema = tools.find((tool) => tool.name === "zaru.schedule")?.inputSchema as {
+      properties: Record<string, { type?: unknown; description?: string }>;
+    };
+    const typed = schema.properties.input?.type;
+    if (!isDeepStrictEqual(typed, ["object", "string"]))
+      failures.push(`the schema types input as ${JSON.stringify(typed)}, not ["object","string"]`);
+    const described = schema.properties.input?.description;
+    const expected =
+      "An object of the target's input values, or one string, which is carried as its prompt.";
+    if (described !== expected) failures.push(`the schema describes input as ${JSON.stringify(described)}`);
+
+    const cases: Array<[string, unknown, unknown]> = [
+      ["a string", "Watch the lease thread for Shai's reply", { prompt: "Watch the lease thread for Shai's reply" }],
+      ["an object", { thread: "lease", folder: "INBOX" }, { thread: "lease", folder: "INBOX" }],
+    ];
+    for (const [name, input, carried] of cases) {
+      const result = await client.callTool({ name: "zaru.schedule", arguments: { ...RECURRING, input } });
+      const expectedContent = { action: "schedule_proposed", ...RECURRING, input: carried };
+      if (result.isError !== false || !isDeepStrictEqual(result.structuredContent, expectedContent))
+        failures.push(`${name} input was answered ${JSON.stringify(result)}, not carried as ${JSON.stringify(carried)}`);
+    }
+
+    const refused = await client.callTool({ name: "zaru.schedule", arguments: { ...RECURRING, input: 42 } });
+    const text = (refused.content as Array<{ text: string }>)[0]?.text;
+    if (refused.isError !== true || text !== JSON.stringify({ error: "'input' must be an object." }))
+      failures.push(`a number input was answered ${JSON.stringify(refused)}, not refused`);
+  } finally {
+    await client.close();
   }
   assert.deepEqual(failures, [], failures.join("; "));
 });

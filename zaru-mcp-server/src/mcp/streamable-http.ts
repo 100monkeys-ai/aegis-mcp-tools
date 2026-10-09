@@ -1005,7 +1005,11 @@ export function validateScheduleProposal(
     return refuse(SCHEDULE_REFUSALS.targetKind);
   if (typeof a.target !== "string") return refuse(SCHEDULE_REFUSALS.target);
   if (typeof a.intent !== "string" || !a.intent.trim()) return refuse(SCHEDULE_REFUSALS.intent);
-  if (!isObject(a.input)) return refuse(SCHEDULE_REFUSALS.input);
+  // A string input is the run's prompt, carried in the shape
+  // `aegis.task.execute` takes for an agent; an object is carried as it is.
+  const input: Record<string, unknown> | null =
+    typeof a.input === "string" ? { prompt: a.input } : isObject(a.input) ? a.input : null;
+  if (input === null) return refuse(SCHEDULE_REFUSALS.input);
   if (typeof a.reason !== "string" || !a.reason.trim()) return refuse(SCHEDULE_REFUSALS.reason);
 
   const hasAt = a.at !== undefined && a.at !== null;
@@ -1016,7 +1020,7 @@ export function validateScheduleProposal(
     target_kind: a.target_kind,
     target: a.target,
     intent: a.intent,
-    input: a.input,
+    input,
     reason: a.reason,
   };
 
@@ -1074,8 +1078,9 @@ const ZARU_SCHEDULE_TOOL = {
         description: "What each run is for, in the person's words.",
       },
       input: {
-        type: "object",
-        description: "The input each run starts with.",
+        type: ["object", "string"],
+        description:
+          "An object of the target's input values, or one string, which is carried as its prompt.",
       },
       at: {
         type: "string",
