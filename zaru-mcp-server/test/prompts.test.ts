@@ -739,7 +739,7 @@ const MAILBOX_SENTENCE =
   "The tools whose names begin with mail. reach the person's mailbox they chose above the chat input: list and read their threads in the inbox, Sent, Drafts, Trash, Archive or all their mail by 'folder', save an attachment to their files, flag threads and mark them read or unread, and nothing else until they ask. A call names which mailbox in 'mailbox' when several are chosen; with one chosen it is set for you. Read only what the message asks for; never send, forward, archive, delete or move mail unless the message asks, and say so when you do. If a call is refused, tell the person in one sentence and answer without it.";
 
 const genericSentence = (server: string) =>
-  `The tools whose names begin with ${server}. reach the person's ${server} connection as their credential allows. Read and change only what the message asks for. If a call is refused, tell the person in one sentence and answer without it.`;
+  `The tools whose names begin with ${server}. reach the person's ${server} connection as their credential allows. Read and change only what the message asks for. If a call is refused, tell the person in one sentence and answer without it. A call may wait for the person's approval; when one does, say so and wait for their answer.`;
 
 const SEVERAL_OF_ONE_KIND =
   "When you have several contexts of one kind, each of their tools takes '_context': name the one the message means, and say which you used.";
@@ -999,6 +999,71 @@ test("K13: the calendar teaching, as taught, names no decision record", () => {
   const complaints: string[] = [];
   for (const [mode, gained] of teachingsFor({ caldav: [BINDING_A, BINDING_B] })) {
     if (!gained.includes(CALENDAR_SENTENCE)) complaints.push(`${mode}: the calendar sentence not taught`);
+    for (const line of gained.split("\n")) {
+      if (RECORD_REFERENCE.test(line)) complaints.push(`${mode}: a taught line names a decision record: ${JSON.stringify(line)}`);
+    }
+  }
+  assert.deepEqual(complaints, []);
+});
+
+// AEGIS ADR-137 R12 and R13: the generic sentence, for a chosen server with no
+// sentence of its own, ends with one sentence on approval; the sentences of the
+// servers in the table are unchanged, and nothing taught names a decision record.
+
+const APPROVAL_SENTENCE = "A call may wait for the person's approval; when one does, say so and wait for their answer.";
+
+test("R12: the generic sentence for a server not in the table ends with the approval sentence, in every mode", () => {
+  const complaints: string[] = [];
+  for (const [mode, gained] of teachingsFor({ zeta: [BINDING_A] })) {
+    if (gained !== taught(genericSentence("zeta"))) {
+      complaints.push(`${mode}: zeta not taught the generic sentence with the approval sentence, got ${JSON.stringify(gained.slice(-200))}`);
+    }
+    if (!gained.endsWith(` ${APPROVAL_SENTENCE}`)) complaints.push(`${mode}: the generic sentence does not end with the approval sentence`);
+  }
+  assert.deepEqual(complaints, []);
+});
+
+test("R12: the table's servers keep their own sentences byte for byte, and none gains the approval sentence", () => {
+  const complaints: string[] = [];
+  // GitHub's sentence pinned exactly, as taught alone.
+  for (const [mode, gained] of teachingsFor({ github: [BINDING_A] })) {
+    if (gained !== taught(GITHUB_SENTENCE)) complaints.push(`${mode}: GitHub's sentence changed, got ${JSON.stringify(gained.slice(-200))}`);
+  }
+  for (const [mode, gained] of teachingsFor({
+    caldav: [BINDING_C],
+    imap: [BINDING_B],
+    github: [BINDING_A],
+    "nuclear-notes": BINDING_A,
+  })) {
+    if (gained !== taught(NUCLEAR_NOTES_SENTENCE, GITHUB_SENTENCE, MAILBOX_SENTENCE, CALENDAR_SENTENCE)) {
+      complaints.push(`${mode}: the table's sentences changed, got ${JSON.stringify(gained.slice(-200))}`);
+    }
+    if (gained.includes(APPROVAL_SENTENCE)) complaints.push(`${mode}: a table server taught the approval sentence`);
+  }
+  assert.deepEqual(complaints, []);
+});
+
+test("R12: with a server not in the table chosen, each of the eight pinned prompts is unchanged and only gains the generic teaching", () => {
+  const complaints: string[] = [];
+  for (const [name, mode, caps, runtime, user] of PINNED_ARGUMENTS) {
+    const [, , length, sha256] = UNCHANGED_PROMPTS.find(([pinned]) => pinned === name)!;
+    const prompt = getZaruInit(mode, caps, runtime, user, { zeta: [BINDING_A] })!.system_prompt;
+    if (createHash("sha256").update(prompt.slice(0, length)).digest("hex") !== sha256) {
+      complaints.push(`'${name}': the pinned prompt changed before the teaching`);
+    }
+    if (prompt.slice(length) !== taught(genericSentence("zeta"))) {
+      complaints.push(`'${name}': gained ${JSON.stringify(prompt.slice(length, length + 160))}, not the generic teaching`);
+    }
+  }
+  assert.deepEqual(complaints, []);
+});
+
+test("R13: the generic teaching, as taught, names no decision record", () => {
+  // The facing-text test's pattern (test/facing-text-no-record-refs.test.ts).
+  const RECORD_REFERENCE = /ADR-[0-9]|CD-[0-9]|ADR [0-9]|[Dd]ecision record|security audit 0|audit 0[0-9][0-9]|§[0-9]/;
+  const complaints: string[] = [];
+  for (const [mode, gained] of teachingsFor({ zeta: [BINDING_A, BINDING_B] })) {
+    if (!gained.includes(APPROVAL_SENTENCE)) complaints.push(`${mode}: the approval sentence not taught`);
     for (const line of gained.split("\n")) {
       if (RECORD_REFERENCE.test(line)) complaints.push(`${mode}: a taught line names a decision record: ${JSON.stringify(line)}`);
     }

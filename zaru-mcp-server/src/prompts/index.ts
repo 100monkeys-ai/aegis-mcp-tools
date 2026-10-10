@@ -571,7 +571,7 @@ const CONTEXT_SENTENCES: ReadonlyArray<readonly [string, string, boolean]> = [
 
 /** The sentence of a chosen server with none of its own. */
 function genericContextSentence(server: string): string {
-  return `The tools whose names begin with ${server}. reach the person's ${server} connection as their credential allows. Read and change only what the message asks for. If a call is refused, tell the person in one sentence and answer without it.`;
+  return `The tools whose names begin with ${server}. reach the person's ${server} connection as their credential allows. Read and change only what the message asks for. If a call is refused, tell the person in one sentence and answer without it. A call may wait for the person's approval; when one does, say so and wait for their answer.`;
 }
 
 const SEVERAL_OF_ONE_KIND =
