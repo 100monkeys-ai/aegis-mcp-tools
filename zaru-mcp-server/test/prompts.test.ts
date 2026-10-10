@@ -1292,11 +1292,12 @@ const SCHEDULE_TOOLS = [
   "aegis.schedule.get",
   "aegis.schedule.pause",
   "aegis.schedule.resume",
+  "aegis.schedule.run_now",
   "aegis.schedule.delete",
   "aegis.schedule.runs",
 ];
 
-test("N13, N24: the agentic and workflow tool lists hold the six schedule tools that read, pause, resume or delete, after aegis.workflow.wait, and neither aegis.schedule.create nor aegis.schedule.update; no other mode's list holds one", () => {
+test("N13, N24: the agentic and workflow tool lists hold the seven schedule tools (seven from N26, 2026-10-10: aegis.schedule.run_now added) that read, pause, resume or delete, after aegis.workflow.wait, and neither aegis.schedule.create nor aegis.schedule.update; no other mode's list holds one", () => {
   const failures: string[] = [];
   for (const [mode, init] of ALL_MODES) {
     const tools = init!.available_tools;
@@ -1304,7 +1305,7 @@ test("N13, N24: the agentic and workflow tool lists hold the six schedule tools 
       const at = tools.indexOf("aegis.workflow.wait");
       const after = tools.slice(at + 1, at + 1 + SCHEDULE_TOOLS.length);
       if (at < 0 || JSON.stringify(after) !== JSON.stringify(SCHEDULE_TOOLS))
-        failures.push(`the ${mode} list does not hold the six schedule tools after aegis.workflow.wait, got ${JSON.stringify(after)}`);
+        failures.push(`the ${mode} list does not hold the seven schedule tools (seven from N26, 2026-10-10) after aegis.workflow.wait, got ${JSON.stringify(after)}`);
       for (const tool of MAKING_TOOLS) if (tools.includes(tool)) failures.push(`the ${mode} list holds ${tool}`);
       const held = tools.filter((tool) => tool.startsWith("aegis.schedule."));
       if (held.length !== SCHEDULE_TOOLS.length) failures.push(`the ${mode} list holds ${held.length} schedule tools: ${held.join(", ")}`);
@@ -1660,20 +1661,62 @@ test("F11: the workflow mode's tool list holds aegis.workflow.run and aegis.work
   assert.deepEqual(tools.slice(at + 1, at + 3), ["aegis.workflow.run", "aegis.workflow.signal"]);
 });
 
-test("F11: the workflow mode's tool list is its list at 3affd36 with only the two tools added", () => {
+test("F11: the workflow mode's tool list is its list at 3affd36 with only the two tools added (and, from N26 of 2026-10-10, aegis.schedule.run_now)", () => {
   const tools = getZaruInit("workflow")!.available_tools;
   assert.deepEqual(
-    tools.filter((t) => t !== "aegis.workflow.run" && t !== "aegis.workflow.signal"),
+    tools.filter((t) => t !== "aegis.workflow.run" && t !== "aegis.workflow.signal" && t !== "aegis.schedule.run_now"),
     WORKFLOW_TOOLS_AT_3AFFD36,
   );
-  assert.equal(tools.length, WORKFLOW_TOOLS_AT_3AFFD36.length + 2);
+  assert.equal(tools.length, WORKFLOW_TOOLS_AT_3AFFD36.length + 3);
 });
 
-test("F11: the agentic and operator tool lists are unchanged, each still holding the tool it held", () => {
+test("F11: the agentic and operator tool lists are unchanged (the agentic list's aegis.schedule.run_now aside, added by N26 of 2026-10-10), each still holding the tool it held", () => {
   const agentic = getZaruInit("agentic")!.available_tools;
   const operator = getZaruInit("operator", new Set(), undefined, { isOperator: true, tier: "operator" })!.available_tools;
-  assert.deepEqual(agentic, AGENTIC_TOOLS_AT_3AFFD36);
+  assert.deepEqual(agentic.filter((t) => t !== "aegis.schedule.run_now"), AGENTIC_TOOLS_AT_3AFFD36);
   assert.deepEqual(operator, OPERATOR_TOOLS_AT_3AFFD36);
   assert.ok(agentic.includes("aegis.workflow.run"));
   assert.ok(operator.includes("aegis.workflow.signal"));
+});
+
+// ---------------------------------------------------------------------------
+// AEGIS ADR-139 N26: a schedule runs now on the person's word. The Zaru MCP
+// server offers the orchestrator's aegis.schedule.run_now in every mode whose
+// tool list carries aegis.schedule.get, right after aegis.schedule.resume; the
+// tool is listed from the orchestrator's catalogue and relayed as every other
+// aegis.* tool is, so the lists are the whole change, and no mode's prompt
+// changes (the eight pins above).
+// ---------------------------------------------------------------------------
+
+const RUN_NOW = "aegis.schedule.run_now";
+
+test("N26: each mode whose tool list carries aegis.schedule.get carries aegis.schedule.run_now once, right after aegis.schedule.resume; no other mode carries it", () => {
+  const failures: string[] = [];
+  let carrying = 0;
+  for (const [mode, init] of ALL_MODES) {
+    const tools = init!.available_tools;
+    const count = tools.filter((tool) => tool === RUN_NOW).length;
+    if (tools.includes("aegis.schedule.get")) {
+      carrying += 1;
+      if (count !== 1) failures.push(`the ${mode} list carries aegis.schedule.get and holds ${RUN_NOW} ${count} times, not once`);
+      else if (tools[tools.indexOf(RUN_NOW) - 1] !== "aegis.schedule.resume")
+        failures.push(`the ${mode} list does not hold ${RUN_NOW} right after aegis.schedule.resume`);
+    } else if (count !== 0) {
+      failures.push(`the ${mode} list holds ${RUN_NOW} without aegis.schedule.get`);
+    }
+  }
+  if (carrying === 0) failures.push("no mode's list carries aegis.schedule.get");
+  assert.deepEqual(failures, [], failures.join("; "));
+});
+
+test("N26: the eight pinned prompts are unchanged byte for byte and none names aegis.schedule.run_now", () => {
+  assert.equal(UNCHANGED_PROMPTS.length, 8);
+  const failures: string[] = [];
+  for (const [name, init, length, sha256] of UNCHANGED_PROMPTS) {
+    const prompt = init()!.system_prompt;
+    if (prompt.length !== length || createHash("sha256").update(prompt).digest("hex") !== sha256)
+      failures.push(`the '${name}' prompt changed`);
+    if (prompt.includes(RUN_NOW)) failures.push(`the '${name}' prompt names ${RUN_NOW}`);
+  }
+  assert.deepEqual(failures, [], failures.join("; "));
 });
