@@ -714,6 +714,8 @@ const TOOL_SCOPES: Record<string, string[]> = {
     "aegis.workflow.generate",
     "aegis.workflow.list",
     "aegis.workflow.logs",
+    "aegis.workflow.run",
+    "aegis.workflow.signal",
     "aegis.agent.generate",
     "aegis.agent.wait",
     "aegis.agent.list",

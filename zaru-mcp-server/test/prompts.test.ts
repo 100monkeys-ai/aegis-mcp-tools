@@ -1532,3 +1532,148 @@ test("D12: with no profile chosen every pinned prompt is unchanged, and the prof
   }
   assert.deepEqual(complaints, []);
 });
+
+// ---------------------------------------------------------------------------
+// AEGIS ADR-141 F11 (Trigger T6): a person or the fleet starts a workflow and
+// answers its gates from the workflow scope. The workflow mode's tool list
+// gains aegis.workflow.run and aegis.workflow.signal, after
+// aegis.workflow.logs; the agentic and operator lists keep them where they
+// were, and every mode's prompt is untouched (the W41 and D3 pins above).
+// ---------------------------------------------------------------------------
+
+/** The workflow mode's tool list as it stood at aegis-mcp-tools 3affd36. */
+const WORKFLOW_TOOLS_AT_3AFFD36 = [
+  "zaru.mode",
+  "zaru.schedule",
+  "zaru.docs",
+  "zaru.memory.get",
+  "zaru.memory.set",
+  "zaru.conversations.list",
+  "zaru.conversations.read",
+  "zaru.conversations.search",
+  "aegis.workflow.generate",
+  "aegis.workflow.list",
+  "aegis.workflow.logs",
+  "aegis.agent.generate",
+  "aegis.agent.wait",
+  "aegis.agent.list",
+  "aegis.agent.logs",
+  "aegis.schema.get",
+  "aegis.schema.validate",
+  "aegis.task.execute",
+  "aegis.task.wait",
+  "aegis.workflow.wait",
+  "aegis.schedule.list",
+  "aegis.schedule.get",
+  "aegis.schedule.pause",
+  "aegis.schedule.resume",
+  "aegis.schedule.delete",
+  "aegis.schedule.runs",
+  "aegis.execution.file",
+  "aegis.goal.cancel",
+];
+
+/** The agentic mode's tool list as it stood at aegis-mcp-tools 3affd36. */
+const AGENTIC_TOOLS_AT_3AFFD36 = [
+  "zaru.mode",
+  "zaru.schedule",
+  "zaru.docs",
+  "zaru.memory.get",
+  "zaru.memory.set",
+  "zaru.conversations.list",
+  "zaru.conversations.read",
+  "zaru.conversations.search",
+  "aegis.agent.generate",
+  "aegis.agent.wait",
+  "aegis.agent.list",
+  "aegis.agent.search",
+  "aegis.workflow.search",
+  "aegis.workflow.run",
+  "aegis.workflow.wait",
+  "aegis.schedule.list",
+  "aegis.schedule.get",
+  "aegis.schedule.pause",
+  "aegis.schedule.resume",
+  "aegis.schedule.delete",
+  "aegis.schedule.runs",
+  "aegis.agent.logs",
+  "aegis.task.execute",
+  "aegis.task.wait",
+  "aegis.task.list",
+  "aegis.task.logs",
+  "aegis.task.cancel",
+  "aegis.tools.list",
+  "aegis.tools.search",
+  "aegis.execution.file",
+  "aegis.goal.cancel",
+];
+
+/** The operator mode's tool list as it stood at aegis-mcp-tools 3affd36. */
+const OPERATOR_TOOLS_AT_3AFFD36 = [
+  "zaru.mode",
+  "zaru.schedule",
+  "zaru.docs",
+  "zaru.memory.get",
+  "zaru.memory.set",
+  "zaru.conversations.list",
+  "zaru.conversations.read",
+  "zaru.conversations.search",
+  "aegis.agent.generate",
+  "aegis.agent.wait",
+  "aegis.agent.list",
+  "aegis.agent.logs",
+  "aegis.task.execute",
+  "aegis.task.wait",
+  "aegis.task.list",
+  "aegis.task.logs",
+  "aegis.task.cancel",
+  "aegis.tools.list",
+  "aegis.tools.search",
+  "aegis.execution.file",
+  "aegis.workflow.generate",
+  "aegis.workflow.list",
+  "aegis.workflow.logs",
+  "aegis.workflow.wait",
+  "aegis.schema.get",
+  "aegis.schema.validate",
+  "aegis.execute.intent",
+  "aegis.execute.status",
+  "aegis.execute.wait",
+  "aegis.agent.create",
+  "aegis.agent.update",
+  "aegis.agent.export",
+  "aegis.agent.delete",
+  "aegis.workflow.create",
+  "aegis.workflow.update",
+  "aegis.workflow.signal",
+  "aegis.workflow.delete",
+  "aegis.task.remove",
+  "aegis.goal.cancel",
+];
+
+test("F11: the workflow mode's tool list holds aegis.workflow.run and aegis.workflow.signal once each, right after aegis.workflow.logs", () => {
+  const tools = getZaruInit("workflow")!.available_tools;
+  for (const tool of ["aegis.workflow.run", "aegis.workflow.signal"]) {
+    assert.equal(tools.filter((t) => t === tool).length, 1, `the workflow list holds ${tool} once`);
+  }
+  const at = tools.indexOf("aegis.workflow.logs");
+  assert.deepEqual(tools.slice(at + 1, at + 3), ["aegis.workflow.run", "aegis.workflow.signal"]);
+});
+
+test("F11: the workflow mode's tool list is its list at 3affd36 with only the two tools added", () => {
+  const tools = getZaruInit("workflow")!.available_tools;
+  assert.deepEqual(
+    tools.filter((t) => t !== "aegis.workflow.run" && t !== "aegis.workflow.signal"),
+    WORKFLOW_TOOLS_AT_3AFFD36,
+  );
+  assert.equal(tools.length, WORKFLOW_TOOLS_AT_3AFFD36.length + 2);
+});
+
+test("F11: the agentic and operator tool lists are unchanged, each still holding the tool it held", () => {
+  const agentic = getZaruInit("agentic")!.available_tools;
+  const operator = getZaruInit("operator", new Set(), undefined, { isOperator: true, tier: "operator" })!.available_tools;
+  assert.deepEqual(agentic, AGENTIC_TOOLS_AT_3AFFD36);
+  assert.deepEqual(operator, OPERATOR_TOOLS_AT_3AFFD36);
+  assert.ok(agentic.includes("aegis.workflow.run"));
+  assert.ok(operator.includes("aegis.workflow.signal"));
+});
