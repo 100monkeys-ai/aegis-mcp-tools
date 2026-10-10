@@ -19,6 +19,22 @@ test("D7a: zaru.chat's description carries the turn sentence word for word", () 
   );
 });
 
+/** The status sentence, word for word, up to the goal's states. */
+const STATUS_SENTENCE =
+  'status is "running" while the turn goes on in Zaru Web and "incomplete" when it ended before its end; whether the work is done is the goal\'s state:';
+
+test("D7a: zaru.chat's description says what status \"running\" and \"incomplete\" mean", () => {
+  const description = ZARU_CHAT_TOOL.description;
+  assert.ok(
+    description.includes(STATUS_SENTENCE),
+    "the zaru.chat description lacks the status sentence",
+  );
+  assert.ok(
+    !description.includes("status says only whether the turn reached its time limit"),
+    "still there: status says only whether the turn reached its time limit",
+  );
+});
+
 test("D7a: zaru.chat's description no longer says a turn ends at 50 seconds or is held to five model calls", () => {
   const description = ZARU_CHAT_TOOL.description;
   for (const phrase of [
