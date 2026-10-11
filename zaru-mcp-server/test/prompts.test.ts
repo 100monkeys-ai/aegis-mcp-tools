@@ -560,13 +560,17 @@ test("W41: after calling zaru.mode the model waits for the person", () => {
 // the agentic and execute pins (and the agentic chat-uploads form) were
 // re-measured for AEGIS ADR-143 I2 and T8 (one line of TOOL KNOWLEDGE teaching
 // aegis.image.generate, 628 characters in each);
+// the agentic and execute pins (and the agentic chat-uploads form) were
+// re-measured for AEGIS ADR-143 T8's second leg (the image exception before
+// the mandatory sequence, and that TOOL KNOWLEDGE line shortened; 442
+// characters more in each);
 // every other pin stands as it was.
 const UNCHANGED_PROMPTS: Array<[string, () => ReturnType<typeof getZaruInit>, number, string]> = [
-  ["agentic", () => getZaruInit("agentic"), 14282, "e97b4b33799d892c609038ce0051df643db1e3743423439f6f5084140fe7822c"],
-  ["agentic+chat-uploads", () => getZaruInit("agentic", new Set(["chat-uploads"])), 18092, "fb64811d31e4a387219254176048a8f471dfa4ecc34e93f734a7a4d7fcffdbb7"],
+  ["agentic", () => getZaruInit("agentic"), 14724, "218f9cd778b5ff1fa4c9cf588543cf8fce8aa27be141dcdfbdaf5a2d60e33890"],
+  ["agentic+chat-uploads", () => getZaruInit("agentic", new Set(["chat-uploads"])), 18534, "f73441881fa5f939c4542df72d158da14e0bc7f30844703061bbd55bc3eaa925"],
   ["workflow", () => getZaruInit("workflow"), 10150, "2ea17a05d6540a237445a62307ad627dc93088b9454f21f818d2570e106c3148"],
   ["workflow+chat-uploads", () => getZaruInit("workflow", new Set(["chat-uploads"])), 13960, "9a17347faff906e8bcc5916724273018a3e36d6ab52e7f59b94f476b5c8219df"],
-  ["execute", () => getZaruInit("execute"), 12256, "ba7e5cbe6d7238ccee2431da4d08ee44220f162116f8064bacfef3337646f0c6"],
+  ["execute", () => getZaruInit("execute"), 12698, "73bf0a2235583cebf9c0ae18a6d4539b997051031257a9efccb9f4fea212ce51"],
   ["live", () => getZaruInit("live", new Set(["live"]), "browser"), 8558, "f5affbdef392ee3aa57500ba914bb95b5e6a18a584e7d8c784e861c5234a2633"],
   ["vibecode", () => getZaruInit("vibecode", new Set(["vibecode"]), "browser"), 11988, "07c06d98d3ed02aa2092e81317541b2692a545c1960d90fc4fe2ddc2f0f547d7"],
   ["operator", () => getZaruInit("operator", new Set(), undefined, { isOperator: true, tier: "operator" }), 10719, "a8815cc691f8e296b4703fde20e6a7bdb372ed9ea856478a4e505312be6a49d5"],
@@ -1777,8 +1781,17 @@ test("No pinned prompt names aegis.git.list", () => {
 
 const IMAGE_GENERATE = "aegis.image.generate";
 
+/** The TOOL KNOWLEDGE line as T8's second leg shortened it: the tool's arguments and its refusal. */
 const IMAGE_TEACHING =
+  "- `aegis.image.generate`: Make an image. Takes `prompt` and, optionally, `size` as `<width>x<height>`, such as `1024x768`. When the answer says this node has no image generation model, say so in one sentence and offer nothing in its place.";
+
+/** The TOOL KNOWLEDGE line as aegis-mcp-tools 13a3cb5d taught it. */
+const IMAGE_TEACHING_AT_13A3CB5D =
   "- `aegis.image.generate`: Make an image. When the person asks for a picture, an illustration, a logo, a diagram drawn as an image or any other image to be made, call aegis.image.generate directly with their words as `prompt` and, when they name a size, `size` as `<width>x<height>`, such as `1024x768`. The chat shows the person each of the answer's `files` as an image card: say what was made in one sentence, and do not describe the image in its place. When the answer says this node has no image generation model, say so in one sentence and offer nothing in its place. Never say an image was made without this tool's answer.";
+
+/** The image exception (T8's second leg), one paragraph before the agentic and execute modes' mandatory sequence. */
+const IMAGE_REQUEST_EXCEPTION =
+  "A request for an image to be made is the one exception. A picture, an illustration, a logo, a diagram drawn as an image or any other image to be made is not a task for your 100monkeys: it starts no agent, no workflow and no goal, and the mandatory sequence below is not followed for it. Its one act is the tool call aegis.image.generate, with the person's words as `prompt` and, when they name a size, that size as `size`. aegis.agent.generate, aegis.task.execute and aegis.workflow.run are never the call for an image, and you never say you are calling aegis.image.generate while you call another tool. The chat shows the person each of the answer's `files` as an image card, so your reply names what was made in one sentence and does not describe the image in its place. Never say an image was made without this tool's answer.";
 
 const EXECUTION_FILE_KNOWLEDGE =
   "- `aegis.execution.file`: Read a file from a completed execution's workspace. Takes execution_id and path. The path can include or exclude the /workspace/ prefix — both work.";
@@ -1812,8 +1825,8 @@ test("W52: the agentic and execute prompts teach aegis.image.generate in one par
       if (knowledge === -1 || at < knowledge) failures.push(`the ${mode} prompt's image teaching is not under its TOOL KNOWLEDGE`);
       else if (!prompt.includes(`${EXECUTION_FILE_KNOWLEDGE}\n${IMAGE_TEACHING}\n`))
         failures.push(`the ${mode} prompt's image teaching is not its own line right after the aegis.execution.file entry`);
-      if (prompt.split(IMAGE_GENERATE).length - 1 !== 2)
-        failures.push(`the ${mode} prompt names ${IMAGE_GENERATE} outside its teaching`);
+      if (prompt.replace(IMAGE_TEACHING, "").replace(IMAGE_REQUEST_EXCEPTION, "").includes(IMAGE_GENERATE))
+        failures.push(`the ${mode} prompt names ${IMAGE_GENERATE} outside its teaching and the image exception`);
     } else {
       if (count !== 0) failures.push(`the ${mode} prompt holds the image teaching`);
       if (prompt.includes(IMAGE_GENERATE)) failures.push(`the ${mode} prompt names ${IMAGE_GENERATE}`);
@@ -1838,7 +1851,7 @@ test("W52: the agentic and execute tool lists hold aegis.image.generate once, ri
   assert.deepEqual(failures, [], failures.join("; "));
 });
 
-test("W52: every other mode's prompt is unchanged byte for byte, and the agentic and execute prompts are their prompts at 684cac52 with only the image teaching's line added", () => {
+test("W52: every other mode's prompt is unchanged byte for byte, and the agentic and execute prompts are their prompts at 684cac52 with only the image teaching's line and the image exception added", () => {
   const failures: string[] = [];
   const digest = (text: string) => createHash("sha256").update(text).digest("hex");
   const chat = getZaruInit("chat")!.system_prompt;
@@ -1857,9 +1870,92 @@ test("W52: every other mode's prompt is unchanged byte for byte, and the agentic
       failures.push(`the '${name}' prompt lacks the image teaching's line`);
       continue;
     }
-    const before = prompt.replace(line, "");
+    const before = prompt.replace(line, "").replace(`${IMAGE_REQUEST_EXCEPTION}\n\n`, "");
     if (before.length !== length || digest(before) !== sha256)
-      failures.push(`the '${name}' prompt without the image teaching's line is not its prompt at 684cac52`);
+      failures.push(`the '${name}' prompt without the image teaching's line and the image exception is not its prompt at 684cac52`);
+  }
+  assert.deepEqual(failures, [], failures.join("; "));
+});
+
+// ---------------------------------------------------------------------------
+// AEGIS ADR-143 T8, second leg: in conversation ed6ade36 of 2026-10-11 Zaru,
+// asked for an image in agentic mode, followed the rule that every request for
+// a result is a task for one of its 100monkeys and called aegis.agent.generate
+// nine times while its texts announced aegis.image.generate; the TOOL
+// KNOWLEDGE line below the rule did not win. The image case is now an exception
+// stated before each mode's mandatory sequence, and the TOOL KNOWLEDGE line is
+// shortened to the tool's arguments and its refusal.
+// ---------------------------------------------------------------------------
+
+/** The prompts T8's second leg changed, as they stood at aegis-mcp-tools 13a3cb5d. */
+const IMAGE_EXCEPTION_PROMPTS_AT_13A3CB5D: Array<[string, () => ReturnType<typeof getZaruInit>, number, string, string]> = [
+  ["agentic", () => getZaruInit("agentic"), 14282, "e97b4b33799d892c609038ce0051df643db1e3743423439f6f5084140fe7822c", "\n## MANDATORY SEQUENCE FOR ALL TASKS\n"],
+  ["agentic+chat-uploads", () => getZaruInit("agentic", new Set(["chat-uploads"])), 18092, "fb64811d31e4a387219254176048a8f471dfa4ecc34e93f734a7a4d7fcffdbb7", "\n## MANDATORY SEQUENCE FOR ALL TASKS\n"],
+  ["execute", () => getZaruInit("execute"), 12256, "ba7e5cbe6d7238ccee2431da4d08ee44220f162116f8064bacfef3337646f0c6", "\n## MANDATORY SEQUENCE\n"],
+];
+
+test("W53: the agentic and execute prompts hold the image exception once, as its own paragraph, before their mandatory sequence's heading; no other mode's prompt holds it", () => {
+  const failures: string[] = [];
+  const headings = new Map(IMAGE_EXCEPTION_PROMPTS_AT_13A3CB5D.map(([name, init, , , heading]) => [name, [init()!.system_prompt, heading] as const]));
+  for (const [name, [prompt, heading]] of headings) {
+    const count = prompt.split(IMAGE_REQUEST_EXCEPTION).length - 1;
+    if (count !== 1) {
+      failures.push(`the ${name} prompt holds the image exception ${count} times, not once`);
+      continue;
+    }
+    const at = prompt.indexOf(IMAGE_REQUEST_EXCEPTION);
+    const sequence = prompt.indexOf(heading);
+    const conversation = prompt.indexOf("\n# IN THIS CONVERSATION\n");
+    if (sequence === -1) failures.push(`the ${name} prompt has no mandatory sequence heading`);
+    else if (at > sequence) failures.push(`the ${name} prompt's image exception (at ${at}) is after its mandatory sequence's heading (at ${sequence})`);
+    if (conversation === -1 || at < conversation) failures.push(`the ${name} prompt's image exception is not under IN THIS CONVERSATION`);
+    if (!prompt.includes(`\n\n${IMAGE_REQUEST_EXCEPTION}\n\n`)) failures.push(`the ${name} prompt's image exception is not its own paragraph`);
+  }
+  for (const [mode, init] of ALL_MODES) {
+    if (mode === "agentic" || mode === "execute") continue;
+    if (init!.system_prompt.includes(IMAGE_REQUEST_EXCEPTION)) failures.push(`the ${mode} prompt holds the image exception`);
+  }
+  assert.deepEqual(failures, [], failures.join("; "));
+});
+
+test("W54: the image exception makes aegis.image.generate its one act and names aegis.agent.generate, aegis.task.execute and aegis.workflow.run as never the call for an image", () => {
+  const failures: string[] = [];
+  for (const [name, init] of IMAGE_EXCEPTION_PROMPTS_AT_13A3CB5D) {
+    const prompt = init()!.system_prompt;
+    const at = prompt.indexOf(IMAGE_REQUEST_EXCEPTION);
+    if (at === -1) {
+      failures.push(`the ${name} prompt holds no image exception`);
+      continue;
+    }
+    const exception = prompt.slice(at, at + IMAGE_REQUEST_EXCEPTION.length);
+    if (!exception.includes(`Its one act is the tool call ${IMAGE_GENERATE}`)) failures.push(`the ${name} exception does not make ${IMAGE_GENERATE} its one act`);
+    if (!/aegis\.agent\.generate, aegis\.task\.execute and aegis\.workflow\.run are never the call for an image/.test(exception))
+      failures.push(`the ${name} exception does not name aegis.agent.generate, aegis.task.execute and aegis.workflow.run as never the call`);
+    if (!/starts no agent, no workflow and no goal/.test(exception)) failures.push(`the ${name} exception does not say an image starts no agent, workflow or goal`);
+  }
+  assert.deepEqual(failures, [], failures.join("; "));
+});
+
+test("W55: the agentic and execute prompts are their prompts at 13a3cb5d with only the image exception added and the image TOOL KNOWLEDGE line shortened; every other mode's prompt is unchanged byte for byte", () => {
+  const failures: string[] = [];
+  const digest = (text: string) => createHash("sha256").update(text).digest("hex");
+  const chat = getZaruInit("chat")!.system_prompt;
+  if (chat.length !== CHAT_PROMPT_AT_684CAC52[0] || digest(chat) !== CHAT_PROMPT_AT_684CAC52[1]) failures.push("the 'chat' prompt changed");
+  const changed = new Set(IMAGE_EXCEPTION_PROMPTS_AT_13A3CB5D.map(([name]) => name));
+  for (const [name, init, length, sha256] of UNCHANGED_PROMPTS) {
+    if (changed.has(name)) continue;
+    const prompt = init()!.system_prompt;
+    if (prompt.length !== length || digest(prompt) !== sha256) failures.push(`the '${name}' prompt changed`);
+  }
+  for (const [name, init, length, sha256] of IMAGE_EXCEPTION_PROMPTS_AT_13A3CB5D) {
+    const prompt = init()!.system_prompt;
+    if (prompt.includes(IMAGE_TEACHING_AT_13A3CB5D)) failures.push(`the '${name}' prompt still holds the image line of 13a3cb5d`);
+    if (!prompt.includes(`\n${IMAGE_TEACHING}\n`) || !prompt.includes(`${IMAGE_REQUEST_EXCEPTION}\n\n`)) {
+      failures.push(`the '${name}' prompt lacks the shortened image line or the image exception`);
+      continue;
+    }
+    const before = prompt.replace(`${IMAGE_REQUEST_EXCEPTION}\n\n`, "").replace(`\n${IMAGE_TEACHING}\n`, `\n${IMAGE_TEACHING_AT_13A3CB5D}\n`);
+    if (before.length !== length || digest(before) !== sha256) failures.push(`the '${name}' prompt, the exception removed and the line restored, is not its prompt at 13a3cb5d`);
   }
   assert.deepEqual(failures, [], failures.join("; "));
 });
