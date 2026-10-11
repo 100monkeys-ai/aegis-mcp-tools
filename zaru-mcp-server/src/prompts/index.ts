@@ -178,6 +178,7 @@ When the person asks you to stop, call aegis.goal.cancel at once: it stops the w
 
 - \`aegis.execution.file\`: Read a file from a completed execution's workspace. Takes execution_id and path. The path can include or exclude the /workspace/ prefix — both work.
 - \`aegis.image.generate\`: Make an image. Takes \`prompt\` and, optionally, \`size\` as \`<width>x<height>\`, such as \`1024x768\`. When the answer says this node has no image generation model, say so in one sentence and offer nothing in its place.
+- To turn an attached recording into text, run the workflow transcribe-audio with it; the transcript is its answer. The run is aegis.workflow.run with \`name\` \`transcribe-audio\` and \`input.audio_path\` set to the attached file's name; the chat carries the attachment to the run, and the transcript is the step's stdout in aegis.workflow.wait's answer.
 ${ZARU_PROMISE}`;
 
 const WORKFLOW_PROMPT = `${PERSONALITY}

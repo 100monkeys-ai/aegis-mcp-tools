@@ -564,10 +564,13 @@ test("W41: after calling zaru.mode the model waits for the person", () => {
 // re-measured for AEGIS ADR-143 T8's second leg (the image exception before
 // the mandatory sequence, and that TOOL KNOWLEDGE line shortened; 442
 // characters more in each);
+// the agentic pin and its chat-uploads form were re-measured for AEGIS ADR-143
+// S5 (one line of TOOL KNOWLEDGE teaching transcribe-audio, 350 characters
+// more in each);
 // every other pin stands as it was.
 const UNCHANGED_PROMPTS: Array<[string, () => ReturnType<typeof getZaruInit>, number, string]> = [
-  ["agentic", () => getZaruInit("agentic"), 14724, "218f9cd778b5ff1fa4c9cf588543cf8fce8aa27be141dcdfbdaf5a2d60e33890"],
-  ["agentic+chat-uploads", () => getZaruInit("agentic", new Set(["chat-uploads"])), 18534, "f73441881fa5f939c4542df72d158da14e0bc7f30844703061bbd55bc3eaa925"],
+  ["agentic", () => getZaruInit("agentic"), 15074, "529d4c5becefa4249b9d466788f3aa42306cf59f757e954971bac5bd9fe4e3d1"],
+  ["agentic+chat-uploads", () => getZaruInit("agentic", new Set(["chat-uploads"])), 18884, "55a9909fd474937d4c0c2236af20eaaac228db2abf16df93391fcccd7f31ef04"],
   ["workflow", () => getZaruInit("workflow"), 10150, "2ea17a05d6540a237445a62307ad627dc93088b9454f21f818d2570e106c3148"],
   ["workflow+chat-uploads", () => getZaruInit("workflow", new Set(["chat-uploads"])), 13960, "9a17347faff906e8bcc5916724273018a3e36d6ab52e7f59b94f476b5c8219df"],
   ["execute", () => getZaruInit("execute"), 12698, "73bf0a2235583cebf9c0ae18a6d4539b997051031257a9efccb9f4fea212ce51"],
@@ -1870,7 +1873,7 @@ test("W52: every other mode's prompt is unchanged byte for byte, and the agentic
       failures.push(`the '${name}' prompt lacks the image teaching's line`);
       continue;
     }
-    const before = prompt.replace(line, "").replace(`${IMAGE_REQUEST_EXCEPTION}\n\n`, "");
+    const before = prompt.replace(line, "").replace(`${IMAGE_REQUEST_EXCEPTION}\n\n`, "").replace(`\n${TRANSCRIBE_TEACHING}`, "");
     if (before.length !== length || digest(before) !== sha256)
       failures.push(`the '${name}' prompt without the image teaching's line and the image exception is not its prompt at 684cac52`);
   }
@@ -1954,8 +1957,95 @@ test("W55: the agentic and execute prompts are their prompts at 13a3cb5d with on
       failures.push(`the '${name}' prompt lacks the shortened image line or the image exception`);
       continue;
     }
-    const before = prompt.replace(`${IMAGE_REQUEST_EXCEPTION}\n\n`, "").replace(`\n${IMAGE_TEACHING}\n`, `\n${IMAGE_TEACHING_AT_13A3CB5D}\n`);
+    const before = prompt
+      .replace(`${IMAGE_REQUEST_EXCEPTION}\n\n`, "")
+      .replace(`\n${TRANSCRIBE_TEACHING}`, "")
+      .replace(`\n${IMAGE_TEACHING}\n`, `\n${IMAGE_TEACHING_AT_13A3CB5D}\n`);
     if (before.length !== length || digest(before) !== sha256) failures.push(`the '${name}' prompt, the exception removed and the line restored, is not its prompt at 13a3cb5d`);
+  }
+  assert.deepEqual(failures, [], failures.join("; "));
+});
+
+// ---------------------------------------------------------------------------
+// AEGIS ADR-143 S5 (under CORRECTION transcribe-audio-teaching-C1): the
+// companion's teaching gains the record's sentence for an attached recording,
+// byte for byte, and one sentence naming the run: aegis.workflow.run with
+// `name` `transcribe-audio`, the attachment carried by the chat,
+// `input.audio_path` the attached file's name, the transcript read from
+// aegis.workflow.wait's answer (the step's stdout). It is taught in the agentic
+// prompt's TOOL KNOWLEDGE alone, right after the aegis.image.generate line: the
+// agentic mode is the one whose tool list offers aegis.workflow.run and
+// aegis.workflow.wait beside the chat's attachments; execute offers neither.
+// ---------------------------------------------------------------------------
+
+/** ADR-143 S5's sentence, as the record gives it. */
+const TRANSCRIBE_SENTENCE =
+  "To turn an attached recording into text, run the workflow transcribe-audio with it; the transcript is its answer.";
+
+/** The agentic TOOL KNOWLEDGE line: S5's sentence, then the run it names. */
+const TRANSCRIBE_TEACHING = `- ${TRANSCRIBE_SENTENCE} The run is aegis.workflow.run with \`name\` \`transcribe-audio\` and \`input.audio_path\` set to the attached file's name; the chat carries the attachment to the run, and the transcript is the step's stdout in aegis.workflow.wait's answer.`;
+
+/** The prompts S5's teaching changed, as they stood at aegis-mcp-tools 68df01fc. */
+const TRANSCRIBE_PROMPTS_AT_68DF01FC: Array<[string, () => ReturnType<typeof getZaruInit>, number, string]> = [
+  ["agentic", () => getZaruInit("agentic"), 14724, "218f9cd778b5ff1fa4c9cf588543cf8fce8aa27be141dcdfbdaf5a2d60e33890"],
+  ["agentic+chat-uploads", () => getZaruInit("agentic", new Set(["chat-uploads"])), 18534, "f73441881fa5f939c4542df72d158da14e0bc7f30844703061bbd55bc3eaa925"],
+];
+
+test("W56: the agentic prompt teaches transcribe-audio once, as its own TOOL KNOWLEDGE line right after the aegis.image.generate line; no other mode's prompt holds S5's sentence", () => {
+  const failures: string[] = [];
+  const modes: Array<[string, ReturnType<typeof getZaruInit>]> = [
+    ...ALL_MODES,
+    ["agentic+chat-uploads", getZaruInit("agentic", new Set(["chat-uploads"]))],
+    ["workflow+chat-uploads", getZaruInit("workflow", new Set(["chat-uploads"]))],
+    ["execute+chat-uploads", getZaruInit("execute", new Set(["chat-uploads"]))],
+  ];
+  for (const [mode, init] of modes) {
+    const prompt = init!.system_prompt;
+    const count = prompt.split(TRANSCRIBE_SENTENCE).length - 1;
+    if (mode === "agentic" || mode === "agentic+chat-uploads") {
+      if (count !== 1) {
+        failures.push(`the ${mode} prompt holds S5's sentence ${count} times, not once`);
+        continue;
+      }
+      const knowledge = prompt.indexOf("\n## TOOL KNOWLEDGE\n");
+      const at = prompt.indexOf(TRANSCRIBE_SENTENCE);
+      if (knowledge === -1 || at < knowledge) failures.push(`the ${mode} prompt's transcribe-audio teaching is not under its TOOL KNOWLEDGE`);
+      else if (!prompt.includes(`\n${IMAGE_TEACHING}\n${TRANSCRIBE_TEACHING}\n`))
+        failures.push(`the ${mode} prompt's transcribe-audio teaching is not its own line right after the aegis.image.generate line`);
+    } else if (count !== 0 || prompt.includes("transcribe-audio")) {
+      failures.push(`the ${mode} prompt holds S5's sentence or names transcribe-audio`);
+    }
+  }
+  assert.deepEqual(failures, [], failures.join("; "));
+});
+
+test("W57: the agentic prompts are their prompts at 68df01fc with only the transcribe-audio line added; every other mode's prompt is unchanged byte for byte, and the tool lists still offer aegis.workflow.run and aegis.workflow.wait in agentic and not in execute", () => {
+  const failures: string[] = [];
+  const digest = (text: string) => createHash("sha256").update(text).digest("hex");
+  const chat = getZaruInit("chat")!.system_prompt;
+  if (chat.length !== CHAT_PROMPT_AT_684CAC52[0] || digest(chat) !== CHAT_PROMPT_AT_684CAC52[1]) failures.push("the 'chat' prompt changed");
+  const changed = new Set(TRANSCRIBE_PROMPTS_AT_68DF01FC.map(([name]) => name));
+  for (const [name, init, length, sha256] of UNCHANGED_PROMPTS) {
+    if (changed.has(name)) continue;
+    const prompt = init()!.system_prompt;
+    if (prompt.length !== length || digest(prompt) !== sha256) failures.push(`the '${name}' prompt changed`);
+  }
+  for (const [name, init, length, sha256] of TRANSCRIBE_PROMPTS_AT_68DF01FC) {
+    const prompt = init()!.system_prompt;
+    const line = `\n${TRANSCRIBE_TEACHING}`;
+    if (!prompt.includes(line)) {
+      failures.push(`the '${name}' prompt lacks the transcribe-audio line`);
+      continue;
+    }
+    const before = prompt.replace(line, "");
+    if (before.length !== length || digest(before) !== sha256)
+      failures.push(`the '${name}' prompt without the transcribe-audio line is not its prompt at 68df01fc`);
+  }
+  const agenticTools = getZaruInit("agentic")!.available_tools;
+  const executeTools = getZaruInit("execute")!.available_tools;
+  for (const tool of ["aegis.workflow.run", "aegis.workflow.wait"]) {
+    if (!agenticTools.includes(tool)) failures.push(`the agentic list lacks ${tool}`);
+    if (executeTools.includes(tool)) failures.push(`the execute list holds ${tool}`);
   }
   assert.deepEqual(failures, [], failures.join("; "));
 });
