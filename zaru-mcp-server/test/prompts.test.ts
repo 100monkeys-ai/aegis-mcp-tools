@@ -1652,8 +1652,8 @@ const OPERATOR_TOOLS_AT_3AFFD36 = [
   "aegis.goal.cancel",
 ];
 
-test("F11: the workflow mode's tool list holds aegis.workflow.run and aegis.workflow.signal once each, right after aegis.workflow.logs", () => {
-  const tools = getZaruInit("workflow")!.available_tools;
+test("F11: the workflow mode's tool list holds aegis.workflow.run and aegis.workflow.signal once each, right after aegis.workflow.logs (aegis.git.list, added after aegis.workflow.run, aside)", () => {
+  const tools = getZaruInit("workflow")!.available_tools.filter((t) => t !== "aegis.git.list");
   for (const tool of ["aegis.workflow.run", "aegis.workflow.signal"]) {
     assert.equal(tools.filter((t) => t === tool).length, 1, `the workflow list holds ${tool} once`);
   }
@@ -1661,19 +1661,25 @@ test("F11: the workflow mode's tool list holds aegis.workflow.run and aegis.work
   assert.deepEqual(tools.slice(at + 1, at + 3), ["aegis.workflow.run", "aegis.workflow.signal"]);
 });
 
-test("F11: the workflow mode's tool list is its list at 3affd36 with only the two tools added (and, from N26 of 2026-10-10, aegis.schedule.run_now)", () => {
+test("F11: the workflow mode's tool list is its list at 3affd36 with only the two tools added (and, from N26 of 2026-10-10, aegis.schedule.run_now; and aegis.git.list)", () => {
   const tools = getZaruInit("workflow")!.available_tools;
   assert.deepEqual(
-    tools.filter((t) => t !== "aegis.workflow.run" && t !== "aegis.workflow.signal" && t !== "aegis.schedule.run_now"),
+    tools.filter(
+      (t) =>
+        t !== "aegis.workflow.run" && t !== "aegis.workflow.signal" && t !== "aegis.schedule.run_now" && t !== "aegis.git.list",
+    ),
     WORKFLOW_TOOLS_AT_3AFFD36,
   );
-  assert.equal(tools.length, WORKFLOW_TOOLS_AT_3AFFD36.length + 3);
+  assert.equal(tools.length, WORKFLOW_TOOLS_AT_3AFFD36.length + 4);
 });
 
-test("F11: the agentic and operator tool lists are unchanged (the agentic list's aegis.schedule.run_now aside, added by N26 of 2026-10-10), each still holding the tool it held", () => {
+test("F11: the agentic and operator tool lists are unchanged (the agentic list's aegis.schedule.run_now and aegis.git.list aside, added by N26 of 2026-10-10 and after it), each still holding the tool it held", () => {
   const agentic = getZaruInit("agentic")!.available_tools;
   const operator = getZaruInit("operator", new Set(), undefined, { isOperator: true, tier: "operator" })!.available_tools;
-  assert.deepEqual(agentic.filter((t) => t !== "aegis.schedule.run_now"), AGENTIC_TOOLS_AT_3AFFD36);
+  assert.deepEqual(
+    agentic.filter((t) => t !== "aegis.schedule.run_now" && t !== "aegis.git.list"),
+    AGENTIC_TOOLS_AT_3AFFD36,
+  );
   assert.deepEqual(operator, OPERATOR_TOOLS_AT_3AFFD36);
   assert.ok(agentic.includes("aegis.workflow.run"));
   assert.ok(operator.includes("aegis.workflow.signal"));
@@ -1717,6 +1723,42 @@ test("N26: the eight pinned prompts are unchanged byte for byte and none names a
     if (prompt.length !== length || createHash("sha256").update(prompt).digest("hex") !== sha256)
       failures.push(`the '${name}' prompt changed`);
     if (prompt.includes(RUN_NOW)) failures.push(`the '${name}' prompt names ${RUN_NOW}`);
+  }
+  assert.deepEqual(failures, [], failures.join("; "));
+});
+
+// ---------------------------------------------------------------------------
+// A workflow run on a repository names the person's binding by its id. The
+// Zaru MCP server offers the orchestrator's aegis.git.list, which lists the
+// person's git repository bindings, in each mode whose tool list carries
+// aegis.workflow.run (agentic and workflow), right after it; the tool is
+// listed from the orchestrator's catalogue and relayed as every other aegis.*
+// tool is, so the lists are the whole change, and no mode's prompt changes
+// (the eight pins above).
+// ---------------------------------------------------------------------------
+
+const GIT_LIST = "aegis.git.list";
+
+test("The agentic and workflow tool lists hold aegis.git.list once, right after aegis.workflow.run; no other mode's list holds it", () => {
+  const failures: string[] = [];
+  for (const [mode, init] of ALL_MODES) {
+    const tools = init!.available_tools;
+    const count = tools.filter((tool) => tool === GIT_LIST).length;
+    if (mode === "agentic" || mode === "workflow") {
+      if (count !== 1) failures.push(`the ${mode} list holds ${GIT_LIST} ${count} times, not once`);
+      else if (tools[tools.indexOf(GIT_LIST) - 1] !== "aegis.workflow.run")
+        failures.push(`the ${mode} list does not hold ${GIT_LIST} right after aegis.workflow.run`);
+    } else if (count !== 0) {
+      failures.push(`the ${mode} list holds ${GIT_LIST}`);
+    }
+  }
+  assert.deepEqual(failures, [], failures.join("; "));
+});
+
+test("No pinned prompt names aegis.git.list", () => {
+  const failures: string[] = [];
+  for (const [name, init] of UNCHANGED_PROMPTS) {
+    if (init()!.system_prompt.includes(GIT_LIST)) failures.push(`the '${name}' prompt names ${GIT_LIST}`);
   }
   assert.deepEqual(failures, [], failures.join("; "));
 });
