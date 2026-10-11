@@ -557,13 +557,16 @@ test("W41: after calling zaru.mode the model waits for the person", () => {
 // re-measured for AEGIS ADR-139 N24 (the sentence teaching aegis.schedule.create
 // replaced by one proposing the schedule from the run, 26 characters fewer in
 // each);
+// the agentic and execute pins (and the agentic chat-uploads form) were
+// re-measured for AEGIS ADR-143 I2 and T8 (one line of TOOL KNOWLEDGE teaching
+// aegis.image.generate, 628 characters in each);
 // every other pin stands as it was.
 const UNCHANGED_PROMPTS: Array<[string, () => ReturnType<typeof getZaruInit>, number, string]> = [
-  ["agentic", () => getZaruInit("agentic"), 13654, "fe81838b1bf45fde5c0837b47b027a6f6d9dd28b9abf9d4a00251a121569ec80"],
-  ["agentic+chat-uploads", () => getZaruInit("agentic", new Set(["chat-uploads"])), 17464, "da52e631c96f879162eb07c2d34fe40897753ac56c9d96716d1735ef977c073b"],
+  ["agentic", () => getZaruInit("agentic"), 14282, "e97b4b33799d892c609038ce0051df643db1e3743423439f6f5084140fe7822c"],
+  ["agentic+chat-uploads", () => getZaruInit("agentic", new Set(["chat-uploads"])), 18092, "fb64811d31e4a387219254176048a8f471dfa4ecc34e93f734a7a4d7fcffdbb7"],
   ["workflow", () => getZaruInit("workflow"), 10150, "2ea17a05d6540a237445a62307ad627dc93088b9454f21f818d2570e106c3148"],
   ["workflow+chat-uploads", () => getZaruInit("workflow", new Set(["chat-uploads"])), 13960, "9a17347faff906e8bcc5916724273018a3e36d6ab52e7f59b94f476b5c8219df"],
-  ["execute", () => getZaruInit("execute"), 11628, "51f8fb63d247f277a04c96c07c654dd70a578fbce737bd50f9848ae559c2ea5b"],
+  ["execute", () => getZaruInit("execute"), 12256, "ba7e5cbe6d7238ccee2431da4d08ee44220f162116f8064bacfef3337646f0c6"],
   ["live", () => getZaruInit("live", new Set(["live"]), "browser"), 8558, "f5affbdef392ee3aa57500ba914bb95b5e6a18a584e7d8c784e861c5234a2633"],
   ["vibecode", () => getZaruInit("vibecode", new Set(["vibecode"]), "browser"), 11988, "07c06d98d3ed02aa2092e81317541b2692a545c1960d90fc4fe2ddc2f0f547d7"],
   ["operator", () => getZaruInit("operator", new Set(), undefined, { isOperator: true, tier: "operator" }), 10719, "a8815cc691f8e296b4703fde20e6a7bdb372ed9ea856478a4e505312be6a49d5"],
@@ -1673,11 +1676,11 @@ test("F11: the workflow mode's tool list is its list at 3affd36 with only the tw
   assert.equal(tools.length, WORKFLOW_TOOLS_AT_3AFFD36.length + 4);
 });
 
-test("F11: the agentic and operator tool lists are unchanged (the agentic list's aegis.schedule.run_now and aegis.git.list aside, added by N26 of 2026-10-10 and after it), each still holding the tool it held", () => {
+test("F11: the agentic and operator tool lists are unchanged (the agentic list's aegis.schedule.run_now, aegis.git.list and aegis.image.generate aside, added by N26 of 2026-10-10 and after it), each still holding the tool it held", () => {
   const agentic = getZaruInit("agentic")!.available_tools;
   const operator = getZaruInit("operator", new Set(), undefined, { isOperator: true, tier: "operator" })!.available_tools;
   assert.deepEqual(
-    agentic.filter((t) => t !== "aegis.schedule.run_now" && t !== "aegis.git.list"),
+    agentic.filter((t) => t !== "aegis.schedule.run_now" && t !== "aegis.git.list" && t !== "aegis.image.generate"),
     AGENTIC_TOOLS_AT_3AFFD36,
   );
   assert.deepEqual(operator, OPERATOR_TOOLS_AT_3AFFD36);
@@ -1759,6 +1762,104 @@ test("No pinned prompt names aegis.git.list", () => {
   const failures: string[] = [];
   for (const [name, init] of UNCHANGED_PROMPTS) {
     if (init()!.system_prompt.includes(GIT_LIST)) failures.push(`the '${name}' prompt names ${GIT_LIST}`);
+  }
+  assert.deepEqual(failures, [], failures.join("; "));
+});
+
+// ---------------------------------------------------------------------------
+// AEGIS ADR-143 I2, I3 and T8: the companion makes an image with the
+// orchestrator's aegis.image.generate. The tool is listed from the
+// orchestrator's catalogue and relayed as every other aegis.* tool is; the
+// agentic and execute modes admit it, right after aegis.execution.file, and
+// each of their prompts teaches it in one paragraph of its TOOL KNOWLEDGE,
+// right after the aegis.execution.file entry. No other mode admits or names it.
+// ---------------------------------------------------------------------------
+
+const IMAGE_GENERATE = "aegis.image.generate";
+
+const IMAGE_TEACHING =
+  "- `aegis.image.generate`: Make an image. When the person asks for a picture, an illustration, a logo, a diagram drawn as an image or any other image to be made, call aegis.image.generate directly with their words as `prompt` and, when they name a size, `size` as `<width>x<height>`, such as `1024x768`. The chat shows the person each of the answer's `files` as an image card: say what was made in one sentence, and do not describe the image in its place. When the answer says this node has no image generation model, say so in one sentence and offer nothing in its place. Never say an image was made without this tool's answer.";
+
+const EXECUTION_FILE_KNOWLEDGE =
+  "- `aegis.execution.file`: Read a file from a completed execution's workspace. Takes execution_id and path. The path can include or exclude the /workspace/ prefix — both work.";
+
+/** The prompts aegis.image.generate's teaching changed, as they stood at aegis-mcp-tools 684cac52. */
+const IMAGE_TEACHING_PROMPTS_AT_684CAC52: Array<[string, () => ReturnType<typeof getZaruInit>, number, string]> = [
+  ["agentic", () => getZaruInit("agentic"), 13654, "fe81838b1bf45fde5c0837b47b027a6f6d9dd28b9abf9d4a00251a121569ec80"],
+  ["agentic+chat-uploads", () => getZaruInit("agentic", new Set(["chat-uploads"])), 17464, "da52e631c96f879162eb07c2d34fe40897753ac56c9d96716d1735ef977c073b"],
+  ["execute", () => getZaruInit("execute"), 11628, "51f8fb63d247f277a04c96c07c654dd70a578fbce737bd50f9848ae559c2ea5b"],
+];
+
+/** The chat prompt at aegis-mcp-tools 684cac52; the pin table above holds no chat entry. */
+const CHAT_PROMPT_AT_684CAC52: [number, string] = [9682, "b53354a10050c459eec7590315ea83ae4842a50964f5257f0542bd89d95e9a75"];
+
+test("W52: the agentic and execute prompts teach aegis.image.generate in one paragraph, once, right after the aegis.execution.file entry of their TOOL KNOWLEDGE; no other mode's prompt holds the paragraph or names the tool", () => {
+  const failures: string[] = [];
+  const modes: Array<[string, ReturnType<typeof getZaruInit>]> = [
+    ...ALL_MODES,
+    ["agentic+chat-uploads", getZaruInit("agentic", new Set(["chat-uploads"]))],
+  ];
+  for (const [mode, init] of modes) {
+    const prompt = init!.system_prompt;
+    const count = prompt.split(IMAGE_TEACHING).length - 1;
+    if (mode === "agentic" || mode === "agentic+chat-uploads" || mode === "execute") {
+      if (count !== 1) {
+        failures.push(`the ${mode} prompt holds the image teaching ${count} times, not once`);
+        continue;
+      }
+      const knowledge = prompt.indexOf("\n## TOOL KNOWLEDGE\n");
+      const at = prompt.indexOf(IMAGE_TEACHING);
+      if (knowledge === -1 || at < knowledge) failures.push(`the ${mode} prompt's image teaching is not under its TOOL KNOWLEDGE`);
+      else if (!prompt.includes(`${EXECUTION_FILE_KNOWLEDGE}\n${IMAGE_TEACHING}\n`))
+        failures.push(`the ${mode} prompt's image teaching is not its own line right after the aegis.execution.file entry`);
+      if (prompt.split(IMAGE_GENERATE).length - 1 !== 2)
+        failures.push(`the ${mode} prompt names ${IMAGE_GENERATE} outside its teaching`);
+    } else {
+      if (count !== 0) failures.push(`the ${mode} prompt holds the image teaching`);
+      if (prompt.includes(IMAGE_GENERATE)) failures.push(`the ${mode} prompt names ${IMAGE_GENERATE}`);
+    }
+  }
+  assert.deepEqual(failures, [], failures.join("; "));
+});
+
+test("W52: the agentic and execute tool lists hold aegis.image.generate once, right after aegis.execution.file; no other mode's list holds it", () => {
+  const failures: string[] = [];
+  for (const [mode, init] of ALL_MODES) {
+    const tools = init!.available_tools;
+    const count = tools.filter((tool) => tool === IMAGE_GENERATE).length;
+    if (mode === "agentic" || mode === "execute") {
+      if (count !== 1) failures.push(`the ${mode} list holds ${IMAGE_GENERATE} ${count} times, not once`);
+      else if (tools[tools.indexOf(IMAGE_GENERATE) - 1] !== "aegis.execution.file")
+        failures.push(`the ${mode} list does not hold ${IMAGE_GENERATE} right after aegis.execution.file`);
+    } else if (count !== 0) {
+      failures.push(`the ${mode} list holds ${IMAGE_GENERATE}`);
+    }
+  }
+  assert.deepEqual(failures, [], failures.join("; "));
+});
+
+test("W52: every other mode's prompt is unchanged byte for byte, and the agentic and execute prompts are their prompts at 684cac52 with only the image teaching's line added", () => {
+  const failures: string[] = [];
+  const digest = (text: string) => createHash("sha256").update(text).digest("hex");
+  const chat = getZaruInit("chat")!.system_prompt;
+  if (chat.length !== CHAT_PROMPT_AT_684CAC52[0] || digest(chat) !== CHAT_PROMPT_AT_684CAC52[1])
+    failures.push("the 'chat' prompt changed");
+  const changed = new Set(IMAGE_TEACHING_PROMPTS_AT_684CAC52.map(([name]) => name));
+  for (const [name, init, length, sha256] of UNCHANGED_PROMPTS) {
+    if (changed.has(name)) continue;
+    const prompt = init()!.system_prompt;
+    if (prompt.length !== length || digest(prompt) !== sha256) failures.push(`the '${name}' prompt changed`);
+  }
+  for (const [name, init, length, sha256] of IMAGE_TEACHING_PROMPTS_AT_684CAC52) {
+    const prompt = init()!.system_prompt;
+    const line = `\n${IMAGE_TEACHING}`;
+    if (!prompt.includes(line)) {
+      failures.push(`the '${name}' prompt lacks the image teaching's line`);
+      continue;
+    }
+    const before = prompt.replace(line, "");
+    if (before.length !== length || digest(before) !== sha256)
+      failures.push(`the '${name}' prompt without the image teaching's line is not its prompt at 684cac52`);
   }
   assert.deepEqual(failures, [], failures.join("; "));
 });

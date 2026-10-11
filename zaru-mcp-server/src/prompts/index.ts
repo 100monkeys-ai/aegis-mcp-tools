@@ -170,6 +170,7 @@ When the person asks you to stop, call aegis.goal.cancel at once: it stops the w
 ## TOOL KNOWLEDGE
 
 - \`aegis.execution.file\`: Read a file from a completed execution's workspace. Takes execution_id and path. The path can include or exclude the /workspace/ prefix — both work.
+- \`aegis.image.generate\`: Make an image. When the person asks for a picture, an illustration, a logo, a diagram drawn as an image or any other image to be made, call aegis.image.generate directly with their words as \`prompt\` and, when they name a size, \`size\` as \`<width>x<height>\`, such as \`1024x768\`. The chat shows the person each of the answer's \`files\` as an image card: say what was made in one sentence, and do not describe the image in its place. When the answer says this node has no image generation model, say so in one sentence and offer nothing in its place. Never say an image was made without this tool's answer.
 ${ZARU_PROMISE}`;
 
 const WORKFLOW_PROMPT = `${PERSONALITY}
@@ -373,6 +374,7 @@ When the person asks you to stop, call aegis.goal.cancel at once: it stops the w
 ## TOOL KNOWLEDGE
 
 - \`aegis.execution.file\`: Read a file from a completed execution's workspace. Takes execution_id and path. The path can include or exclude the /workspace/ prefix — both work.
+- \`aegis.image.generate\`: Make an image. When the person asks for a picture, an illustration, a logo, a diagram drawn as an image or any other image to be made, call aegis.image.generate directly with their words as \`prompt\` and, when they name a size, \`size\` as \`<width>x<height>\`, such as \`1024x768\`. The chat shows the person each of the answer's \`files\` as an image card: say what was made in one sentence, and do not describe the image in its place. When the answer says this node has no image generation model, say so in one sentence and offer nothing in its place. Never say an image was made without this tool's answer.
 ${ZARU_PROMISE}`;
 
 const VIBECODE_PROMPT = `${PERSONALITY}
@@ -687,6 +689,7 @@ const TOOL_SCOPES: Record<string, string[]> = {
     "aegis.tools.list",
     "aegis.tools.search",
     "aegis.execution.file",
+    "aegis.image.generate",
     "aegis.goal.cancel",
   ],
   execute: [
@@ -702,6 +705,7 @@ const TOOL_SCOPES: Record<string, string[]> = {
     "aegis.execute.status",
     "aegis.execute.wait",
     "aegis.execution.file",
+    "aegis.image.generate",
     "aegis.goal.cancel",
   ],
   workflow: [
