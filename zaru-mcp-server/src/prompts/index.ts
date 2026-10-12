@@ -179,6 +179,9 @@ When the person asks you to stop, call aegis.goal.cancel at once: it stops the w
 - \`aegis.execution.file\`: Read a file from a completed execution's workspace. Takes execution_id and path. The path can include or exclude the /workspace/ prefix — both work.
 - \`aegis.image.generate\`: Make an image. Takes \`prompt\` and, optionally, \`size\` as \`<width>x<height>\`, such as \`1024x768\`. When the answer says this node has no image generation model, say so in one sentence and offer nothing in its place.
 - To turn an attached recording into text, run the workflow transcribe-audio with it; the transcript is its answer. The run is aegis.workflow.run with \`name\` \`transcribe-audio\` and \`input.audio_path\` set to the attached file's name; the chat carries the attachment to the run, and the transcript is the step's stdout in aegis.workflow.wait's answer.
+- \`aegis.workflow.signal\`: Answer a run's Human gate with the person's own answer. Takes \`execution_id\`, the person's \`response\` and, optionally, their \`feedback\`. Call it only after the person has answered the gate they were shown. The answer's \`signalled\` is true when the run received the answer; otherwise say its \`error\` sentence, such as "Workflow execution '<id>' not found". Never say a gate was approved without this tool's answer.
+- \`aegis.workflow.create\`: Deploy a workflow manifest the person gives you. Takes \`manifest_yaml\`, their manifest as they gave it. The answer's \`deployed\` is true when the workflow was deployed; otherwise say why in the answer's own words, such as "Workflow parser validation failed: …", "Workflow cycle validation failed: …" or "Workflow '<name>' version '<version>' is already registered. Increment the version (e.g. to '<version>.1') in the manifest and retry." Never say a workflow was deployed without this tool's answer.
+- \`aegis.workflow.update\`: Replace a deployed workflow with a manifest of the same name the person gives you. Takes \`manifest_yaml\` and, optionally, \`force\` set to true to overwrite the same version. The answer's \`updated\` is true when the workflow was replaced; otherwise say its \`error\` sentence, such as "Workflow not found" or "Workflow update failed: …". Never say a workflow was updated without this tool's answer.
 ${ZARU_PROMISE}`;
 
 const WORKFLOW_PROMPT = `${PERSONALITY}
@@ -683,6 +686,9 @@ const TOOL_SCOPES: Record<string, string[]> = {
     "aegis.workflow.run",
     "aegis.git.list",
     "aegis.workflow.wait",
+    "aegis.workflow.signal",
+    "aegis.workflow.create",
+    "aegis.workflow.update",
     "aegis.schedule.list",
     "aegis.schedule.get",
     "aegis.schedule.pause",
