@@ -570,12 +570,18 @@ test("W41: after calling zaru.mode the model waits for the person", () => {
 // the agentic pin and its chat-uploads form were re-measured for the three
 // TOOL KNOWLEDGE lines teaching aegis.workflow.signal, aegis.workflow.create
 // and aegis.workflow.update (1389 characters more in each);
+// those three lines moved to the workflow prompt on Jeshua's word of
+// 2026-10-12 ("There's a workflow mode, aside from agentic and chat"): the
+// agentic pin and its chat-uploads form are their values at 3e3ff265 again,
+// and the workflow pin and its chat-uploads form were re-measured for the
+// workflow prompt's new TOOL KNOWLEDGE block holding them (1409 characters more
+// in each);
 // every other pin stands as it was.
 const UNCHANGED_PROMPTS: Array<[string, () => ReturnType<typeof getZaruInit>, number, string]> = [
-  ["agentic", () => getZaruInit("agentic"), 16463, "44da5d55f781b66a03120738fdc1da23fa02af422449ea8529f0c7055de10c8f"],
-  ["agentic+chat-uploads", () => getZaruInit("agentic", new Set(["chat-uploads"])), 20273, "21fe100320f0c0761fd2048eff54c524ec7a9f1b0791b1495405aa1de7d8a32b"],
-  ["workflow", () => getZaruInit("workflow"), 10150, "2ea17a05d6540a237445a62307ad627dc93088b9454f21f818d2570e106c3148"],
-  ["workflow+chat-uploads", () => getZaruInit("workflow", new Set(["chat-uploads"])), 13960, "9a17347faff906e8bcc5916724273018a3e36d6ab52e7f59b94f476b5c8219df"],
+  ["agentic", () => getZaruInit("agentic"), 15074, "529d4c5becefa4249b9d466788f3aa42306cf59f757e954971bac5bd9fe4e3d1"],
+  ["agentic+chat-uploads", () => getZaruInit("agentic", new Set(["chat-uploads"])), 18884, "55a9909fd474937d4c0c2236af20eaaac228db2abf16df93391fcccd7f31ef04"],
+  ["workflow", () => getZaruInit("workflow"), 11559, "55ed34f8ba29902ef85eea059a5185760c2ec8c921a79ea079c85bc55ddda2d8"],
+  ["workflow+chat-uploads", () => getZaruInit("workflow", new Set(["chat-uploads"])), 15369, "9e7ea405198b5cc62cc6e1a0580aff2d4872e8fb7758bc4e6ef5aaab57730bb6"],
   ["execute", () => getZaruInit("execute"), 12698, "73bf0a2235583cebf9c0ae18a6d4539b997051031257a9efccb9f4fea212ce51"],
   ["live", () => getZaruInit("live", new Set(["live"]), "browser"), 8558, "f5affbdef392ee3aa57500ba914bb95b5e6a18a584e7d8c784e861c5234a2633"],
   ["vibecode", () => getZaruInit("vibecode", new Set(["vibecode"]), "browser"), 11988, "07c06d98d3ed02aa2092e81317541b2692a545c1960d90fc4fe2ddc2f0f547d7"],
@@ -1315,8 +1321,7 @@ test("N13, N24: the agentic and workflow tool lists hold the seven schedule tool
   for (const [mode, init] of ALL_MODES) {
     const tools = init!.available_tools;
     if (mode === "agentic" || mode === "workflow") {
-      // The agentic list's aegis.workflow.signal, create and update, right after aegis.workflow.wait, aside.
-      const listed = mode === "agentic" ? tools.filter((tool) => !WORKFLOW_TOOLS_ADDED.includes(tool)) : tools;
+      const listed = tools;
       const at = listed.indexOf("aegis.workflow.wait");
       const after = listed.slice(at + 1, at + 1 + SCHEDULE_TOOLS.length);
       if (at < 0 || JSON.stringify(after) !== JSON.stringify(SCHEDULE_TOOLS))
@@ -1676,24 +1681,29 @@ test("F11: the workflow mode's tool list holds aegis.workflow.run and aegis.work
   assert.deepEqual(tools.slice(at + 1, at + 3), ["aegis.workflow.run", "aegis.workflow.signal"]);
 });
 
-test("F11: the workflow mode's tool list is its list at 3affd36 with only the two tools added (and, from N26 of 2026-10-10, aegis.schedule.run_now; and aegis.git.list)", () => {
+test("F11: the workflow mode's tool list is its list at 3affd36 with only the two tools added (and, from N26 of 2026-10-10, aegis.schedule.run_now; aegis.git.list; and, from 2026-10-12, aegis.workflow.create and aegis.workflow.update)", () => {
   const tools = getZaruInit("workflow")!.available_tools;
   assert.deepEqual(
     tools.filter(
       (t) =>
-        t !== "aegis.workflow.run" && t !== "aegis.workflow.signal" && t !== "aegis.schedule.run_now" && t !== "aegis.git.list",
+        t !== "aegis.workflow.run" &&
+        t !== "aegis.workflow.signal" &&
+        t !== "aegis.schedule.run_now" &&
+        t !== "aegis.git.list" &&
+        t !== "aegis.workflow.create" &&
+        t !== "aegis.workflow.update",
     ),
     WORKFLOW_TOOLS_AT_3AFFD36,
   );
-  assert.equal(tools.length, WORKFLOW_TOOLS_AT_3AFFD36.length + 4);
+  assert.equal(tools.length, WORKFLOW_TOOLS_AT_3AFFD36.length + 6);
 });
 
-test("F11: the agentic and operator tool lists are unchanged (the agentic list's aegis.schedule.run_now, aegis.git.list and aegis.image.generate aside, added by N26 of 2026-10-10 and after it, and its aegis.workflow.signal, aegis.workflow.create and aegis.workflow.update, added on 2026-10-12), each still holding the tool it held", () => {
+test("F11: the agentic and operator tool lists are unchanged (the agentic list's aegis.schedule.run_now, aegis.git.list and aegis.image.generate aside, added by N26 of 2026-10-10 and after it), each still holding the tool it held", () => {
   const agentic = getZaruInit("agentic")!.available_tools;
   const operator = getZaruInit("operator", new Set(), undefined, { isOperator: true, tier: "operator" })!.available_tools;
   assert.deepEqual(
     agentic.filter(
-      (t) => t !== "aegis.schedule.run_now" && t !== "aegis.git.list" && t !== "aegis.image.generate" && !WORKFLOW_TOOLS_ADDED.includes(t),
+      (t) => t !== "aegis.schedule.run_now" && t !== "aegis.git.list" && t !== "aegis.image.generate",
     ),
     AGENTIC_TOOLS_AT_3AFFD36,
   );
@@ -2060,14 +2070,18 @@ test("W57: the agentic prompts are their prompts at 68df01fc with only the trans
 // ---------------------------------------------------------------------------
 // AEGIS ADR-141's Update "Human gates approved through the MCP surface" and
 // ADR-055's Update "A workflow manifest deployed from the MCP surface"
-// (2026-10-12), the Zaru MCP server's half: the agentic mode's tool list
-// admits aegis.workflow.signal, aegis.workflow.create and aegis.workflow.update,
-// right after aegis.workflow.wait, and its prompt's TOOL KNOWLEDGE gains one
-// line for each, right after the transcribe-audio line. The argument names and
-// the quoted refusals are the orchestrator's handlers' at aegis-orchestrator
-// 7523ee0a (tool_invocation_service/workflows.rs: signal 879-965, update
-// 1338-1460, create 1462-1730). The workflow and operator modes' lists already
-// carry the tools and do not change; no other mode lists or names them anew.
+// (2026-10-12), the Zaru MCP server's half, in the workflow mode on Jeshua's
+// word of 2026-10-12 ("There's a workflow mode, aside from agentic and chat"):
+// the workflow mode's tool list carries aegis.workflow.signal and holds
+// aegis.workflow.create and aegis.workflow.update right after it, and its
+// prompt ends with a TOOL KNOWLEDGE block of one line for each, the lines
+// aegis-mcp-tools c3706b92 put in the agentic prompt, unchanged. The agentic
+// mode lists and teaches none of the three, its prompt its prompt at 3e3ff265
+// again. The argument names and the quoted refusals are the orchestrator's
+// handlers' at aegis-orchestrator 7523ee0a (tool_invocation_service/workflows.rs:
+// signal 879-965, update 1338-1460, create 1462-1730). The operator mode's list
+// already carries the tools and does not change; no other mode lists or names
+// them.
 // ---------------------------------------------------------------------------
 
 const WORKFLOW_TOOLS_ADDED = ["aegis.workflow.signal", "aegis.workflow.create", "aegis.workflow.update"];
@@ -2087,7 +2101,7 @@ const WORKFLOW_TEACHINGS: Array<[string, string]> = [
   ["aegis.workflow.update", UPDATE_TEACHING],
 ];
 
-/** The agentic prompts as they stood at aegis-mcp-tools 3e3ff265. */
+/** The agentic prompts as they stood at aegis-mcp-tools 3e3ff265, before the three lines, and stand again. */
 const WORKFLOW_TEACHING_PROMPTS_AT_3E3FF265: Array<[string, () => ReturnType<typeof getZaruInit>, number, string]> = [
   ["agentic", () => getZaruInit("agentic"), 15074, "529d4c5becefa4249b9d466788f3aa42306cf59f757e954971bac5bd9fe4e3d1"],
   ["agentic+chat-uploads", () => getZaruInit("agentic", new Set(["chat-uploads"])), 18884, "55a9909fd474937d4c0c2236af20eaaac228db2abf16df93391fcccd7f31ef04"],
@@ -2096,19 +2110,29 @@ const WORKFLOW_TEACHING_PROMPTS_AT_3E3FF265: Array<[string, () => ReturnType<typ
 const stripWorkflowTeachings = (prompt: string) =>
   prompt.replace(`\n${SIGNAL_TEACHING}`, "").replace(`\n${CREATE_TEACHING}`, "").replace(`\n${UPDATE_TEACHING}`, "");
 
-test("WT1: the agentic tool list holds aegis.workflow.signal, aegis.workflow.create and aegis.workflow.update once each, right after aegis.workflow.wait", () => {
-  const tools = getZaruInit("agentic")!.available_tools;
+/** The workflow prompts as they stood at aegis-mcp-tools c3706b92, before the TOOL KNOWLEDGE block. */
+const WORKFLOW_PROMPTS_AT_C3706B92: Array<[string, () => ReturnType<typeof getZaruInit>, number, string]> = [
+  ["workflow", () => getZaruInit("workflow"), 10150, "2ea17a05d6540a237445a62307ad627dc93088b9454f21f818d2570e106c3148"],
+  ["workflow+chat-uploads", () => getZaruInit("workflow", new Set(["chat-uploads"])), 13960, "9a17347faff906e8bcc5916724273018a3e36d6ab52e7f59b94f476b5c8219df"],
+];
+
+const WORKFLOW_KNOWLEDGE_BLOCK = `\n## TOOL KNOWLEDGE\n\n${SIGNAL_TEACHING}\n${CREATE_TEACHING}\n${UPDATE_TEACHING}\n`;
+
+const stripWorkflowKnowledge = (prompt: string) => prompt.replace(WORKFLOW_KNOWLEDGE_BLOCK, "");
+
+test("WT1: the workflow tool list holds aegis.workflow.signal, aegis.workflow.create and aegis.workflow.update once each, in that order, right after aegis.git.list", () => {
+  const tools = getZaruInit("workflow")!.available_tools;
   for (const tool of WORKFLOW_TOOLS_ADDED) {
-    assert.equal(tools.filter((t) => t === tool).length, 1, `the agentic list holds ${tool} once`);
+    assert.equal(tools.filter((t) => t === tool).length, 1, `the workflow list holds ${tool} once`);
   }
-  const at = tools.indexOf("aegis.workflow.wait");
+  const at = tools.indexOf("aegis.git.list");
   assert.deepEqual(tools.slice(at + 1, at + 1 + WORKFLOW_TOOLS_ADDED.length), WORKFLOW_TOOLS_ADDED);
 });
 
-test("WT1: the workflow, execute, chat, live, vibecode and operator tool lists hold the three tools exactly as they did at 3e3ff265", () => {
+test("WT1: the agentic tool list holds none of the three; the execute, chat, live, vibecode and operator tool lists hold them exactly as they did at 3e3ff265", () => {
   const expected: Record<string, string[]> = {
     chat: [],
-    workflow: ["aegis.workflow.signal"],
+    agentic: [],
     execute: [],
     live: [],
     vibecode: [],
@@ -2116,7 +2140,7 @@ test("WT1: the workflow, execute, chat, live, vibecode and operator tool lists h
   };
   const failures: string[] = [];
   for (const [mode, init] of ALL_MODES) {
-    if (mode === "agentic") continue;
+    if (mode === "workflow") continue;
     const held = init!.available_tools.filter((t) => WORKFLOW_TOOLS_ADDED.includes(t));
     if (JSON.stringify(held) !== JSON.stringify(expected[mode])) failures.push(`the ${mode} list holds ${JSON.stringify(held)}`);
   }
@@ -2124,7 +2148,7 @@ test("WT1: the workflow, execute, chat, live, vibecode and operator tool lists h
 });
 
 for (const [index, [tool, teaching]] of WORKFLOW_TEACHINGS.entries()) {
-  test(`WT${index + 2}: the agentic prompt teaches ${tool} once, as its own TOOL KNOWLEDGE line in order after the transcribe-audio line; no other mode's prompt holds the line`, () => {
+  test(`WT${index + 2}: the workflow prompt teaches ${tool} once, as its own line in order in its TOOL KNOWLEDGE block; the agentic prompt and every other mode's prompt hold the line 0 times`, () => {
     const failures: string[] = [];
     const modes: Array<[string, ReturnType<typeof getZaruInit>]> = [
       ...ALL_MODES,
@@ -2132,11 +2156,11 @@ for (const [index, [tool, teaching]] of WORKFLOW_TEACHINGS.entries()) {
       ["workflow+chat-uploads", getZaruInit("workflow", new Set(["chat-uploads"]))],
       ["execute+chat-uploads", getZaruInit("execute", new Set(["chat-uploads"]))],
     ];
-    const previous = index === 0 ? TRANSCRIBE_TEACHING : WORKFLOW_TEACHINGS[index - 1][1];
+    const previous = index === 0 ? "## TOOL KNOWLEDGE\n" : WORKFLOW_TEACHINGS[index - 1][1];
     for (const [mode, init] of modes) {
       const prompt = init!.system_prompt;
       const count = prompt.split(teaching).length - 1;
-      if (mode === "agentic" || mode === "agentic+chat-uploads") {
+      if (mode === "workflow" || mode === "workflow+chat-uploads") {
         if (count !== 1) {
           failures.push(`the ${mode} prompt holds the ${tool} line ${count} times, not once`);
           continue;
@@ -2146,7 +2170,7 @@ for (const [index, [tool, teaching]] of WORKFLOW_TEACHINGS.entries()) {
         else if (!prompt.includes(`\n${previous}\n${teaching}\n`))
           failures.push(`the ${mode} prompt's ${tool} line is not its own line right after the line before it`);
       } else if (count !== 0) {
-        failures.push(`the ${mode} prompt holds the ${tool} line`);
+        failures.push(`the ${mode} prompt holds the ${tool} line ${count} times, not 0`);
       }
     }
     assert.deepEqual(failures, [], failures.join("; "));
@@ -2155,7 +2179,7 @@ for (const [index, [tool, teaching]] of WORKFLOW_TEACHINGS.entries()) {
 
 test("WT5: each teaching line names the tool's arguments as the orchestrator's handler reads them and never lets the model claim the act without the tool's answer", () => {
   const failures: string[] = [];
-  const lines = getZaruInit("agentic")!.system_prompt.split("\n");
+  const lines = getZaruInit("workflow")!.system_prompt.split("\n");
   const names: Array<[string, string[]]> = [
     ["aegis.workflow.signal", ["`execution_id`", "`response`", "`feedback`", "`signalled`"]],
     ["aegis.workflow.create", ["`manifest_yaml`", "`deployed`"]],
@@ -2164,7 +2188,7 @@ test("WT5: each teaching line names the tool's arguments as the orchestrator's h
   for (const [tool, words] of names) {
     const line = lines.find((l) => l.startsWith(`- \`${tool}\`: `));
     if (line === undefined) {
-      failures.push(`the agentic prompt has no TOOL KNOWLEDGE line for ${tool}`);
+      failures.push(`the workflow prompt has no TOOL KNOWLEDGE line for ${tool}`);
       continue;
     }
     for (const word of words) if (!line.includes(word)) failures.push(`the ${tool} line does not name ${word}`);
@@ -2173,12 +2197,12 @@ test("WT5: each teaching line names the tool's arguments as the orchestrator's h
   assert.deepEqual(failures, [], failures.join("; "));
 });
 
-test("WT6: the agentic prompts are their prompts at 3e3ff265 with only the three workflow lines added; every other mode's prompt is unchanged byte for byte", () => {
+test("WT6: the agentic prompts are their prompts at 3e3ff265, the workflow prompts their prompts at c3706b92 with only the TOOL KNOWLEDGE block of the three lines added; every other mode's prompt is unchanged byte for byte", () => {
   const failures: string[] = [];
   const digest = (text: string) => createHash("sha256").update(text).digest("hex");
   const chat = getZaruInit("chat")!.system_prompt;
   if (chat.length !== CHAT_PROMPT_AT_684CAC52[0] || digest(chat) !== CHAT_PROMPT_AT_684CAC52[1]) failures.push("the 'chat' prompt changed");
-  const changed = new Set(WORKFLOW_TEACHING_PROMPTS_AT_3E3FF265.map(([name]) => name));
+  const changed = new Set(WORKFLOW_PROMPTS_AT_C3706B92.map(([name]) => name));
   for (const [name, init, length, sha256] of UNCHANGED_PROMPTS) {
     if (changed.has(name)) continue;
     const prompt = init()!.system_prompt;
@@ -2186,13 +2210,17 @@ test("WT6: the agentic prompts are their prompts at 3e3ff265 with only the three
   }
   for (const [name, init, length, sha256] of WORKFLOW_TEACHING_PROMPTS_AT_3E3FF265) {
     const prompt = init()!.system_prompt;
-    if (WORKFLOW_TEACHINGS.some(([, line]) => !prompt.includes(`\n${line}`))) {
-      failures.push(`the '${name}' prompt lacks a workflow line`);
+    if (prompt.length !== length || digest(prompt) !== sha256) failures.push(`the '${name}' prompt is not its prompt at 3e3ff265`);
+  }
+  for (const [name, init, length, sha256] of WORKFLOW_PROMPTS_AT_C3706B92) {
+    const prompt = init()!.system_prompt;
+    if (prompt.split(WORKFLOW_KNOWLEDGE_BLOCK).length !== 2) {
+      failures.push(`the '${name}' prompt does not hold the TOOL KNOWLEDGE block of the three lines once`);
       continue;
     }
-    const before = stripWorkflowTeachings(prompt);
+    const before = stripWorkflowKnowledge(prompt);
     if (before.length !== length || digest(before) !== sha256)
-      failures.push(`the '${name}' prompt without the three workflow lines is not its prompt at 3e3ff265`);
+      failures.push(`the '${name}' prompt without the TOOL KNOWLEDGE block is not its prompt at c3706b92`);
   }
   assert.deepEqual(failures, [], failures.join("; "));
 });
