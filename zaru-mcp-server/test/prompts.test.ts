@@ -582,12 +582,20 @@ test("W41: after calling zaru.mode the model waits for the person", () => {
 // aegis.workflow.wait lines and its aegis.workflow.signal line the gate rule
 // (1775 characters more in each); the agentic prompt's gains the same run line
 // and its own wait line (1250 characters more in each);
+// the agentic and workflow pins (and their chat-uploads forms) were
+// re-measured for the gate-fidelity rules (the GF tests at the end of this
+// file): the workflow prompt's run line gains the inputs sentences, its wait
+// line the fidelity sentences, its signal line the run's own id and the read
+// after the signal, and its TOOL KNOWLEDGE a last line for aegis.workflow.logs
+// (1559 characters more in each); the agentic prompt's run line gains the
+// inputs sentences and its wait line the fidelity sentences (901 characters
+// more in each);
 // every other pin stands as it was.
 const UNCHANGED_PROMPTS: Array<[string, () => ReturnType<typeof getZaruInit>, number, string]> = [
-  ["agentic", () => getZaruInit("agentic"), 16324, "b2817a15b9d14c06b3b6405d3c3f05d418dbb7fa75a10775db202af5c128edff"],
-  ["agentic+chat-uploads", () => getZaruInit("agentic", new Set(["chat-uploads"])), 20134, "aaec4d5a292af9098fdc424f51cf39aa5047bc557843782deacd309cbd19f508"],
-  ["workflow", () => getZaruInit("workflow"), 13334, "3b05cef932c69ee09905cadbd253e17a13b9540d1f9f398b09d245c6ef52632a"],
-  ["workflow+chat-uploads", () => getZaruInit("workflow", new Set(["chat-uploads"])), 17144, "d1f5680fd4e99dcc0b1e8a55c2be4a737742962660553524da6e18d97ef9ed58"],
+  ["agentic", () => getZaruInit("agentic"), 17225, "c109a7b904cff90c6ac5cbdf8df069f96832bb2ec9cfe129cc830256b1e19275"],
+  ["agentic+chat-uploads", () => getZaruInit("agentic", new Set(["chat-uploads"])), 21035, "70bdf6cc8b5f615ea57fca5a21761a54f295ff4d00bc96571edf0cf0b2e8c57f"],
+  ["workflow", () => getZaruInit("workflow"), 14893, "6121276892fc88fb3651fb8ed607d50656374dc67002341e9a3062d1bf10b564"],
+  ["workflow+chat-uploads", () => getZaruInit("workflow", new Set(["chat-uploads"])), 18703, "accbfa2d2f7483bb432a44ee26d32305c196d5b458152b3bf7a4c6d48a7818ac"],
   ["execute", () => getZaruInit("execute"), 12698, "73bf0a2235583cebf9c0ae18a6d4539b997051031257a9efccb9f4fea212ce51"],
   ["live", () => getZaruInit("live", new Set(["live"]), "browser"), 8558, "f5affbdef392ee3aa57500ba914bb95b5e6a18a584e7d8c784e861c5234a2633"],
   ["vibecode", () => getZaruInit("vibecode", new Set(["vibecode"]), "browser"), 11988, "07c06d98d3ed02aa2092e81317541b2692a545c1960d90fc4fe2ddc2f0f547d7"],
@@ -2102,9 +2110,24 @@ const CREATE_TEACHING =
 const UPDATE_TEACHING =
   "- `aegis.workflow.update`: Replace a deployed workflow with a manifest of the same name the person gives you. Takes `manifest_yaml` and, optionally, `force` set to true to overwrite the same version. The answer's `updated` is true when the workflow was replaced; otherwise say its `error` sentence, such as \"Workflow not found\" or \"Workflow update failed: …\". Never say a workflow was updated without this tool's answer.";
 
-/** The signal line now: its teaching at 4791cab1 with the gate-conduct rule (GC1, GATE_RULE_SENTENCES) in place of "Call it only after the person has answered the gate they were shown." */
-const SIGNAL_TEACHING =
+/** The signal line at f332aa9c: its teaching at 4791cab1 with the gate-conduct rule (GC1, GATE_RULE_SENTENCES) in place of "Call it only after the person has answered the gate they were shown." */
+const SIGNAL_TEACHING_AT_F332AA9C =
   "- `aegis.workflow.signal`: Answer a run's Human gate with the person's own answer. Takes `execution_id`, the person's `response` and, optionally, their `feedback`. A Human gate is the person's, never yours: you never answer it for them, and you never carry an answer forward from what they said before the gate was shown; a sentence such as \"test the workflow end to end\" is not an answer to a gate. Call it only in a turn whose message from the person answers the gate you showed them, and only once for that gate. Its `response` is the word the gate's prompt names, `yes` or `no`, exactly, never another word such as \"approved\"; the person's reasons go in `feedback`, in their own words, never a paraphrase. When their reply is not plainly yes or no, ask them which it is and do not call it. The answer's `signalled` is true when the run received the answer; otherwise say its `error` sentence, such as \"Workflow execution '<id>' not found\". Never say a gate was approved without this tool's answer.";
+
+/** Gate fidelity, rule 3: the signal carries the run's own id (GF2). */
+const SIGNAL_ID_SENTENCE = "Its `execution_id` is always the one aegis.workflow.run answered for that run.";
+/** Gate fidelity, rule 1: after the signal, the state is read, never told (GF2). */
+const SIGNAL_AFTER_SENTENCE =
+  "After it answers, call aegis.workflow.wait or aegis.workflow.logs with that `execution_id` and report the state their answer gives; until one of them has answered, say you have not read the run's state yet.";
+
+/** A signal line with the two gate-fidelity sentences put in: the id after the arguments, the read after the answer's error sentence. */
+const withSignalFidelity = (line: string) =>
+  line
+    .replace("their `feedback`. ", `their \`feedback\`. ${SIGNAL_ID_SENTENCE} `)
+    .replace(" Never say a gate was approved", ` ${SIGNAL_AFTER_SENTENCE} Never say a gate was approved`);
+
+/** The signal line now: its line at f332aa9c with the gate-fidelity sentences (GF2). */
+const SIGNAL_TEACHING = withSignalFidelity(SIGNAL_TEACHING_AT_F332AA9C);
 
 const WORKFLOW_TEACHINGS: Array<[string, string]> = [
   ["aegis.workflow.signal", SIGNAL_TEACHING],
@@ -2293,21 +2316,51 @@ const DRAFT_ONLY_SENTENCES = [
 
 const COMPLETED_AT_GATE = GATE_SHOWN_SENTENCES[1];
 
-/** The run line, the same in the workflow and agentic modes. */
-const RUN_TEACHING = `- \`aegis.workflow.run\`: Start a run of a workflow. Takes \`name\`, \`input\` and, for a workflow that works on a repository, \`repositories\`. ${[...ONE_RUN_SENTENCES, ...DRAFT_ONLY_SENTENCES].join(" ")}`;
+/** Gate fidelity, rule 2: the inputs are read before the run, from the tool of the mode's own list that answers them (GF4). */
+const INPUTS_TOOL: Record<string, string> = { workflow: "aegis.workflow.list", agentic: "aegis.workflow.search" };
+const inputsReadSentence = (tool: string) =>
+  `Before you start it, read the workflow's inputs: the \`input_schema\` its entry carries in ${tool}'s answer names each input, and its \`required\` list the ones the run cannot start without.`;
+const INPUTS_ASK_SENTENCE =
+  "Ask the person for each required input their request does not give, such as `test_command` and `test_image`, and start the run only when `input` holds every one of them; never send a call you know is short.";
+
+/** Gate fidelity, rule 1: what Zaru shows is read and quoted, never composed (GF1). */
+const FIDELITY_SENTENCES = [
+  "Every gate, state, verdict and progress sentence you show the person is read from a tool's answer, in this turn or an earlier one, and quoted, never composed.",
+  "A gate is shown only as the prompt a tool answered for it, whole, the second and every later gate as much as the first: never shorten any part of it, as with \"as previously shown\", and never show a gate no tool answered.",
+  "Never say a commit, push, test or landing happened, or that a run is at a state, unless a tool's answer says so.",
+];
+
+/** Gate fidelity, rule 3: the logs carry the run's own id (GF3). */
+const LOGS_ID_SENTENCE =
+  "Takes `execution_id`, always the one aegis.workflow.run answered for that run, on every call; a call without it is refused with \"required field 'execution_id' is missing or null\".";
+
+const RUN_HEAD = "- `aegis.workflow.run`: Start a run of a workflow. Takes `name`, `input` and, for a workflow that works on a repository, `repositories`.";
+
+/** The run line at f332aa9c, the same in the workflow and agentic modes. */
+const RUN_TEACHING_AT_F332AA9C = `${RUN_HEAD} ${[...ONE_RUN_SENTENCES, ...DRAFT_ONLY_SENTENCES].join(" ")}`;
+
+/** The run line now: the inputs sentences after the arguments, naming the mode's own tool. */
+const runTeaching = (tool: string) => `${RUN_HEAD} ${inputsReadSentence(tool)} ${INPUTS_ASK_SENTENCE} ${[...ONE_RUN_SENTENCES, ...DRAFT_ONLY_SENTENCES].join(" ")}`;
+const WORKFLOW_RUN_TEACHING = runTeaching(INPUTS_TOOL.workflow);
+const AGENTIC_RUN_TEACHING = runTeaching(INPUTS_TOOL.agentic);
 
 /** The workflow mode's wait line. */
-const WORKFLOW_WAIT_TEACHING = `- \`aegis.workflow.wait\`: Wait for a run you started. Takes its \`execution_id\`. ${GATE_SHOWN_SENTENCES.join(" ")}`;
+const WORKFLOW_WAIT_TEACHING = `- \`aegis.workflow.wait\`: Wait for a run you started. Takes its \`execution_id\`. ${GATE_SHOWN_SENTENCES.join(" ")} ${FIDELITY_SENTENCES.join(" ")}`;
 
 /** The agentic mode's wait line. */
-const AGENTIC_WAIT_TEACHING = `- \`aegis.workflow.wait\`: Wait for a run you started. Takes its \`execution_id\`. ${AGENTIC_GATE_SENTENCES[0]} ${COMPLETED_AT_GATE}`;
+const AGENTIC_WAIT_TEACHING = `- \`aegis.workflow.wait\`: Wait for a run you started. Takes its \`execution_id\`. ${AGENTIC_GATE_SENTENCES[0]} ${COMPLETED_AT_GATE} ${FIDELITY_SENTENCES.join(" ")}`;
+
+/** The workflow mode's logs line, the last of its TOOL KNOWLEDGE. */
+const WORKFLOW_LOGS_TEACHING = `- \`aegis.workflow.logs\`: Read a run's events, among them each gate's \`HumanInputRequested\` event with its \`prompt\`. ${LOGS_ID_SENTENCE} Never say what a run did without this tool's or aegis.workflow.wait's answer.`;
 
 /** A prompt with the gate-conduct lines removed and the signal line as it stood at 4791cab1: the history tests compare this with their pins. */
 const stripGateConduct = (prompt: string) =>
   prompt
-    .replace(`\n${RUN_TEACHING}`, "")
+    .replace(`\n${WORKFLOW_RUN_TEACHING}`, "")
+    .replace(`\n${AGENTIC_RUN_TEACHING}`, "")
     .replace(`\n${WORKFLOW_WAIT_TEACHING}`, "")
     .replace(`\n${AGENTIC_WAIT_TEACHING}`, "")
+    .replace(`\n${WORKFLOW_LOGS_TEACHING}`, "")
     .replace(SIGNAL_TEACHING, SIGNAL_TEACHING_AT_4791CAB1);
 
 const toolLine = (prompt: string, tool: string) => prompt.split("\n").filter((l) => l.startsWith(`- \`${tool}\`: `));
@@ -2330,8 +2383,8 @@ test("GC1: the workflow mode's aegis.workflow.signal line holds rule 1: the gate
     for (const sentence of GATE_RULE_SENTENCES) if (!lines[0].includes(sentence)) failures.push(`the ${mode} signal line lacks: ${sentence}`);
     if (lines[0].includes("Call it only after the person has answered the gate they were shown."))
       failures.push(`the ${mode} signal line still holds the sentence the model read past`);
-    if (lines[0] !== SIGNAL_TEACHING_AT_4791CAB1.replace("Call it only after the person has answered the gate they were shown.", GATE_RULE_SENTENCES.join(" ")))
-      failures.push(`the ${mode} signal line is not its line at 4791cab1 with that sentence replaced by the rule's`);
+    if (lines[0] !== withSignalFidelity(SIGNAL_TEACHING_AT_4791CAB1.replace("Call it only after the person has answered the gate they were shown.", GATE_RULE_SENTENCES.join(" "))))
+      failures.push(`the ${mode} signal line is not its line at 4791cab1 with that sentence replaced by the rule's and the gate-fidelity sentences put in`);
   }
   assert.deepEqual(failures, [], failures.join("; "));
 });
@@ -2358,11 +2411,11 @@ test("GC3: the workflow and agentic modes' aegis.workflow.run line holds rule 2 
       failures.push(`the ${mode} prompt has ${lines.length} aegis.workflow.run lines, not 1`);
       continue;
     }
-    seen.add(lines[0]);
+    seen.add(lines[0].replace(` ${inputsReadSentence(INPUTS_TOOL[mode.split("+")[0]])}`, ""));
     for (const sentence of [...ONE_RUN_SENTENCES, ...DRAFT_ONLY_SENTENCES])
       if (!lines[0].includes(sentence)) failures.push(`the ${mode} run line lacks: ${sentence}`);
   }
-  if (seen.size > 1) failures.push(`the run line differs between the modes (${seen.size} forms)`);
+  if (seen.size > 1) failures.push(`the run line differs between the modes beyond the tool that answers the inputs (${seen.size} forms)`);
   assert.deepEqual(failures, [], failures.join("; "));
 });
 
@@ -2397,12 +2450,124 @@ test("GC5: the gate words the signal line names are the Forge gates' own, `yes` 
 test("GC6: the workflow prompt's TOOL KNOWLEDGE opens with the run, wait and signal lines, in that order, each its own line; the agentic prompt's ends with the run and wait lines after the transcribe-audio line", () => {
   const failures: string[] = [];
   for (const [mode, init] of GATE_MODES.slice(0, 2)) {
-    if (!init()!.system_prompt.includes(`\n## TOOL KNOWLEDGE\n\n${RUN_TEACHING}\n${WORKFLOW_WAIT_TEACHING}\n${SIGNAL_TEACHING}\n`))
+    if (!init()!.system_prompt.includes(`\n## TOOL KNOWLEDGE\n\n${WORKFLOW_RUN_TEACHING}\n${WORKFLOW_WAIT_TEACHING}\n${SIGNAL_TEACHING}\n`))
       failures.push(`the ${mode} prompt's TOOL KNOWLEDGE does not open with the run, wait and signal lines`);
   }
   for (const [mode, init] of GATE_MODES.slice(2)) {
-    if (!init()!.system_prompt.includes(`\n${TRANSCRIBE_TEACHING}\n${RUN_TEACHING}\n${AGENTIC_WAIT_TEACHING}\n`))
+    if (!init()!.system_prompt.includes(`\n${TRANSCRIBE_TEACHING}\n${AGENTIC_RUN_TEACHING}\n${AGENTIC_WAIT_TEACHING}\n`))
       failures.push(`the ${mode} prompt does not hold the run and wait lines right after the transcribe-audio line`);
+  }
+  assert.deepEqual(failures, [], failures.join("; "));
+});
+
+// ---------------------------------------------------------------------------
+// Gate fidelity (AEGIS ADR-141's Update "Human gates approved through the MCP
+// surface", Zaru ADR-0026's Update of 2026-10-12; Jeshua, 2026-10-12: "Zaru is
+// the interface, it doesn't really "autonomously decide" outside of its
+// interactions with the user (me)"). On the Forge run ec3f9b6b (conversation
+// fc9f49c0, 2026-10-13), with the gate-conduct rules above deployed, Zaru in
+// the workflow mode relayed both real gates and waited, but thirteen seconds
+// after the person's design `yes` it answered with no tool call at all,
+// narrating "Approval sent", "through tests and implementation" and a third
+// gate "# The Forge: approve the review … Answer yes to commit the change"
+// with a reviewer's verdict, "paused at AWAIT_REVIEW_APPROVAL", while the run
+// waited at AWAIT_ARCH_APPROVAL (the Forge has two Human gates only,
+// aegis-orchestrator de9acea3 the-forge.yaml 22, 108, 156); it said "The
+// commit landed on the work branch" during TEST, which was false; it cut the
+// requirements out of the design gate ("(as previously shown …)"); it called
+// aegis.workflow.run first without the required `task`, `test_command` and
+// `test_image`; and it called aegis.workflow.logs without `execution_id`.
+// Three rules, each a sentence asserted below: (1) every gate, state, verdict
+// and progress sentence is read from a tool's answer and quoted, never
+// composed: a gate only as a tool answered it, whole, a later gate too; after
+// a signal the state is read with aegis.workflow.wait or aegis.workflow.logs,
+// or said not yet read; no commit, push, test or landing without a tool's
+// answer; (2) before aegis.workflow.run the workflow's inputs are read from
+// the tool of the mode's own list that answers them (aegis.workflow.list
+// answers `input_schema` in the workflow mode, aegis.workflow.search in the
+// agentic mode; aegis-orchestrator de9acea3 tool_invocation_service
+// workflows.rs and discovery.rs) and a required input the request does not
+// give is asked for; (3) aegis.workflow.logs and aegis.workflow.signal carry
+// the `execution_id` the run answered. The agentic mode, which offers the run
+// and the wait and neither the logs nor the signal, teaches (1) on its wait
+// line and (2) on its run line. These tests pin the text; whether the model
+// obeys it is proved on the live page only.
+// ---------------------------------------------------------------------------
+
+test("GF1: the workflow and agentic modes' aegis.workflow.wait line holds rule 1: every gate, state, verdict and progress sentence is read from a tool's answer and quoted; a gate only as a tool answered it, whole, a later gate too; no commit, push, test or landing without a tool's answer", () => {
+  const failures: string[] = [];
+  for (const [mode, init] of GATE_MODES) {
+    const lines = toolLine(init()!.system_prompt, "aegis.workflow.wait");
+    if (lines.length !== 1) {
+      failures.push(`the ${mode} prompt has ${lines.length} aegis.workflow.wait lines, not 1`);
+      continue;
+    }
+    for (const sentence of FIDELITY_SENTENCES) if (!lines[0].includes(sentence)) failures.push(`the ${mode} wait line lacks: ${sentence}`);
+  }
+  assert.deepEqual(failures, [], failures.join("; "));
+});
+
+test("GF2: the workflow mode's aegis.workflow.signal line holds rules 3 and 1: its execution_id is the one the run answered, and after it answers the state is read with aegis.workflow.wait or aegis.workflow.logs, or said not yet read", () => {
+  const failures: string[] = [];
+  for (const [mode, init] of GATE_MODES.slice(0, 2)) {
+    const lines = toolLine(init()!.system_prompt, "aegis.workflow.signal");
+    if (lines.length !== 1) {
+      failures.push(`the ${mode} prompt has ${lines.length} aegis.workflow.signal lines, not 1`);
+      continue;
+    }
+    for (const sentence of [SIGNAL_ID_SENTENCE, SIGNAL_AFTER_SENTENCE]) if (!lines[0].includes(sentence)) failures.push(`the ${mode} signal line lacks: ${sentence}`);
+  }
+  assert.deepEqual(failures, [], failures.join("; "));
+});
+
+test("GF3: the workflow mode teaches aegis.workflow.logs once, its execution_id always the one the run answered, as the TOOL KNOWLEDGE line right after aegis.workflow.update; the tool is on the workflow list", () => {
+  const failures: string[] = [];
+  for (const [mode, init] of GATE_MODES.slice(0, 2)) {
+    const zaru = init()!;
+    const lines = toolLine(zaru.system_prompt, "aegis.workflow.logs");
+    if (lines.length !== 1) {
+      failures.push(`the ${mode} prompt has ${lines.length} aegis.workflow.logs lines, not 1`);
+      continue;
+    }
+    if (!lines[0].includes(LOGS_ID_SENTENCE)) failures.push(`the ${mode} logs line lacks: ${LOGS_ID_SENTENCE}`);
+    if (!zaru.system_prompt.includes(`\n${UPDATE_TEACHING}\n${WORKFLOW_LOGS_TEACHING}\n`))
+      failures.push(`the ${mode} prompt's logs line is not its own line right after the aegis.workflow.update line`);
+    if (!zaru.available_tools.includes("aegis.workflow.logs")) failures.push(`the ${mode} list does not offer aegis.workflow.logs`);
+  }
+  assert.deepEqual(failures, [], failures.join("; "));
+});
+
+test("GF4: the workflow and agentic modes' aegis.workflow.run line holds rule 2: the inputs read first from the mode's own tool that answers them (aegis.workflow.list, aegis.workflow.search), and every required input the request does not give asked for, test_command and test_image named", () => {
+  const failures: string[] = [];
+  for (const [mode, init] of GATE_MODES) {
+    const zaru = init()!;
+    const base = mode.split("+")[0];
+    const tool = INPUTS_TOOL[base];
+    const other = INPUTS_TOOL[base === "workflow" ? "agentic" : "workflow"];
+    const lines = toolLine(zaru.system_prompt, "aegis.workflow.run");
+    if (lines.length !== 1) {
+      failures.push(`the ${mode} prompt has ${lines.length} aegis.workflow.run lines, not 1`);
+      continue;
+    }
+    for (const sentence of [inputsReadSentence(tool), INPUTS_ASK_SENTENCE]) if (!lines[0].includes(sentence)) failures.push(`the ${mode} run line lacks: ${sentence}`);
+    if (!zaru.available_tools.includes(tool)) failures.push(`the ${mode} list does not offer ${tool}, which its run line names`);
+    if (lines[0].includes(other)) failures.push(`the ${mode} run line names ${other}, which its list does not offer`);
+  }
+  assert.deepEqual(failures, [], failures.join("; "));
+});
+
+test("GF5: no other mode's prompt holds a gate-fidelity sentence; the agentic prompt teaches no aegis.workflow.logs and its list offers none", () => {
+  const failures: string[] = [];
+  const all = [...FIDELITY_SENTENCES, SIGNAL_ID_SENTENCE, SIGNAL_AFTER_SENTENCE, LOGS_ID_SENTENCE, INPUTS_ASK_SENTENCE, ...Object.values(INPUTS_TOOL).map(inputsReadSentence)];
+  for (const [mode, init] of ALL_MODES) {
+    if (mode === "workflow" || mode === "agentic") continue;
+    const prompt = init!.system_prompt;
+    for (const sentence of all) if (prompt.includes(sentence)) failures.push(`the ${mode} prompt holds: ${sentence}`);
+  }
+  for (const [mode, init] of GATE_MODES.slice(2)) {
+    const zaru = init()!;
+    if (toolLine(zaru.system_prompt, "aegis.workflow.logs").length !== 0) failures.push(`the ${mode} prompt teaches aegis.workflow.logs`);
+    if (zaru.available_tools.includes("aegis.workflow.logs")) failures.push(`the ${mode} list offers aegis.workflow.logs`);
   }
   assert.deepEqual(failures, [], failures.join("; "));
 });
