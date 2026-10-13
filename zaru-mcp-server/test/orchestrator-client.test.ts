@@ -863,7 +863,7 @@ test("wait ceiling: a wait still running at the bound answers a tool result that
     still_running: true,
     timed_out: true,
     waited_seconds: 45,
-    message: `Execution ${RUNNING} is still running after 45s, iteration count 3. Repeat this same aegis.task.wait call to continue waiting.`,
+    message: `Execution ${RUNNING} is still running after 45s, iteration count 3. The run keeps going on its own; read it again only when the person asks.`,
   });
 });
 
@@ -896,7 +896,7 @@ test("wait ceiling: a tool whose name does not end in .wait is forwarded untouch
 test("wait ceiling: the wait tools' descriptions name the ceiling, and no other tool's changes", async () => {
   const { client } = waitClient(() => null, 45);
   const tools = await client.listTools(waitUser);
-  assert.match(tools[0]?.description ?? "", /^Waits\. On this server one call waits at most 45 seconds/);
+  assert.equal(tools[0]?.description, "Waits. On this server one call waits at most 45 seconds, whatever timeout_seconds asks: if the execution is still running then, the result says so; the run keeps going on its own, so read it again only when the person asks.");
   assert.equal(tools[1]?.description, "Status.");
 });
 

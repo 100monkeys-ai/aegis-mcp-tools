@@ -5,7 +5,8 @@
 // default of 300 seconds or more. On the Worker a tool whose name ends in
 // ".wait" asks the orchestrator for at most WAIT_CEILING_SECONDS, and an
 // execution still running at that bound comes back as an ordinary tool result
-// that says so and says that repeating the call continues the wait.
+// that says so and says that the run keeps going on its own, to be read again
+// only when the person asks, never by repeating the call in a loop.
 //
 // Run in the Workers runtime (wrangler's local workerd), as
 // worker-runtime.worker.test.ts is, against a stub orchestrator that records
@@ -241,8 +242,8 @@ test("wait ceiling: aegis.task.wait with timeout_seconds 300 asks the orchestrat
   assert.equal(answer.waited_seconds, 45, "the answer does not give the seconds waited");
   assert.match(
     String(answer.message),
-    /Repeat this same aegis\.task\.wait call to continue waiting\./,
-    `the answer does not say that repeating the call continues the wait: ${String(answer.message)}`,
+    /The run keeps going on its own; read it again only when the person asks\.$/,
+    `the answer does not say the run keeps going on its own and is read again only when the person asks: ${String(answer.message)}`,
   );
 });
 
@@ -288,7 +289,7 @@ test("wait ceiling: aegis.workflow.wait still running at the bound says so, with
   assert.equal(answer.waited_seconds, 45);
   assert.match(
     String(answer.message),
-    /Repeat this same aegis\.workflow\.wait call to continue waiting\./,
+    /The run keeps going on its own; read it again only when the person asks\.$/,
   );
 });
 
