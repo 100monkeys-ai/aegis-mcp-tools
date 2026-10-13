@@ -627,12 +627,17 @@ test("W41: after calling zaru.mode the model waits for the person", () => {
 // operator prompt's timeout line end the turn on a running wait in place of
 // waiting again or calling the wait until it ends (15 characters more in the
 // execute prompt, 93 in the operator prompt);
+// the agentic and workflow pins (and their chat-uploads forms) were
+// re-measured for gate-promise-wording (GP1 and GP2 at the end of this file):
+// each run line says each Human gate appears on that card and in Approvals,
+// the badge in the header, forbids any promise for after the turn, and reads
+// a run asked about later once (399 characters more in each);
 // every other pin stands as it was.
 const UNCHANGED_PROMPTS: Array<[string, () => ReturnType<typeof getZaruInit>, number, string]> = [
-  ["agentic", () => getZaruInit("agentic"), 19017, "6381ee3ee0f60bf8474940f412d2bcfff84c795548e40e160c3bccedd5b82ddb"],
-  ["agentic+chat-uploads", () => getZaruInit("agentic", new Set(["chat-uploads"])), 22827, "283ac570feead81ee664e902762ff714b5b6de6b69df8fe11919f667ef74b615"],
-  ["workflow", () => getZaruInit("workflow"), 15939, "6ca0b4aebd83808643ca097bb083fd560a65127da05debe367d99c0b6c7090df"],
-  ["workflow+chat-uploads", () => getZaruInit("workflow", new Set(["chat-uploads"])), 19749, "19df56929166a59abd8b874d1c702e01e3404ce56888d52a4266a7e942ff0e88"],
+  ["agentic", () => getZaruInit("agentic"), 19416, "e1bda22189360154b877d050fb6cc63e8e684544c39ab3d23b028353b9f4664c"],
+  ["agentic+chat-uploads", () => getZaruInit("agentic", new Set(["chat-uploads"])), 23226, "5956f7900f3de2eea1ec22fed4671326390267c9051994a54ab0601ac42562f5"],
+  ["workflow", () => getZaruInit("workflow"), 16338, "014608027fba22269bcc39373642710abe29cb3b014e427d6a88215dfb8e4203"],
+  ["workflow+chat-uploads", () => getZaruInit("workflow", new Set(["chat-uploads"])), 20148, "66eefd299cb499fe88cc752bb3a1b00d23a1faddb09fd96417f2ca1c2fc09b06"],
   ["execute", () => getZaruInit("execute"), 12713, "05e09176db7c4c0050b7a5a6510528b36e86715557eaef36905e486562878487"],
   ["live", () => getZaruInit("live", new Set(["live"]), "browser"), 8558, "f5affbdef392ee3aa57500ba914bb95b5e6a18a584e7d8c784e861c5234a2633"],
   ["vibecode", () => getZaruInit("vibecode", new Set(["vibecode"]), "browser"), 11988, "07c06d98d3ed02aa2092e81317541b2692a545c1960d90fc4fe2ddc2f0f547d7"],
@@ -2403,7 +2408,13 @@ const LOGS_ID_SENTENCE =
 
 /** After the run starts: say so, where it shows, and end the turn (the run line, both modes). */
 const STARTED_RUN_SENTENCE =
-  "When aegis.workflow.run answers `started`, tell the person the run has started, with its `execution_id`, that the card below shows its state as it runs, and that each Human gate will appear there and on Approvals for them to answer there, never in the chat; then end your turn without calling aegis.workflow.wait.";
+  "When aegis.workflow.run answers `started`, tell the person the run has started, with its `execution_id`, that the card below shows its state, and that each Human gate appears on that card and in Approvals, the badge in the header, for them to answer there, never in the chat; then end your turn without calling aegis.workflow.wait.";
+
+/** gate-promise-wording: no promise for after the turn; a later question is one read (the run line, both modes; GP1, GP2). */
+const NO_PROMISE_SENTENCES = [
+  "Your turn ends there and nothing of yours watches the run after it: never promise to bring a gate or its prompt into the chat later, to pass it on, show it or quote it when the run gets there, or to watch the run or come back to it; promise nothing for after your turn.",
+  "When the person asks about the run later, read it once with aegis.workflow.wait and answer from that one read.",
+];
 
 /** At most one wait a turn, only when asked, never in a loop; running is one sentence (the wait line, both modes). */
 const WAIT_ONCE_SENTENCES = [
@@ -2464,7 +2475,7 @@ const RUN_HEAD = "- `aegis.workflow.run`: Start a run of a workflow. Takes `name
 const RUN_TEACHING_AT_F332AA9C = `${RUN_HEAD} ${[...ONE_RUN_SENTENCES, ...DRAFT_ONLY_SENTENCES].join(" ")}`;
 
 /** The run line now: the inputs sentences after the arguments, naming the mode's own tool. */
-const runTeaching = (tool: string) => `${RUN_HEAD} ${inputsReadSentence(tool)} ${INPUTS_ASK_SENTENCE} ${TASK_WORDS_SENTENCE} ${[...ONE_RUN_SENTENCES, ...DRAFT_ONLY_SENTENCES, GATE_CONTROL_SENTENCE, STARTED_RUN_SENTENCE].join(" ")}`;
+const runTeaching = (tool: string) => `${RUN_HEAD} ${inputsReadSentence(tool)} ${INPUTS_ASK_SENTENCE} ${TASK_WORDS_SENTENCE} ${[...ONE_RUN_SENTENCES, ...DRAFT_ONLY_SENTENCES, GATE_CONTROL_SENTENCE, STARTED_RUN_SENTENCE, ...NO_PROMISE_SENTENCES].join(" ")}`;
 const WORKFLOW_RUN_TEACHING = runTeaching(INPUTS_TOOL.workflow);
 const AGENTIC_RUN_TEACHING = runTeaching(INPUTS_TOOL.agentic);
 
@@ -2976,5 +2987,43 @@ test("RY6: the operator and execute prompts end the turn on a running wait and n
   for (const [mode, prompt] of [["operator", operator], ["execute", execute]] as const)
     for (const pattern of [/wait again if/i, /keep calling/i, /AGAIN with the same execution_id/])
       if (pattern.test(prompt)) failures.push(`the ${mode} prompt holds ${pattern}`);
+  assert.deepEqual(failures, [], failures.join("; "));
+});
+
+// gate-promise-wording: after the run started, Zaru wrote "Each gate will
+// appear on the card and in Approvals for you to answer there; I'll surface
+// each gate's prompt here, verbatim, when the run reaches it." (Jeshua,
+// 2026-10-13T07:41:22Z, watching forge-browser-proof-6's run 7a237b3a). Its
+// turn had ended and nothing of it watches the run, so the promise could not
+// be kept: the gate is the person's, on the card and in Approvals, and the
+// companion neither relays nor answers it.
+
+/** A sentence in which the companion promises to come back with a gate. */
+const GATE_PROMISE = [/\bI'll\b/i, /\bI will\b/i, /\bsurface/i, /when the run reaches it/i];
+
+test("GP1: the workflow and agentic run lines say each Human gate appears on the card and in Approvals for the person to answer there, and forbid any promise for after the turn; no other mode's prompt holds it", () => {
+  const failures: string[] = [];
+  for (const [mode, init] of GATE_MODES) {
+    const run = toolLine(init()!.system_prompt, "aegis.workflow.run")[0] ?? "";
+    if (!run.includes("each Human gate appears on that card and in Approvals, the badge in the header, for them to answer there"))
+      failures.push(`the ${mode} run line does not say the gates appear on the card and in Approvals`);
+    if (!run.includes(`${STARTED_RUN_SENTENCE} ${NO_PROMISE_SENTENCES.join(" ")}`))
+      failures.push(`the ${mode} run line lacks, after the started-run sentence: ${NO_PROMISE_SENTENCES.join(" ")}`);
+  }
+  for (const [mode, init] of SIGNAL_MODES) {
+    if (mode.startsWith("workflow") || mode.startsWith("agentic")) continue;
+    for (const sentence of NO_PROMISE_SENTENCES) if (init()!.system_prompt.includes(sentence)) failures.push(`the ${mode} prompt holds: ${sentence}`);
+  }
+  assert.deepEqual(failures, [], failures.join("; "));
+});
+
+test("GP2: the workflow and agentic prompts carry no gate sentence in which the companion promises to surface, relay or show a gate later (\"I'll\", \"I will\", \"surface\", \"when the run reaches it\") or says a gate \"will appear\"", () => {
+  const failures: string[] = [];
+  for (const [mode, init] of GATE_MODES) {
+    for (const sentence of init()!.system_prompt.split(/(?<=[.!?])\s+/)) {
+      if (!/\bgates?\b/i.test(sentence)) continue;
+      for (const pattern of [...GATE_PROMISE, /\bwill appear\b/i]) if (pattern.test(sentence)) failures.push(`the ${mode} prompt holds (${pattern}): ${sentence}`);
+    }
+  }
   assert.deepEqual(failures, [], failures.join("; "));
 });
