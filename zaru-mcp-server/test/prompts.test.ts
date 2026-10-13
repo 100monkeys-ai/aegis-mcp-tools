@@ -605,12 +605,19 @@ test("W41: after calling zaru.mode the model waits for the person", () => {
 // the agentic prompt's run line gains the same sentence and its wait line the
 // person's control and the read after their answer (471 characters more in
 // each);
+// the agentic and workflow pins (and their chat-uploads forms) were
+// re-measured for the gate card (GK1 at the end of this file): each wait
+// line names the card under the run in this conversation, Approvals and the
+// run's execution page in place of the execution page on the AEGIS dashboard,
+// asks for no answer in the chat and says no gate answered unless the mode's
+// own run-reading tools answer so (134 characters more in each workflow
+// prompt, 111 in each agentic prompt);
 // every other pin stands as it was.
 const UNCHANGED_PROMPTS: Array<[string, () => ReturnType<typeof getZaruInit>, number, string]> = [
-  ["agentic", () => getZaruInit("agentic"), 17696, "839366286a5bbdc665ebdbbe22633bc7e2510ea9f4a4bc9d1f76dc6adf592fea"],
-  ["agentic+chat-uploads", () => getZaruInit("agentic", new Set(["chat-uploads"])), 21506, "30976cc3fe5eea78b133235d0fc1bf8e2efd72a880f7da95bcf80c7c65a70f45"],
-  ["workflow", () => getZaruInit("workflow"), 14229, "504235391ff9cf7d711e98f62e1664d3e30bbb6592c692037718fc7047b5edd2"],
-  ["workflow+chat-uploads", () => getZaruInit("workflow", new Set(["chat-uploads"])), 18039, "91eb4f7d324e9fdc9f02f4dc1e3e7173ec28fcad7103c68f5dcf37385cab8802"],
+  ["agentic", () => getZaruInit("agentic"), 17807, "767789b2ca603131a2242816670de648f62a3b7fb5fc467cd9bb8b7a71035cc9"],
+  ["agentic+chat-uploads", () => getZaruInit("agentic", new Set(["chat-uploads"])), 21617, "da29adba0e633d110b25efae54d5cd4bf41b907008a104cbb54f88c3b2070a38"],
+  ["workflow", () => getZaruInit("workflow"), 14363, "157818dac2aecfc616565a91628561b47de1c162c77747dd6439bb982bf86c29"],
+  ["workflow+chat-uploads", () => getZaruInit("workflow", new Set(["chat-uploads"])), 18173, "f47436daf6f846b9da226c31acf386fb337d93951bc3a23fa9de69155ed1090b"],
   ["execute", () => getZaruInit("execute"), 12698, "73bf0a2235583cebf9c0ae18a6d4539b997051031257a9efccb9f4fea212ce51"],
   ["live", () => getZaruInit("live", new Set(["live"]), "browser"), 8558, "f5affbdef392ee3aa57500ba914bb95b5e6a18a584e7d8c784e861c5234a2633"],
   ["vibecode", () => getZaruInit("vibecode", new Set(["vibecode"]), "browser"), 11988, "07c06d98d3ed02aa2092e81317541b2692a545c1960d90fc4fe2ddc2f0f547d7"],
@@ -2310,9 +2317,22 @@ const GATE_RULE_SENTENCES = [
 const GATE_CONTROL_SENTENCE =
   "A Human gate is the person's, answered by the person on their own control and never by you: you have no tool that answers a gate, and you never answer one for them or say one was answered unless a tool's answer shows it.";
 
-/** Where the person answers, and no yes or no asked for in the chat (both modes' wait lines). */
-const ON_CONTROL_CLAUSE =
-  "say that the run waits for their answer on their own control, the run's execution page on the AEGIS dashboard; never ask them for a yes or no in the chat, and end your turn.";
+/** The three places the person answers a gate, in Zaru Web's words. */
+const GATE_PLACES = "the card under the run in this conversation, or Approvals, or the run's execution page";
+
+/** The tools that read a run, per mode: the only ones whose answer says a gate was answered. */
+const GATE_READERS: Record<string, string> = {
+  workflow: "aegis.workflow.wait or aegis.workflow.logs",
+  agentic: "aegis.workflow.wait",
+};
+
+/** The wait line's clause after the gate's prompt, per mode. */
+const gatePlaceClause = (mode: string) =>
+  `say that the run waits for their answer on their own control: ${GATE_PLACES}; never ask them for their answer in the chat, never say the gate was answered unless ${GATE_READERS[mode]} answers so, and end your turn.`;
+
+/** Where the person answers, no answer asked for in the chat and none claimed without a tool's answer (each mode's wait line). */
+const ON_CONTROL_CLAUSE = gatePlaceClause("workflow");
+const AGENTIC_ON_CONTROL_CLAUSE = gatePlaceClause("agentic");
 
 /** After the person says they answered: the state read, never told (the workflow mode's logs line). */
 const LOGS_AFTER_SENTENCE =
@@ -2330,7 +2350,7 @@ const GATE_SHOWN_SENTENCES = [
 
 /** Rule 1 in the agentic mode's wait line. */
 const AGENTIC_GATE_SENTENCES = [
-  `When the run waits at a Human gate, show the person the gate's prompt whole, word for word, as the tool answered it, when the answer carries it, and ${ON_CONTROL_CLAUSE}`,
+  `When the run waits at a Human gate, show the person the gate's prompt whole, word for word, as the tool answered it, when the answer carries it, and ${AGENTIC_ON_CONTROL_CLAUSE}`,
   AGENTIC_AFTER_SENTENCE,
   "When the answer's status is `completed` while its current state is a Human gate, the run ended at that gate and did nothing after it: say so with its `execution_id` and the gate's name, never as a success.",
 ];
@@ -2466,7 +2486,7 @@ test("GC5: no prompt names a gate word for the model to send; no other mode's pr
   // 170) both read "Answer yes … or no with what to change."; the word is the
   // person's, sent from their own control, so no prompt teaches it.
   for (const [mode, init] of GATE_MODES) if (init()!.system_prompt.includes("`yes` or `no`, exactly")) failures.push(`the ${mode} prompt names \`yes\` or \`no\` for the model to send`);
-  const all = [...GATE_RULE_SENTENCES, ...GATE_SHOWN_SENTENCES, ...AGENTIC_GATE_SENTENCES, ...ONE_RUN_SENTENCES, ...DRAFT_ONLY_SENTENCES, GATE_CONTROL_SENTENCE, ON_CONTROL_CLAUSE, LOGS_AFTER_SENTENCE];
+  const all = [...GATE_RULE_SENTENCES, ...GATE_SHOWN_SENTENCES, ...AGENTIC_GATE_SENTENCES, ...ONE_RUN_SENTENCES, ...DRAFT_ONLY_SENTENCES, GATE_CONTROL_SENTENCE, ON_CONTROL_CLAUSE, AGENTIC_ON_CONTROL_CLAUSE, LOGS_AFTER_SENTENCE];
   for (const [mode, init] of ALL_MODES) {
     if (mode === "workflow" || mode === "agentic") continue;
     const prompt = init!.system_prompt;
@@ -2611,8 +2631,9 @@ test("GF5: no other mode's prompt holds a gate-fidelity sentence; the agentic pr
 // (run ec3f9b6b). A Human gate is answered by the person on their own control,
 // never by the model's tool call: no mode's tool list names the signal and no
 // mode's prompt teaches it; the run, wait and logs lines say the gate is the
-// person's control, name where they answer it (the run's execution page on
-// the AEGIS dashboard), ask for no yes or no in the chat, and read the state
+// person's control, name where they answer it (since the gate card, the card
+// under the run, Approvals or the run's execution page: GK1 below), ask for
+// no answer in the chat, and read the state
 // once the person says they answered. The tool itself stays: tools/list is the
 // orchestrator's catalogue for the caller, relayed unfiltered, so an external
 // MCP client (Claude Code) still lists and calls aegis.workflow.signal; the
@@ -2676,7 +2697,8 @@ test("SR3: the workflow and agentic prompts each carry the sentence that a Human
     const run = toolLine(prompt, "aegis.workflow.run")[0] ?? "";
     const wait = toolLine(prompt, "aegis.workflow.wait")[0] ?? "";
     if (!run.includes(GATE_CONTROL_SENTENCE)) failures.push(`the ${mode} run line lacks: ${GATE_CONTROL_SENTENCE}`);
-    if (!wait.includes(ON_CONTROL_CLAUSE)) failures.push(`the ${mode} wait line lacks: ${ON_CONTROL_CLAUSE}`);
+    const clause = mode.startsWith("workflow") ? ON_CONTROL_CLAUSE : AGENTIC_ON_CONTROL_CLAUSE;
+    if (!wait.includes(clause)) failures.push(`the ${mode} wait line lacks: ${clause}`);
     const after = mode.startsWith("workflow") ? toolLine(prompt, "aegis.workflow.logs")[0] ?? "" : wait;
     const sentence = mode.startsWith("workflow") ? LOGS_AFTER_SENTENCE : AGENTIC_AFTER_SENTENCE;
     if (!after.includes(sentence)) failures.push(`the ${mode} prompt lacks: ${sentence}`);
@@ -2713,5 +2735,41 @@ test("SR4: the server still lists aegis.workflow.signal on tools/list for a Zaru
     }
   }
   for (const [mode, init] of SIGNAL_MODES) if (init()!.available_tools.includes(SIGNAL)) failures.push(`the ${mode} list names ${SIGNAL}`);
+  assert.deepEqual(failures, [], failures.join("; "));
+});
+
+// ---------------------------------------------------------------------------
+// The gate card (Zaru ADR-0058's Update "gate-card-2026-10-13", D5g to D5k;
+// Jeshua, 2026-10-13T02:19:18Z: "Zaru Web should not have access to approve,
+// because that defeats the purpose."; on the gate joining the approvals
+// queue, screen and chat card, 02:27:01Z: "Perfect"). Zaru Web shows a run's
+// pending Human gate as a card under the run in the conversation that started
+// it, on Approvals and on the run's execution page (zaru-client 70381f63). The
+// workflow and agentic modes name those three places, in those words, where
+// the person answers; the run waits for the answer there and Zaru ends its
+// turn, never asks for the answer in the chat, and never says the gate was
+// answered unless the tools of the mode's own list that read the run answer
+// so (the workflow mode's aegis.workflow.wait and aegis.workflow.logs; the
+// agentic mode's aegis.workflow.wait, its list offering no logs). The
+// execution page on the AEGIS dashboard is no longer named alone.
+// ---------------------------------------------------------------------------
+
+
+test("GK1: the workflow and agentic wait lines name the card under the run, Approvals and the run's execution page as where the person answers, end the turn, ask for no answer in the chat and say no gate answered unless the mode's own run-reading tools answer so; no prompt names the dashboard page alone", () => {
+  const failures: string[] = [];
+  for (const [mode, init] of GATE_MODES) {
+    const zaru = init()!;
+    const base = mode.split("+")[0];
+    const wait = toolLine(zaru.system_prompt, "aegis.workflow.wait")[0] ?? "";
+    const clause = gatePlaceClause(base);
+    if (!wait.includes(clause)) failures.push(`the ${mode} wait line lacks: ${clause}`);
+    if (zaru.system_prompt.includes("execution page on the AEGIS dashboard")) failures.push(`the ${mode} prompt names the execution page on the AEGIS dashboard`);
+    for (const tool of GATE_READERS[base].split(" or ")) if (!zaru.available_tools.includes(tool)) failures.push(`the ${mode} wait line names ${tool}, which its list does not offer`);
+  }
+  for (const [mode, init] of SIGNAL_MODES) {
+    if (mode.startsWith("workflow") || mode.startsWith("agentic")) continue;
+    const prompt = init()!.system_prompt;
+    if (prompt.includes(GATE_PLACES)) failures.push(`the ${mode} prompt names where a gate is answered`);
+  }
   assert.deepEqual(failures, [], failures.join("; "));
 });
