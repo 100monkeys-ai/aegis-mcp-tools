@@ -612,16 +612,31 @@ test("W41: after calling zaru.mode the model waits for the person", () => {
 // asks for no answer in the chat and says no gate answered unless the mode's
 // own run-reading tools answer so (134 characters more in each workflow
 // prompt, 111 in each agentic prompt);
+// the agentic and workflow pins (and their chat-uploads forms) were
+// re-measured for run-then-yield (RY1 to RY4 at the end of this file): each
+// run line ends the turn after a started run, naming the card below and
+// Approvals; each wait line reads a run at most once a turn, only when the
+// person asks, and ends the turn on a running answer; the workflow logs line
+// the same; the agentic Steps 1 to 3 and the workflow Steps 3 and 5 read
+// their wait once and end the turn on a running answer, and agentic Step 3
+// no longer says the wait blocks until the execution finishes; each run
+// line names `task` as the person's own words (RY5) (1576 characters more in
+// each workflow prompt, 1210 in each agentic prompt);
+// the execute and operator pins were re-measured for run-then-yield-C2
+// (RY6 at the end of this file): the execute prompt's Step 3 line and the
+// operator prompt's timeout line end the turn on a running wait in place of
+// waiting again or calling the wait until it ends (15 characters more in the
+// execute prompt, 93 in the operator prompt);
 // every other pin stands as it was.
 const UNCHANGED_PROMPTS: Array<[string, () => ReturnType<typeof getZaruInit>, number, string]> = [
-  ["agentic", () => getZaruInit("agentic"), 17807, "767789b2ca603131a2242816670de648f62a3b7fb5fc467cd9bb8b7a71035cc9"],
-  ["agentic+chat-uploads", () => getZaruInit("agentic", new Set(["chat-uploads"])), 21617, "da29adba0e633d110b25efae54d5cd4bf41b907008a104cbb54f88c3b2070a38"],
-  ["workflow", () => getZaruInit("workflow"), 14363, "157818dac2aecfc616565a91628561b47de1c162c77747dd6439bb982bf86c29"],
-  ["workflow+chat-uploads", () => getZaruInit("workflow", new Set(["chat-uploads"])), 18173, "f47436daf6f846b9da226c31acf386fb337d93951bc3a23fa9de69155ed1090b"],
-  ["execute", () => getZaruInit("execute"), 12698, "73bf0a2235583cebf9c0ae18a6d4539b997051031257a9efccb9f4fea212ce51"],
+  ["agentic", () => getZaruInit("agentic"), 19017, "6381ee3ee0f60bf8474940f412d2bcfff84c795548e40e160c3bccedd5b82ddb"],
+  ["agentic+chat-uploads", () => getZaruInit("agentic", new Set(["chat-uploads"])), 22827, "283ac570feead81ee664e902762ff714b5b6de6b69df8fe11919f667ef74b615"],
+  ["workflow", () => getZaruInit("workflow"), 15939, "6ca0b4aebd83808643ca097bb083fd560a65127da05debe367d99c0b6c7090df"],
+  ["workflow+chat-uploads", () => getZaruInit("workflow", new Set(["chat-uploads"])), 19749, "19df56929166a59abd8b874d1c702e01e3404ce56888d52a4266a7e942ff0e88"],
+  ["execute", () => getZaruInit("execute"), 12713, "05e09176db7c4c0050b7a5a6510528b36e86715557eaef36905e486562878487"],
   ["live", () => getZaruInit("live", new Set(["live"]), "browser"), 8558, "f5affbdef392ee3aa57500ba914bb95b5e6a18a584e7d8c784e861c5234a2633"],
   ["vibecode", () => getZaruInit("vibecode", new Set(["vibecode"]), "browser"), 11988, "07c06d98d3ed02aa2092e81317541b2692a545c1960d90fc4fe2ddc2f0f547d7"],
-  ["operator", () => getZaruInit("operator", new Set(), undefined, { isOperator: true, tier: "operator" }), 10719, "a8815cc691f8e296b4703fde20e6a7bdb372ed9ea856478a4e505312be6a49d5"],
+  ["operator", () => getZaruInit("operator", new Set(), undefined, { isOperator: true, tier: "operator" }), 10812, "bf0e596ee323459b39033f16780bf27b62563c231ba2113ab62d86f2c2fdb234"],
 ];
 
 test("W41: every other mode's prompt is unchanged byte for byte", () => {
@@ -2386,28 +2401,85 @@ const FIDELITY_SENTENCES = [
 const LOGS_ID_SENTENCE =
   "Takes `execution_id`, always the one aegis.workflow.run answered for that run, on every call; a call without it is refused with \"required field 'execution_id' is missing or null\".";
 
+/** After the run starts: say so, where it shows, and end the turn (the run line, both modes). */
+const STARTED_RUN_SENTENCE =
+  "When aegis.workflow.run answers `started`, tell the person the run has started, with its `execution_id`, that the card below shows its state as it runs, and that each Human gate will appear there and on Approvals for them to answer there, never in the chat; then end your turn without calling aegis.workflow.wait.";
+
+/** At most one wait a turn, only when asked, never in a loop; running is one sentence (the wait line, both modes). */
+const WAIT_ONCE_SENTENCES = [
+  "Call aegis.workflow.wait at most once in a turn and never in a loop: only when the person asks what a run is doing now or what it produced, a run they ask about later included, or when the person says they have answered its gate.",
+  "When its answer reads running, say so in one sentence and end your turn.",
+];
+
+/** Logs only for a gate's prompt, the run's history or an ended run (the workflow mode's logs line). */
+const LOGS_WHEN_SENTENCES = [
+  "Call aegis.workflow.logs at most once in a turn and never in a loop: only to read the prompt of the gate aegis.workflow.wait answered the run waits at, when the person asks for the run's history, when the person says they have answered its gate, or when the run has ended; never to see whether a run is still going.",
+  "When its answer shows the run still running, say so in one sentence and end your turn.",
+];
+
+/** An agent or task wait that answers running: one sentence, the card named, the turn ended. */
+const EXECUTION_RUNNING_SENTENCE =
+  "Call it once in this turn and never in a loop: when it answers that the execution is still running, say so in one sentence with its `execution_id` and that the card below shows its state as it runs, and end your turn.";
+
+/** The same, where the card's live state is not read for every wait the step names (the workflow mode's Step 3). */
+const GENERATE_RUNNING_SENTENCE =
+  "Call it once in this turn and never in a loop: when it answers that the execution is still running, say so in one sentence with its `execution_id` and end your turn.";
+
+/** Agentic Step 1, a matching workflow: started, the turn ended, the result when asked. */
+const AGENTIC_STEP1_WORKFLOW =
+  "If a matching workflow exists, run it with aegis.workflow.run, tell the person it has started and end your turn without calling aegis.workflow.wait, as its TOOL KNOWLEDGE line says; Step 4 reports its result when the person asks for it.";
+
+/** The agentic and workflow Steps' text before the run-then-yield sentences (the history tests compare against it). */
+const STEPS_BEFORE_RUN_THEN_YIELD: Array<[string, string]> = [
+  [AGENTIC_STEP1_WORKFLOW, "If a matching workflow exists, run it with aegis.workflow.run, call aegis.workflow.wait with the execution_id it returns, then go to Step 4."],
+  [
+    `You MUST then immediately call aegis.task.wait with that execution_id; it waits server-side for the execution. Do NOT respond to the user before it answers, and do NOT say "I'll let you know when it's ready". ${EXECUTION_RUNNING_SENTENCE} `,
+    `You MUST then immediately call aegis.task.wait with that execution_id. aegis.task.wait blocks server-side until the execution finishes. Call it once and wait. Do NOT respond to the user, do NOT say "I'll let you know when it's ready", do NOT say "it's in progress" — just call aegis.task.wait and wait for it to return. `,
+  ],
+  [`do not proceed until it returns. ${EXECUTION_RUNNING_SENTENCE} `, "do not proceed until it returns. "],
+  [`until the wait tool returns. ${GENERATE_RUNNING_SENTENCE} `, "until the wait tool returns. "],
+  [`with the returned execution_id. ${EXECUTION_RUNNING_SENTENCE} `, "with the returned execution_id. "],
+  // run-then-yield-C2: the execute and operator lines (RY6).
+  [
+    "say in one sentence that it is still running, with its `execution_id`, and end your turn; call aegis.execute.wait again only when the person asks, never in a loop. Do NOT fall back",
+    "call aegis.execute.wait AGAIN with the same execution_id. Keep calling aegis.execute.wait until you get a terminal status (\"completed\" or \"failed\"). Do NOT fall back",
+  ],
+  [
+    "returns before the workflow finishes, say in one sentence that it is still running, with its `execution_id`, and end your turn; read it again only when the person asks, never in a loop.",
+    "returns before the workflow finishes, check the status and wait again if it's still running.",
+  ],
+];
+
+/** A prompt with the run-then-yield sentences of its Steps taken out, as it stood at 2d29b3b1 outside its TOOL KNOWLEDGE. */
+const stripRunThenYieldSteps = (prompt: string) =>
+  STEPS_BEFORE_RUN_THEN_YIELD.reduce((text, [now, before]) => text.replace(now, before), prompt);
+
+/** run-then-yield-C1: `task` is the person's own words (the run line, both modes; RY5). */
+const TASK_WORDS_SENTENCE =
+  "Every required input is filled, and `task` is the person's request in their own words, as they wrote it: never a paraphrase, never a task you composed, and never left out.";
+
 const RUN_HEAD = "- `aegis.workflow.run`: Start a run of a workflow. Takes `name`, `input` and, for a workflow that works on a repository, `repositories`.";
 
 /** The run line at f332aa9c, the same in the workflow and agentic modes. */
 const RUN_TEACHING_AT_F332AA9C = `${RUN_HEAD} ${[...ONE_RUN_SENTENCES, ...DRAFT_ONLY_SENTENCES].join(" ")}`;
 
 /** The run line now: the inputs sentences after the arguments, naming the mode's own tool. */
-const runTeaching = (tool: string) => `${RUN_HEAD} ${inputsReadSentence(tool)} ${INPUTS_ASK_SENTENCE} ${[...ONE_RUN_SENTENCES, ...DRAFT_ONLY_SENTENCES, GATE_CONTROL_SENTENCE].join(" ")}`;
+const runTeaching = (tool: string) => `${RUN_HEAD} ${inputsReadSentence(tool)} ${INPUTS_ASK_SENTENCE} ${TASK_WORDS_SENTENCE} ${[...ONE_RUN_SENTENCES, ...DRAFT_ONLY_SENTENCES, GATE_CONTROL_SENTENCE, STARTED_RUN_SENTENCE].join(" ")}`;
 const WORKFLOW_RUN_TEACHING = runTeaching(INPUTS_TOOL.workflow);
 const AGENTIC_RUN_TEACHING = runTeaching(INPUTS_TOOL.agentic);
 
 /** The workflow mode's wait line. */
-const WORKFLOW_WAIT_TEACHING = `- \`aegis.workflow.wait\`: Wait for a run you started. Takes its \`execution_id\`. ${GATE_SHOWN_SENTENCES.join(" ")} ${FIDELITY_SENTENCES.join(" ")}`;
+const WORKFLOW_WAIT_TEACHING = `- \`aegis.workflow.wait\`: Wait for a run you started. Takes its \`execution_id\`. ${WAIT_ONCE_SENTENCES.join(" ")} ${GATE_SHOWN_SENTENCES.join(" ")} ${FIDELITY_SENTENCES.join(" ")}`;
 
 /** The agentic mode's wait line. */
-const AGENTIC_WAIT_TEACHING = `- \`aegis.workflow.wait\`: Wait for a run you started. Takes its \`execution_id\`. ${AGENTIC_GATE_SENTENCES.join(" ")} ${FIDELITY_SENTENCES.join(" ")}`;
+const AGENTIC_WAIT_TEACHING = `- \`aegis.workflow.wait\`: Wait for a run you started. Takes its \`execution_id\`. ${WAIT_ONCE_SENTENCES.join(" ")} ${AGENTIC_GATE_SENTENCES.join(" ")} ${FIDELITY_SENTENCES.join(" ")}`;
 
 /** The workflow mode's logs line, the last of its TOOL KNOWLEDGE. */
-const WORKFLOW_LOGS_TEACHING = `- \`aegis.workflow.logs\`: Read a run's events, among them each gate's \`HumanInputRequested\` event with its \`prompt\`. ${LOGS_ID_SENTENCE} ${LOGS_AFTER_SENTENCE} Never say what a run did without this tool's or aegis.workflow.wait's answer.`;
+const WORKFLOW_LOGS_TEACHING = `- \`aegis.workflow.logs\`: Read a run's events, among them each gate's \`HumanInputRequested\` event with its \`prompt\`. ${LOGS_ID_SENTENCE} ${LOGS_WHEN_SENTENCES.join(" ")} ${LOGS_AFTER_SENTENCE} Never say what a run did without this tool's or aegis.workflow.wait's answer.`;
 
 /** A prompt with the gate-conduct lines removed and the signal line put back as it stood at 4791cab1, the first line of the workflow prompt's TOOL KNOWLEDGE before create: the history tests compare this with their pins. */
 const stripGateConduct = (prompt: string) =>
-  prompt
+  stripRunThenYieldSteps(prompt)
     .replace(`\n${WORKFLOW_RUN_TEACHING}`, "")
     .replace(`\n${AGENTIC_RUN_TEACHING}`, "")
     .replace(`\n${WORKFLOW_WAIT_TEACHING}`, "")
@@ -2771,5 +2843,138 @@ test("GK1: the workflow and agentic wait lines name the card under the run, Appr
     const prompt = init()!.system_prompt;
     if (prompt.includes(GATE_PLACES)) failures.push(`the ${mode} prompt names where a gate is answered`);
   }
+  assert.deepEqual(failures, [], failures.join("; "));
+});
+
+// ---------------------------------------------------------------------------
+// Run, then yield (Jeshua, 2026-10-13T05:08:30Z, on a conversation where Zaru
+// spent its turn's steps on aegis.workflow.wait and aegis.workflow.logs calls
+// answering "Still running", then ended on "I used all my steps for this turn
+// before finishing.": "Should we double the number of steps in workflow and
+// agentic mode?"). Not the budget but the conduct: Zaru Web shows a run's
+// state as it runs under the run (zaru-client 57270834: a wait card that read
+// running reads the run every five seconds until it ends; a workflow run on
+// its own route, an agent, task or execute run on /api/executions/{id}) and a
+// run's Human gate as a card under the run and on Approvals (70381f63), so
+// the companion has nothing to poll for. After aegis.workflow.run answers
+// started, Zaru says so with the execution_id, where the run's state and its
+// gates will show, and ends its turn; it reads a run at most once a turn,
+// only when the person asks about it, never in a loop; a read that answers
+// running is one sentence and the end of the turn. The agentic mode's agent
+// and task waits, and the workflow mode's, follow the same rule when their
+// answer reads running. These tests pin the text; whether the model obeys it
+// is proved on the live page only.
+// ---------------------------------------------------------------------------
+
+/** Sentences that told the model to keep waiting, poll or repeat a wait. */
+const KEEP_WAITING = [
+  /keep (calling|waiting|polling)/i,
+  /continue (the |to )?wait/i,
+  /\bpoll(s|ing|ed)?\b/i,
+  /wait for it to return/i,
+  /Call it once and wait\b/,
+  /blocks server-side until/i,
+  /wait again if/i,
+  /repeat (this|the same)\b[^.]*\bcall/i,
+  /call aegis\.workflow\.wait with the execution_id it returns/,
+];
+
+test("RY1: the workflow and agentic run lines end the turn after a started run, saying the execution_id, the card below and the gates there and on Approvals; no other mode's prompt holds it", () => {
+  const failures: string[] = [];
+  for (const [mode, init] of GATE_MODES) {
+    const run = toolLine(init()!.system_prompt, "aegis.workflow.run")[0] ?? "";
+    if (!run.includes(STARTED_RUN_SENTENCE)) failures.push(`the ${mode} run line lacks: ${STARTED_RUN_SENTENCE}`);
+  }
+  for (const [mode, init] of SIGNAL_MODES) {
+    if (mode.startsWith("workflow") || mode.startsWith("agentic")) continue;
+    if (init()!.system_prompt.includes(STARTED_RUN_SENTENCE)) failures.push(`the ${mode} prompt holds the started-run sentence`);
+  }
+  assert.deepEqual(failures, [], failures.join("; "));
+});
+
+test("RY2: the workflow and agentic wait lines read a run at most once a turn, only when the person asks, never in a loop, and a running answer is one sentence and the end of the turn; the workflow logs line the same, for a gate's prompt, the history or an ended run", () => {
+  const failures: string[] = [];
+  for (const [mode, init] of GATE_MODES) {
+    const prompt = init()!.system_prompt;
+    const wait = toolLine(prompt, "aegis.workflow.wait")[0] ?? "";
+    for (const sentence of WAIT_ONCE_SENTENCES) if (!wait.includes(sentence)) failures.push(`the ${mode} wait line lacks: ${sentence}`);
+    if (mode.startsWith("workflow")) {
+      const logs = toolLine(prompt, "aegis.workflow.logs")[0] ?? "";
+      for (const sentence of LOGS_WHEN_SENTENCES) if (!logs.includes(sentence)) failures.push(`the ${mode} logs line lacks: ${sentence}`);
+    }
+  }
+  assert.deepEqual(failures, [], failures.join("; "));
+});
+
+test("RY3: the agentic Steps 2 and 3 and the workflow Steps 3 and 5 read their wait once and end the turn on a running answer; agentic Step 1 ends the turn after a started workflow run", () => {
+  const failures: string[] = [];
+  const step = (prompt: string, from: string, to: string) => {
+    const start = prompt.indexOf(from);
+    return start < 0 ? "" : prompt.slice(start, prompt.indexOf(to, start));
+  };
+  const holders: Array<[string, string, string, string]> = [
+    ["agentic", "**Step 2", "**Step 3", EXECUTION_RUNNING_SENTENCE],
+    ["agentic", "**Step 3", "**Step 4", EXECUTION_RUNNING_SENTENCE],
+    ["workflow", "**Step 3", "**Step 4", GENERATE_RUNNING_SENTENCE],
+    ["workflow", "**Step 5", "**Step 6", EXECUTION_RUNNING_SENTENCE],
+  ];
+  for (const [mode, init] of GATE_MODES) {
+    const prompt = init()!.system_prompt;
+    for (const [holder, from, to, sentence] of holders) {
+      if (!mode.startsWith(holder)) continue;
+      if (!step(prompt, from, to).includes(sentence)) failures.push(`the ${mode} ${from.slice(2)} lacks: ${sentence}`);
+    }
+    if (mode.startsWith("agentic") && !step(prompt, "**Step 1", "**Step 2").includes(AGENTIC_STEP1_WORKFLOW))
+      failures.push(`the ${mode} Step 1 does not end the turn after a started workflow run`);
+  }
+  assert.deepEqual(failures, [], failures.join("; "));
+});
+
+test("RY4: the workflow and agentic prompts carry no sentence that tells the model to keep waiting, poll, repeat a wait or continue the wait", () => {
+  const failures: string[] = [];
+  for (const [mode, init] of GATE_MODES) {
+    for (const sentence of init()!.system_prompt.split(/(?<=[.!?])\s+/))
+      for (const pattern of KEEP_WAITING) if (pattern.test(sentence)) failures.push(`the ${mode} prompt holds (${pattern}): ${sentence}`);
+  }
+  assert.deepEqual(failures, [], failures.join("; "));
+});
+
+// run-then-yield-C1: before the run, `task` is the person's request in their
+// own words (forge-browser-proof-5, 04:56Z: the first call was refused
+// "Input validation failed: "task" is a required property" although the
+// person's sentence was the task; the second sent a composed task "Make a
+// small, sensible change to README.md (fix a typo, …)").
+
+test("RY5: the workflow and agentic run lines name `task` as the person's own words, never a paraphrase and never left out, right after the required inputs are asked for; no other mode's prompt holds it", () => {
+  const failures: string[] = [];
+  for (const [mode, init] of GATE_MODES) {
+    const run = toolLine(init()!.system_prompt, "aegis.workflow.run")[0] ?? "";
+    if (!run.includes(`${INPUTS_ASK_SENTENCE} ${TASK_WORDS_SENTENCE}`)) failures.push(`the ${mode} run line lacks, after the inputs sentence: ${TASK_WORDS_SENTENCE}`);
+  }
+  for (const [mode, init] of SIGNAL_MODES) {
+    if (mode.startsWith("workflow") || mode.startsWith("agentic")) continue;
+    if (init()!.system_prompt.includes(TASK_WORDS_SENTENCE)) failures.push(`the ${mode} prompt holds the task sentence`);
+  }
+  assert.deepEqual(failures, [], failures.join("; "));
+});
+
+// run-then-yield-C2: the operator and execute modes' lines that told the
+// model to wait again or keep calling a wait read the same rule: a wait that
+// answers running is one sentence and the end of the turn; read again only
+// when the person asks, never in a loop.
+const OPERATOR_RUNNING_LINE =
+  "- If aegis.workflow.wait returns before the workflow finishes, say in one sentence that it is still running, with its `execution_id`, and end your turn; read it again only when the person asks, never in a loop.";
+const EXECUTE_RUNNING_LINE =
+  "- If aegis.execute.wait returns with status \"running\" (server-side timeout before pipeline finished), say in one sentence that it is still running, with its `execution_id`, and end your turn; call aegis.execute.wait again only when the person asks, never in a loop. Do NOT fall back to aegis.execute.status — always use aegis.execute.wait.";
+
+test("RY6: the operator and execute prompts end the turn on a running wait and no longer tell the model to wait again or keep calling the wait", () => {
+  const failures: string[] = [];
+  const operator = getZaruInit("operator", new Set(), undefined, { isOperator: true, tier: "operator" })!.system_prompt;
+  const execute = getZaruInit("execute")!.system_prompt;
+  if (!operator.split("\n").includes(OPERATOR_RUNNING_LINE)) failures.push(`the operator prompt lacks: ${OPERATOR_RUNNING_LINE}`);
+  if (!execute.split("\n").includes(EXECUTE_RUNNING_LINE)) failures.push(`the execute prompt lacks: ${EXECUTE_RUNNING_LINE}`);
+  for (const [mode, prompt] of [["operator", operator], ["execute", execute]] as const)
+    for (const pattern of [/wait again if/i, /keep calling/i, /AGAIN with the same execution_id/])
+      if (pattern.test(prompt)) failures.push(`the ${mode} prompt holds ${pattern}`);
   assert.deepEqual(failures, [], failures.join("; "));
 });

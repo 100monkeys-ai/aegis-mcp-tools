@@ -133,7 +133,7 @@ export function stillRunningResult(
     waited_seconds: waitSeconds,
     message:
       `Execution ${String(executionId)} is still ${status} after ${waitSeconds}s${progress}. ` +
-      `Repeat this same ${toolName} call to continue waiting.`,
+      `The run keeps going on its own; read it again only when the person asks.`,
   };
   return {
     content: [{ type: "text", text: JSON.stringify(body, null, 2) }],
@@ -147,7 +147,7 @@ function describeWaitCeiling(
 ): AegisToolDefinition {
   const sentence =
     `On this server one call waits at most ${ceiling} seconds, whatever timeout_seconds asks: ` +
-    `if the execution is still running then, the result says so, and repeating the same call continues the wait.`;
+    `if the execution is still running then, the result says so; the run keeps going on its own, so read it again only when the person asks.`;
   return {
     ...tool,
     description: tool.description ? `${tool.description} ${sentence}` : sentence,
