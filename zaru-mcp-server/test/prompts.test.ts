@@ -614,7 +614,7 @@ test("W41: after calling zaru.mode the model waits for the person", () => {
 // prompt, 111 in each agentic prompt);
 // the agentic and workflow pins (and their chat-uploads forms) were
 // re-measured for run-then-yield (RY1 to RY4 at the end of this file): each
-// run line ends the turn after a started run, naming the card below and
+// run line ends the turn after a started run, naming the card above and
 // Approvals; each wait line reads a run at most once a turn, only when the
 // person asks, and ends the turn on a running answer; the workflow logs line
 // the same; the agentic Steps 1 to 3 and the workflow Steps 3 and 5 read
@@ -632,12 +632,18 @@ test("W41: after calling zaru.mode the model waits for the person", () => {
 // each run line says each Human gate appears on that card and in Approvals,
 // the badge in the header, forbids any promise for after the turn, and reads
 // a run asked about later once (399 characters more in each);
+// the agentic and workflow pins (and their chat-uploads forms) were
+// re-measured for card-above-wording (CA1 to CA3 at the end of this file):
+// each card the answer names is the card above it, and the agentic run line
+// (Step 3) and the workflow test-execution line (Step 5) carry the run line's
+// sentence that promises nothing for after the turn (270 characters more in
+// each);
 // every other pin stands as it was.
 const UNCHANGED_PROMPTS: Array<[string, () => ReturnType<typeof getZaruInit>, number, string]> = [
-  ["agentic", () => getZaruInit("agentic"), 19416, "e1bda22189360154b877d050fb6cc63e8e684544c39ab3d23b028353b9f4664c"],
-  ["agentic+chat-uploads", () => getZaruInit("agentic", new Set(["chat-uploads"])), 23226, "5956f7900f3de2eea1ec22fed4671326390267c9051994a54ab0601ac42562f5"],
-  ["workflow", () => getZaruInit("workflow"), 16338, "014608027fba22269bcc39373642710abe29cb3b014e427d6a88215dfb8e4203"],
-  ["workflow+chat-uploads", () => getZaruInit("workflow", new Set(["chat-uploads"])), 20148, "66eefd299cb499fe88cc752bb3a1b00d23a1faddb09fd96417f2ca1c2fc09b06"],
+  ["agentic", () => getZaruInit("agentic"), 19686, "667060b321689384e5b81526ad39fe68c6703a618d5916cc4638e4ad6830ea39"],
+  ["agentic+chat-uploads", () => getZaruInit("agentic", new Set(["chat-uploads"])), 23496, "f9064301e87980dff271060ba2ef96234b5f9bac25f846948609ba5aed31f547"],
+  ["workflow", () => getZaruInit("workflow"), 16608, "75a7a17507fe459a8168a0f895c55d9f7842ee625ee40febd1712253e18e084b"],
+  ["workflow+chat-uploads", () => getZaruInit("workflow", new Set(["chat-uploads"])), 20418, "bfdef5ff734210ed47047c97b3a98978d9f093d5dc037228dc0e814e94ccde02"],
   ["execute", () => getZaruInit("execute"), 12713, "05e09176db7c4c0050b7a5a6510528b36e86715557eaef36905e486562878487"],
   ["live", () => getZaruInit("live", new Set(["live"]), "browser"), 8558, "f5affbdef392ee3aa57500ba914bb95b5e6a18a584e7d8c784e861c5234a2633"],
   ["vibecode", () => getZaruInit("vibecode", new Set(["vibecode"]), "browser"), 11988, "07c06d98d3ed02aa2092e81317541b2692a545c1960d90fc4fe2ddc2f0f547d7"],
@@ -2408,7 +2414,7 @@ const LOGS_ID_SENTENCE =
 
 /** After the run starts: say so, where it shows, and end the turn (the run line, both modes). */
 const STARTED_RUN_SENTENCE =
-  "When aegis.workflow.run answers `started`, tell the person the run has started, with its `execution_id`, that the card below shows its state, and that each Human gate appears on that card and in Approvals, the badge in the header, for them to answer there, never in the chat; then end your turn without calling aegis.workflow.wait.";
+  "When aegis.workflow.run answers `started`, tell the person the run has started, with its `execution_id`, that the card above shows its state, and that each Human gate appears on that card and in Approvals, the badge in the header, for them to answer there, never in the chat; then end your turn without calling aegis.workflow.wait.";
 
 /** gate-promise-wording: no promise for after the turn; a later question is one read (the run line, both modes; GP1, GP2). */
 const NO_PROMISE_SENTENCES = [
@@ -2430,7 +2436,10 @@ const LOGS_WHEN_SENTENCES = [
 
 /** An agent or task wait that answers running: one sentence, the card named, the turn ended. */
 const EXECUTION_RUNNING_SENTENCE =
-  "Call it once in this turn and never in a loop: when it answers that the execution is still running, say so in one sentence with its `execution_id` and that the card below shows its state as it runs, and end your turn.";
+  "Call it once in this turn and never in a loop: when it answers that the execution is still running, say so in one sentence with its `execution_id` and that the card above shows its state as it runs, and end your turn.";
+
+/** card-above-wording: the workflow run line's no-promise sentence, carried verbatim onto the agentic run line (Step 3) and the workflow test-execution line (Step 5), after the running sentence (CA2, CA3). */
+const EXECUTION_NO_PROMISE_SENTENCE = NO_PROMISE_SENTENCES[0];
 
 /** The same, where the card's live state is not read for every wait the step names (the workflow mode's Step 3). */
 const GENERATE_RUNNING_SENTENCE =
@@ -2444,12 +2453,12 @@ const AGENTIC_STEP1_WORKFLOW =
 const STEPS_BEFORE_RUN_THEN_YIELD: Array<[string, string]> = [
   [AGENTIC_STEP1_WORKFLOW, "If a matching workflow exists, run it with aegis.workflow.run, call aegis.workflow.wait with the execution_id it returns, then go to Step 4."],
   [
-    `You MUST then immediately call aegis.task.wait with that execution_id; it waits server-side for the execution. Do NOT respond to the user before it answers, and do NOT say "I'll let you know when it's ready". ${EXECUTION_RUNNING_SENTENCE} `,
+    `You MUST then immediately call aegis.task.wait with that execution_id; it waits server-side for the execution. Do NOT respond to the user before it answers, and do NOT say "I'll let you know when it's ready". ${EXECUTION_RUNNING_SENTENCE} ${EXECUTION_NO_PROMISE_SENTENCE} `,
     `You MUST then immediately call aegis.task.wait with that execution_id. aegis.task.wait blocks server-side until the execution finishes. Call it once and wait. Do NOT respond to the user, do NOT say "I'll let you know when it's ready", do NOT say "it's in progress" — just call aegis.task.wait and wait for it to return. `,
   ],
   [`do not proceed until it returns. ${EXECUTION_RUNNING_SENTENCE} `, "do not proceed until it returns. "],
   [`until the wait tool returns. ${GENERATE_RUNNING_SENTENCE} `, "until the wait tool returns. "],
-  [`with the returned execution_id. ${EXECUTION_RUNNING_SENTENCE} `, "with the returned execution_id. "],
+  [`with the returned execution_id. ${EXECUTION_RUNNING_SENTENCE} ${EXECUTION_NO_PROMISE_SENTENCE} `, "with the returned execution_id. "],
   // run-then-yield-C2: the execute and operator lines (RY6).
   [
     "say in one sentence that it is still running, with its `execution_id`, and end your turn; call aegis.execute.wait again only when the person asks, never in a loop. Do NOT fall back",
@@ -2890,7 +2899,7 @@ const KEEP_WAITING = [
   /call aegis\.workflow\.wait with the execution_id it returns/,
 ];
 
-test("RY1: the workflow and agentic run lines end the turn after a started run, saying the execution_id, the card below and the gates there and on Approvals; no other mode's prompt holds it", () => {
+test("RY1: the workflow and agentic run lines end the turn after a started run, saying the execution_id, the card above and the gates there and on Approvals; no other mode's prompt holds it", () => {
   const failures: string[] = [];
   for (const [mode, init] of GATE_MODES) {
     const run = toolLine(init()!.system_prompt, "aegis.workflow.run")[0] ?? "";
@@ -3024,6 +3033,59 @@ test("GP2: the workflow and agentic prompts carry no gate sentence in which the 
       if (!/\bgates?\b/i.test(sentence)) continue;
       for (const pattern of [...GATE_PROMISE, /\bwill appear\b/i]) if (pattern.test(sentence)) failures.push(`the ${mode} prompt holds (${pattern}): ${sentence}`);
     }
+  }
+  assert.deepEqual(failures, [], failures.join("; "));
+});
+
+// card-above-wording: the chat renders a run's cards above the companion's
+// answer, yet the answer placed its card beneath it ("... shows its state as
+// it works") under the "Waited for the work" and "The agent is working on it"
+// cards (Jeshua, 2026-10-14T19:28Z, his screenshot; Zaru known-defects-8 row
+// zaru-card-below-wording). The
+// same agentic answer ended "I'll report the evaluation as soon as it lands",
+// a promise for after the turn that the agentic run line forbade by one
+// example only (row zaru-promises-to-report-after-run): the workflow run
+// line's no-promise sentence is carried onto the agentic run line and the
+// workflow test-execution line.
+
+/** A card placed beneath the answer, where the chat renders it above. */
+const CARD_BENEATH = /\bcard\s+below\b/i;
+
+test("CA1: no mode's prompt places a card beneath the answer; the agentic and workflow prompts point to \"the card above\"", () => {
+  const failures: string[] = [];
+  for (const [mode, init] of UNCHANGED_PROMPTS) {
+    const prompt = init()!.system_prompt;
+    const beneath = prompt.match(CARD_BENEATH);
+    if (beneath) failures.push(`the ${mode} prompt says "${beneath[0]}"`);
+    if ((mode.startsWith("agentic") || mode.startsWith("workflow")) && !prompt.includes("the card above"))
+      failures.push(`the ${mode} prompt does not say "the card above"`);
+  }
+  assert.deepEqual(failures, [], failures.join("; "));
+});
+
+const stepText = (prompt: string, from: string, to: string) => {
+  const start = prompt.indexOf(from);
+  return start < 0 ? "" : prompt.slice(start, prompt.indexOf(to, start));
+};
+
+test("CA2: the agentic run line (Step 3, aegis.task.execute) promises nothing for after the turn, in the workflow run line's sentence, after its running sentence", () => {
+  const failures: string[] = [];
+  for (const [mode, init] of GATE_MODES) {
+    if (!mode.startsWith("agentic")) continue;
+    const step = stepText(init()!.system_prompt, "**Step 3", "**Step 4");
+    if (!step.includes(`${EXECUTION_RUNNING_SENTENCE} ${EXECUTION_NO_PROMISE_SENTENCE}`))
+      failures.push(`the ${mode} Step 3 lacks, after the running sentence: ${EXECUTION_NO_PROMISE_SENTENCE}`);
+  }
+  assert.deepEqual(failures, [], failures.join("; "));
+});
+
+test("CA3: the workflow test-execution line (Step 5, aegis.task.execute) promises nothing for after the turn, in the workflow run line's sentence, after its running sentence", () => {
+  const failures: string[] = [];
+  for (const [mode, init] of GATE_MODES) {
+    if (!mode.startsWith("workflow")) continue;
+    const step = stepText(init()!.system_prompt, "**Step 5", "**Step 6");
+    if (!step.includes(`${EXECUTION_RUNNING_SENTENCE} ${EXECUTION_NO_PROMISE_SENTENCE}`))
+      failures.push(`the ${mode} Step 5 lacks, after the running sentence: ${EXECUTION_NO_PROMISE_SENTENCE}`);
   }
   assert.deepEqual(failures, [], failures.join("; "));
 });
