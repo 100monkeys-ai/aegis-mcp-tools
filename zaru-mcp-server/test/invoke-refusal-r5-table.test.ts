@@ -107,6 +107,10 @@ const ADR_035_R5: readonly R5Row[] = [
   },
   // The Update of 2026-10-05, A3: the attest route's refusal.
   { code: "CONTEXT_NOT_ALLOWED", status: 403, member: "policy_violation", internal: false },
+  // Zaru ADR-0070 D1 (d) (connection-needs-server): a tool the chosen profile does
+  // not admit, 403 policy_violation, its sentence alone; ADR-035's Update for
+  // the row is owed with that record's orchestrator arc.
+  { code: "TOOL_NOT_IN_PROFILE", status: 403, member: "policy_violation", internal: false },
 ];
 
 const USER = {

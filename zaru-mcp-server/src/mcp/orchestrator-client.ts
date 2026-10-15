@@ -233,7 +233,10 @@ export class OrchestratorInvokeError extends Error {
  * 2026-10-04 (R5), the Update of 2026-10-05 for the SEAL gateway's refusals
  * (CREDENTIAL_BINDING_REQUIRED to CREDENTIAL_CHANNEL_NOT_CONFIDENTIAL), that
  * day's A3 (CONTEXT_NOT_ALLOWED, the attest route's refusal) and the Update
- * of 2026-10-08 U1 (UPSTREAM_UNAVAILABLE answered 503, not 502). A code is
+ * of 2026-10-08 U1 (UPSTREAM_UNAVAILABLE answered 503, not 502), and Zaru
+ * ADR-0070 D1 (d)'s TOOL_NOT_IN_PROFILE (a tool the chosen profile does not
+ * admit, answered 403 `policy_violation`; ADR-035's Update for it is owed
+ * with that record's orchestrator arc). A code is
  * relayed only at its own status (`aegis-orchestrator` 9907ce69,
  * `orchestrator/core/src/domain/seal_session.rs` 286-462). Exported so that
  * test/invoke-refusal-r5-table.test.ts pins it against the record row by row.
@@ -273,7 +276,42 @@ export const R5_ROWS: Readonly<
   REMOTE_TOOL_ERROR: { status: 422, internal: false },
   CREDENTIAL_CHANNEL_NOT_CONFIDENTIAL: { status: 503, internal: true },
   CONTEXT_NOT_ALLOWED: { status: 403, internal: false },
+  TOOL_NOT_IN_PROFILE: { status: 403, internal: false },
 };
+
+/**
+ * What a refusal for a missing connection or profile needs (Zaru ADR-0070
+ * D1): the family that is missing and the Zaru Web page that resolves it.
+ */
+export interface ConnectionNeeds {
+  family: string;
+  page: string;
+}
+
+/** A connection family: `mailbox`, `calendar`, `github`, `nuclear-notes`, or a server's own name. */
+export const CONNECTION_FAMILY = /^[a-z0-9][a-z0-9._-]{0,63}$/;
+
+const PROFILE_PAGE =
+  /^\/vault\/profiles(?:\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})?$/i;
+
+/**
+ * `needs` in D1's shape, or undefined. D1's shape is an object of exactly
+ * `family` and `page`: a connection family with the page `/vault/connections`
+ * (D1 (c): that page lists every way to connect), or the family `profile`
+ * with `/vault/profiles` or `/vault/profiles/<profile id>`. Anything else is
+ * dropped (D5), so a client never renders a link this server did not check.
+ */
+export function connectionNeedsOf(value: unknown): ConnectionNeeds | undefined {
+  if (!isPlainObject(value)) return undefined;
+  const keys = Object.keys(value).sort();
+  if (keys.length !== 2 || keys[0] !== "family" || keys[1] !== "page") return undefined;
+  const { family, page } = value;
+  if (typeof family !== "string" || typeof page !== "string") return undefined;
+  if (!CONNECTION_FAMILY.test(family)) return undefined;
+  const fits =
+    family === "profile" ? PROFILE_PAGE.test(page) : page === "/vault/connections";
+  return fits ? { family, page } : undefined;
+}
 
 /**
  * The fixed sentence of each internal class (R4, R5), the server's own copy:
@@ -315,6 +353,8 @@ export interface RelayedFailure {
   message: string;
   requestId?: string;
   retryAfterSeconds?: number;
+  /** A refused row's `error.needs`, kept only in D1's shape (Zaru ADR-0070 D5). */
+  needs?: ConnectionNeeds;
   /** The body's own `error.code` and `error.message`, for the log only. */
   upstreamCode?: string;
   upstreamMessage?: string;
@@ -414,6 +454,7 @@ export function relayFailure(
       ...upstream,
     };
   }
+  const needs = connectionNeedsOf(error!.needs);
   return {
     kind: "refused",
     policy: record!.status === "policy_violation",
@@ -421,6 +462,7 @@ export function relayFailure(
     message: error!.message as string,
     requestId,
     ...retry,
+    ...(needs ? { needs } : {}),
     ...upstream,
   };
 }
@@ -428,16 +470,22 @@ export function relayFailure(
 /**
  * The tool result an MCP client sees for a relayed failure: an ordinary
  * result with `isError` true and one text item,
- * `{"error":{"code","message"},"request_id"[,"retry_after_seconds"]}`.
+ * `{"error":{"code","message"[,"needs"]},"request_id"[,"retry_after_seconds"]}`.
  * The error is an object so that a reader taking `error.message` (Zaru Web,
- * `components/chat/tool-failure.ts`) shows the message.
+ * `components/chat/tool-failure.ts`) shows the message; `needs`, when the
+ * orchestrator gave it in D1's shape, sits beside it for a client to link
+ * the page that resolves the refusal (Zaru ADR-0070 D2, D5).
  */
 export function failureToolResult(failure: RelayedFailure): {
   content: Array<{ type: "text"; text: string }>;
   isError: true;
 } {
   const payload: Record<string, unknown> = {
-    error: { code: failure.code, message: failure.message },
+    error: {
+      code: failure.code,
+      message: failure.message,
+      ...(failure.needs ? { needs: failure.needs } : {}),
+    },
   };
   if (failure.requestId) payload.request_id = failure.requestId;
   if (failure.retryAfterSeconds !== undefined) {

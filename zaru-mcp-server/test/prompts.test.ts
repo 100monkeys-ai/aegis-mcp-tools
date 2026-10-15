@@ -437,8 +437,21 @@ function sharedPersonality(): string {
 }
 
 /** Chat mode's own text: everything after the shared personality. */
+/** Zaru ADR-0070 D3 (b)'s three sentences, appended to every mode's prompt: shared teaching, not the chat mode's own text. */
+const CONNECTION_NEEDS_TEACHING = [
+  "When a message needs the person's mail, calendar, GitHub, Nuclear Notes or another connection and no tool of it is listed to you, call zaru.connection.needed with that family, tell the person in one sentence what to connect or choose and that the card above takes them there, and end your turn. Ask nothing else.",
+  "When a call is refused because something is not connected, not chosen or not in the chosen profile, tell the person in one sentence what is missing and that the card above takes them there, and end your turn.",
+  "Never say a connection is or is not made unless a tool's answer says so.",
+]
+  .map((sentence) => `\n\n${sentence}`)
+  .join("");
+
+/** A served prompt without D3 (b)'s appended teaching (it appears once, after the mode's own text). */
+const withoutConnectionNeeds = (prompt: string) => prompt.replace(CONNECTION_NEEDS_TEACHING, "");
+
 function chatOwnText(): string {
-  const chat = getZaruInit("chat")!.system_prompt;
+  // connection-needs-server: D3 (b)'s teaching is appended to every mode and is not the chat mode's own text.
+  const chat = withoutConnectionNeeds(getZaruInit("chat")!.system_prompt);
   const personality = sharedPersonality();
   assert.ok(chat.startsWith(personality), "the chat prompt opens with the shared personality");
   return chat.slice(personality.length);
@@ -647,16 +660,20 @@ test("W41: after calling zaru.mode the model waits for the person", () => {
 // the no-promise sentence, and the transcription line sends the model to no
 // wait and teaches `input.audio_path` (954 characters more in each agentic
 // prompt, 436 in each workflow prompt, 437 in the operator prompt);
+// every pin was re-measured for connection-needs-server (Zaru ADR-0070 D3
+// (b), test/connection-needs-server.test.ts): the three sentences on a
+// missing connection are appended to every mode's prompt, after its own text
+// and before any chosen context or profile (598 characters more in each);
 // every other pin stands as it was.
 const UNCHANGED_PROMPTS: Array<[string, () => ReturnType<typeof getZaruInit>, number, string]> = [
-  ["agentic", () => getZaruInit("agentic"), 20640, "052942772c32b7b3353946c3d5297f37fe2aac7fc76f7fd04b5a33c32847ec53"],
-  ["agentic+chat-uploads", () => getZaruInit("agentic", new Set(["chat-uploads"])), 24450, "316985e6c7c6ad64816351484909cf561209f1f4f5cfd66a3698e3134ff38538"],
-  ["workflow", () => getZaruInit("workflow"), 17044, "32a7f684674e30f73223889bfadd0c394193ebfc1a19402cc655a0d4bf706a4f"],
-  ["workflow+chat-uploads", () => getZaruInit("workflow", new Set(["chat-uploads"])), 20854, "6bab64bba4a9819d8bd66b4baca5eb369d5f970b2eec4da240bd2840934088f9"],
-  ["execute", () => getZaruInit("execute"), 12713, "05e09176db7c4c0050b7a5a6510528b36e86715557eaef36905e486562878487"],
-  ["live", () => getZaruInit("live", new Set(["live"]), "browser"), 8558, "f5affbdef392ee3aa57500ba914bb95b5e6a18a584e7d8c784e861c5234a2633"],
-  ["vibecode", () => getZaruInit("vibecode", new Set(["vibecode"]), "browser"), 11988, "07c06d98d3ed02aa2092e81317541b2692a545c1960d90fc4fe2ddc2f0f547d7"],
-  ["operator", () => getZaruInit("operator", new Set(), undefined, { isOperator: true, tier: "operator" }), 11249, "9a1cfcb3ea0d3fed0deb86a3198fbc1d2ad66db583ed333f2dc5f3fa49c4a0b0"],
+  ["agentic", () => getZaruInit("agentic"), 21238, "e1d5da21cd2833cedbe50889731b969b8e8e45f475b3fb22b441fc808ad96404"],
+  ["agentic+chat-uploads", () => getZaruInit("agentic", new Set(["chat-uploads"])), 25048, "5caa9c86f5d7cba3496f577788829af65e583e56868b448955bdcfb42e220124"],
+  ["workflow", () => getZaruInit("workflow"), 17642, "1c247bf2d6a75e385b8c2a72cfa5f5d8499546861e2484e3a1257352299505c1"],
+  ["workflow+chat-uploads", () => getZaruInit("workflow", new Set(["chat-uploads"])), 21452, "8f8867ee82c1db329f7271238561ce100b22c8a857e9bdc90ee9ef06f9309a15"],
+  ["execute", () => getZaruInit("execute"), 13311, "38c26aff0314050a56fed068f43bae639f791c3c02aaa8ce6fe5f36febc0bf46"],
+  ["live", () => getZaruInit("live", new Set(["live"]), "browser"), 9156, "8630ff490dfdb338538993ba9d8ac202f9375207c4a143d3ba5bc71d580cc68a"],
+  ["vibecode", () => getZaruInit("vibecode", new Set(["vibecode"]), "browser"), 12586, "6760042f288e3f03cc79c0071f51fd4cd81bf74d757ccd73b731737567c29d44"],
+  ["operator", () => getZaruInit("operator", new Set(), undefined, { isOperator: true, tier: "operator" }), 11847, "910e942b7045214c7c4ded686f81ec7097216c501e9932cb753fdb43c1f38b71"],
 ];
 
 test("W41: every other mode's prompt is unchanged byte for byte", () => {
@@ -1943,7 +1960,7 @@ test("W52: the agentic and execute tool lists hold aegis.image.generate once, ri
 test("W52: every other mode's prompt is unchanged byte for byte, and the agentic and execute prompts are their prompts at 684cac52 with only the image teaching's line and the image exception added", () => {
   const failures: string[] = [];
   const digest = (text: string) => createHash("sha256").update(text).digest("hex");
-  const chat = getZaruInit("chat")!.system_prompt;
+  const chat = withoutConnectionNeeds(getZaruInit("chat")!.system_prompt); // connection-needs-server: D3 (b)'s teaching taken out for the history pins
   if (chat.length !== CHAT_PROMPT_AT_684CAC52[0] || digest(chat) !== CHAT_PROMPT_AT_684CAC52[1])
     failures.push("the 'chat' prompt changed");
   const changed = new Set(IMAGE_TEACHING_PROMPTS_AT_684CAC52.map(([name]) => name));
@@ -1953,7 +1970,7 @@ test("W52: every other mode's prompt is unchanged byte for byte, and the agentic
     if (prompt.length !== length || digest(prompt) !== sha256) failures.push(`the '${name}' prompt changed`);
   }
   for (const [name, init, length, sha256] of IMAGE_TEACHING_PROMPTS_AT_684CAC52) {
-    const prompt = init()!.system_prompt;
+    const prompt = withoutConnectionNeeds(init()!.system_prompt);
     const line = `\n${IMAGE_TEACHING}`;
     if (!prompt.includes(line)) {
       failures.push(`the '${name}' prompt lacks the image teaching's line`);
@@ -2028,7 +2045,7 @@ test("W54: the image exception makes aegis.image.generate its one act and names 
 test("W55: the agentic and execute prompts are their prompts at 13a3cb5d with only the image exception added and the image TOOL KNOWLEDGE line shortened; every other mode's prompt is unchanged byte for byte", () => {
   const failures: string[] = [];
   const digest = (text: string) => createHash("sha256").update(text).digest("hex");
-  const chat = getZaruInit("chat")!.system_prompt;
+  const chat = withoutConnectionNeeds(getZaruInit("chat")!.system_prompt); // connection-needs-server: D3 (b)'s teaching taken out for the history pins
   if (chat.length !== CHAT_PROMPT_AT_684CAC52[0] || digest(chat) !== CHAT_PROMPT_AT_684CAC52[1]) failures.push("the 'chat' prompt changed");
   const changed = new Set(IMAGE_EXCEPTION_PROMPTS_AT_13A3CB5D.map(([name]) => name));
   for (const [name, init, length, sha256] of UNCHANGED_PROMPTS) {
@@ -2037,7 +2054,7 @@ test("W55: the agentic and execute prompts are their prompts at 13a3cb5d with on
     if (prompt.length !== length || digest(prompt) !== sha256) failures.push(`the '${name}' prompt changed`);
   }
   for (const [name, init, length, sha256] of IMAGE_EXCEPTION_PROMPTS_AT_13A3CB5D) {
-    const prompt = init()!.system_prompt;
+    const prompt = withoutConnectionNeeds(init()!.system_prompt);
     if (prompt.includes(IMAGE_TEACHING_AT_13A3CB5D)) failures.push(`the '${name}' prompt still holds the image line of 13a3cb5d`);
     if (!prompt.includes(`\n${IMAGE_TEACHING}\n`) || !prompt.includes(`${IMAGE_REQUEST_EXCEPTION}\n\n`)) {
       failures.push(`the '${name}' prompt lacks the shortened image line or the image exception`);
@@ -2114,7 +2131,7 @@ test("W56: the agentic prompt teaches transcribe-audio once, as its own TOOL KNO
 test("W57: the agentic prompts are their prompts at 68df01fc with only the transcribe-audio line added; every other mode's prompt is unchanged byte for byte, and the tool lists still offer aegis.workflow.run and aegis.workflow.wait in agentic and not in execute", () => {
   const failures: string[] = [];
   const digest = (text: string) => createHash("sha256").update(text).digest("hex");
-  const chat = getZaruInit("chat")!.system_prompt;
+  const chat = withoutConnectionNeeds(getZaruInit("chat")!.system_prompt); // connection-needs-server: D3 (b)'s teaching taken out for the history pins
   if (chat.length !== CHAT_PROMPT_AT_684CAC52[0] || digest(chat) !== CHAT_PROMPT_AT_684CAC52[1]) failures.push("the 'chat' prompt changed");
   const changed = new Set(TRANSCRIBE_PROMPTS_AT_68DF01FC.map(([name]) => name));
   for (const [name, init, length, sha256] of UNCHANGED_PROMPTS) {
@@ -2123,7 +2140,7 @@ test("W57: the agentic prompts are their prompts at 68df01fc with only the trans
     if (prompt.length !== length || digest(prompt) !== sha256) failures.push(`the '${name}' prompt changed`);
   }
   for (const [name, init, length, sha256] of TRANSCRIBE_PROMPTS_AT_68DF01FC) {
-    const prompt = init()!.system_prompt;
+    const prompt = withoutConnectionNeeds(init()!.system_prompt);
     const line = `\n${TRANSCRIBE_TEACHING}`;
     if (!prompt.includes(line)) {
       failures.push(`the '${name}' prompt lacks the transcribe-audio line`);
@@ -2299,7 +2316,7 @@ test("WT5: each teaching line names the tool's arguments as the orchestrator's h
 test("WT6: with the gate-conduct lines removed, the agentic prompts are their prompts at 3e3ff265, the workflow prompts their prompts at c3706b92 with only the TOOL KNOWLEDGE block of the three lines added; every other mode's prompt is unchanged byte for byte", () => {
   const failures: string[] = [];
   const digest = (text: string) => createHash("sha256").update(text).digest("hex");
-  const chat = getZaruInit("chat")!.system_prompt;
+  const chat = withoutConnectionNeeds(getZaruInit("chat")!.system_prompt); // connection-needs-server: D3 (b)'s teaching taken out for the history pins
   if (chat.length !== CHAT_PROMPT_AT_684CAC52[0] || digest(chat) !== CHAT_PROMPT_AT_684CAC52[1]) failures.push("the 'chat' prompt changed");
   const changed = new Set(WORKFLOW_PROMPTS_AT_C3706B92.map(([name]) => name));
   for (const [name, init, length, sha256] of UNCHANGED_PROMPTS) {
@@ -2308,11 +2325,11 @@ test("WT6: with the gate-conduct lines removed, the agentic prompts are their pr
     if (prompt.length !== length || digest(prompt) !== sha256) failures.push(`the '${name}' prompt changed`);
   }
   for (const [name, init, length, sha256] of WORKFLOW_TEACHING_PROMPTS_AT_3E3FF265) {
-    const prompt = stripGateConduct(init()!.system_prompt);
+    const prompt = stripGateConduct(withoutConnectionNeeds(init()!.system_prompt));
     if (prompt.length !== length || digest(prompt) !== sha256) failures.push(`the '${name}' prompt is not its prompt at 3e3ff265`);
   }
   for (const [name, init, length, sha256] of WORKFLOW_PROMPTS_AT_C3706B92) {
-    const prompt = stripGateConduct(init()!.system_prompt);
+    const prompt = stripGateConduct(withoutConnectionNeeds(init()!.system_prompt));
     if (prompt.split(WORKFLOW_KNOWLEDGE_BLOCK).length !== 2) {
       failures.push(`the '${name}' prompt does not hold the TOOL KNOWLEDGE block of the three lines once`);
       continue;

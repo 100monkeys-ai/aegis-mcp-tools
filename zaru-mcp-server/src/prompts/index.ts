@@ -677,6 +677,18 @@ function profileTeaching(profile: ChosenProfile | undefined): string {
   return PROFILE_HEADING + sentences.map((sentence) => `\n\n${sentence}`).join("");
 }
 
+// What a missing connection is told (Zaru ADR-0070 D3 (b)): appended to every
+// mode's prompt, after its own text and before any chosen context or profile,
+// the three sentences as the record gives them. The chosen contexts' and the
+// profile's own refusal line stands for every other refusal (D3 (c)).
+const CONNECTION_NEEDS_TEACHING = [
+  "When a message needs the person's mail, calendar, GitHub, Nuclear Notes or another connection and no tool of it is listed to you, call zaru.connection.needed with that family, tell the person in one sentence what to connect or choose and that the card above takes them there, and end your turn. Ask nothing else.",
+  "When a call is refused because something is not connected, not chosen or not in the chosen profile, tell the person in one sentence what is missing and that the card above takes them there, and end your turn.",
+  "Never say a connection is or is not made unless a tool's answer says so.",
+]
+  .map((sentence) => `\n\n${sentence}`)
+  .join("");
+
 /** Modes that accept and forward `attachments` when the chat-uploads capability is active. */
 const CHAT_UPLOADS_MODES = new Set(["agentic", "workflow"]);
 
@@ -982,7 +994,10 @@ export function getZaruInit(
       ? prompt + CHAT_UPLOADS_TEACHING
       : prompt;
   const augmentedPrompt =
-    withUploads + contextTeaching(contexts) + profileTeaching(profile);
+    withUploads +
+    CONNECTION_NEEDS_TEACHING +
+    contextTeaching(contexts) +
+    profileTeaching(profile);
 
   return {
     mode: effectiveMode,

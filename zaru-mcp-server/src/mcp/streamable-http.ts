@@ -11,8 +11,10 @@ import {
   type ZaruUser,
 } from "../middleware/auth.js";
 import {
+  CONNECTION_FAMILY,
   OrchestratorClient,
   type ChosenProfileAnswer,
+  type ConnectionNeeds,
   type OperatorEscalationAnswer,
 } from "./orchestrator-client.js";
 import {
@@ -1133,6 +1135,131 @@ export interface McpRequestContext {
 }
 
 // ---------------------------------------------------------------------------
+// zaru.connection.needed (Zaru ADR-0070 D3 (a)): when a message needs a
+// connection whose tools are not listed to the model, the model asks this
+// server what is missing. The answer is computed from the person's own
+// listing (Zaru ADR-0069 D2: a family's tools are in it exactly when the
+// person holds a binding of it), the turn's `x-zaru-contexts` choice and its
+// `@profile` (AEGIS ADR-140 D12): not connected, connected but not chosen, or
+// not in the chosen profile. Only a Zaru Web turn (`x-zaru-turn`) chooses
+// contexts; a remote client's call resolves the person's own binding with no
+// choice (Zaru ADR-0069 D4), so off a turn a connected family needs nothing. `needs` is D1's shape, so Zaru Web renders the
+// same connection card for this answer as for a refused call (D2). It reads
+// the listings and nothing else, and changes nothing.
+// ---------------------------------------------------------------------------
+
+export const ZARU_CONNECTION_NEEDED_TOOL = {
+  name: "zaru.connection.needed",
+  description:
+    "Find out what the person must connect or choose before a family of tools can be used, when no tool of that family is listed to you. Answers `needs` (the family and the Zaru Web page that resolves it) and one sentence saying what is missing; it changes nothing.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      family: {
+        type: "string",
+        description:
+          "The connection the message needs: mailbox, calendar, github, nuclear-notes, or another connection's own name.",
+      },
+    },
+    required: ["family"],
+  },
+} as const;
+
+/** The refusal of a `family` that names no connection. */
+export const CONNECTION_FAMILY_REFUSAL =
+  "family must name one connection: mailbox, calendar, github, nuclear-notes, or another connection's own name.";
+
+/** The refusal when the person's connections could not be read. */
+export const CONNECTION_READ_FAILED =
+  "Zaru could not read the person's connections just now; say so in one sentence.";
+
+/**
+ * Each family's chosen-context key in `x-zaru-contexts`, the prefix of its
+ * tools' names, and how a sentence names it when it is missing and when it
+ * is the person's. A family not listed here is a server, named by itself.
+ */
+const CONNECTION_FAMILIES: Readonly<
+  Record<string, { contextKey: string; toolPrefix: string; absent: string; own: string }>
+> = {
+  mailbox: { contextKey: "imap", toolPrefix: "mail.", absent: "A mailbox", own: "Your mailbox" },
+  calendar: { contextKey: "caldav", toolPrefix: "calendar.", absent: "A calendar", own: "Your calendar" },
+  github: { contextKey: "github", toolPrefix: "github.", absent: "GitHub", own: "Your GitHub" },
+  "nuclear-notes": {
+    contextKey: "nuclear-notes",
+    toolPrefix: "nuclear-notes.",
+    absent: "Nuclear Notes",
+    own: "Your Nuclear Notes",
+  },
+};
+
+function connectionFamily(family: string) {
+  return (
+    CONNECTION_FAMILIES[family] ?? {
+      contextKey: family,
+      toolPrefix: `${family}.`,
+      absent: family,
+      own: `Your ${family}`,
+    }
+  );
+}
+
+/** What `zaru.connection.needed` answers: D1's `needs`, or null when nothing is missing, and one sentence. */
+export interface ConnectionNeededAnswer {
+  needs: ConnectionNeeds | null;
+  sentence: string;
+}
+
+/**
+ * The answer for `family`, from the person's listing and the turn's choice.
+ * The family is checked first (`connectionNeededFamily`).
+ */
+export async function connectionNeeded(
+  user: ZaruUser,
+  family: string,
+  client: OrchestratorClient,
+  context: McpRequestContext,
+): Promise<ConnectionNeededAnswer> {
+  const named = connectionFamily(family);
+  const ofFamily = (tools: Array<{ name: string }>) =>
+    tools.some((tool) => tool.name.startsWith(named.toolPrefix));
+  const connections = { family, page: "/vault/connections" };
+  if (!ofFamily(await client.listTools(user))) {
+    return {
+      needs: connections,
+      sentence: `${named.absent} is not connected to Zaru. Connect it on the Connections page in Zaru Web.`,
+    };
+  }
+  const chosen = `${named.own} is connected and chosen for this conversation.`;
+  if (context.profile !== undefined) {
+    const allowed = await client.listContextTools(user, { profile: context.profile });
+    if (ofFamily(allowed)) return { needs: null, sentence: chosen };
+    return {
+      needs: { family: "profile", page: `/vault/profiles/${context.profile}` },
+      sentence:
+        "The profile chosen for this conversation does not allow this. Change it on the profile's page in Zaru Web.",
+    };
+  }
+  if (context.zaruTurn !== true) {
+    return { needs: null, sentence: `${named.own} is connected to Zaru.` };
+  }
+  const choice = context.contexts?.[named.contextKey];
+  const isChosen =
+    typeof choice === "string" || (Array.isArray(choice) && choice.length > 0);
+  if (isChosen) return { needs: null, sentence: chosen };
+  return {
+    needs: connections,
+    sentence: `${named.own} is connected but not chosen for this conversation. Choose it under Context above the chat input.`,
+  };
+}
+
+/** `family` when it names a connection, else undefined (`profile` is a page, not a connection). */
+export function connectionNeededFamily(family: unknown): string | undefined {
+  return typeof family === "string" && family !== "profile" && CONNECTION_FAMILY.test(family)
+    ? family
+    : undefined;
+}
+
+// ---------------------------------------------------------------------------
 // zaru.schedule (AEGIS ADR-139 N17): a schedule proposed to the person as a
 // card. The bounds and refusal sentences are N2's, so a proposal the card
 // carries is one aegis.schedule.create accepts on timing; the orchestrator
@@ -1590,6 +1717,7 @@ Available modes:
             required: ["query"],
           },
         },
+        ZARU_CONNECTION_NEEDED_TOOL,
         {
           name: "zaru.mode",
           description:
@@ -1774,6 +1902,34 @@ Available modes:
               type: "text",
               text: JSON.stringify({ error: "Failed to search docs" }),
             },
+          ],
+          isError: true,
+        };
+      }
+    }
+
+    if (name === ZARU_CONNECTION_NEEDED_TOOL.name) {
+      const family = connectionNeededFamily(
+        (args as Record<string, unknown> | undefined)?.family,
+      );
+      if (family === undefined) {
+        return {
+          content: [
+            { type: "text", text: JSON.stringify({ error: CONNECTION_FAMILY_REFUSAL }) },
+          ],
+          isError: true,
+        };
+      }
+      try {
+        const answer = await connectionNeeded(user, family, client, context);
+        return { content: [{ type: "text", text: JSON.stringify(answer) }] };
+      } catch (err) {
+        logError("zaru.connection.needed.failed", {
+          error: err instanceof Error ? err : { message: String(err) },
+        });
+        return {
+          content: [
+            { type: "text", text: JSON.stringify({ error: CONNECTION_READ_FAILED }) },
           ],
           isError: true,
         };
