@@ -15,7 +15,7 @@ function jsonResponse(payload: unknown, status = 200): Response {
   });
 }
 
-test("listTools uses orchestrator discovery and caches by security context", async () => {
+test("listTools uses orchestrator discovery with the caller's credential and caches by person and security context", async () => {
   const calls: Array<{
     method: string;
     url: string;
@@ -78,6 +78,7 @@ test("listTools uses orchestrator discovery and caches by security context", asy
     headers: {
       Accept: "application/json",
       "X-Zaru-Security-Context": "zaru-free",
+      Authorization: "Bearer jwt",
     },
   });
 });

@@ -553,18 +553,35 @@ export class OrchestratorClient {
   }
 
   private async discoverTools(user: ZaruUser): Promise<AegisToolDefinition[]> {
-    const cacheKey = user.securityContext;
+    // The listing is the presenting person's callable set (Zaru ADR-0069 D2):
+    // the orchestrator computes it from the credential the server attests
+    // with, so the cache is keyed by the person (tenant and user) with the
+    // context, never by the context alone, and one person's set is never
+    // served to another. A new connection shows within the time to live.
+    const cacheKey = JSON.stringify([
+      user.tenantId ?? null,
+      user.userId,
+      user.securityContext,
+    ]);
     const cached = this.toolCache.get(cacheKey);
     const now = Date.now();
     if (cached && cached.expiresAt > now) {
       return cached.tools;
     }
 
+    // With the credential, `GET /v1/seal/tools` answers the person's set: the
+    // context's tools less every connection family they have not connected,
+    // their bound servers' tools included, and under an operator escalation
+    // the operator context's tools with their plan set (ADR-0069 D1, D7); a
+    // credential it cannot authenticate is answered 401, a context the
+    // caller may not attest 403. Without one it answers the context's static
+    // set.
     const discoveryResponse = await this.fetchImpl(this.toolDiscoveryUrl, {
       method: "GET",
       headers: {
         Accept: "application/json",
         "X-Zaru-Security-Context": user.securityContext,
+        ...(user.token ? { Authorization: `Bearer ${user.token}` } : {}),
       },
     });
 

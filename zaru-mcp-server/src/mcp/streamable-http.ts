@@ -1526,7 +1526,14 @@ export function createMcpServerForUser(
         });
       }
     }
-    const tools = [...listed, ...contextTools];
+    // The person's set already holds their bound servers' tools (Zaru
+    // ADR-0069 D2), so a chosen context's listing may repeat a name: each
+    // tool is advertised once, as the person's listing gives it.
+    const listedNames = new Set(listed.map((tool) => tool.name));
+    const tools = [
+      ...listed,
+      ...contextTools.filter((tool) => !listedNames.has(tool.name)),
+    ];
     // Per-caller mode enum: filter the advertised modes so the schema only
     // exposes options the caller can actually invoke. The same set is
     // mirrored by the dispatch-time gate in `getZaruInit`.
