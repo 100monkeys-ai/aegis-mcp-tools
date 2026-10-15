@@ -29,6 +29,7 @@ test("getZaruInit('vibecode') returns a full response for a browser client with 
     "zaru.mode",
     "zaru.schedule",
     "zaru.docs",
+    "zaru.connection.needed", // connection-needs-server-C1 (Zaru ADR-0070 D3 (a))
     "zaru.memory.get",
     "zaru.memory.set",
     "zaru.conversations.list",
@@ -75,6 +76,7 @@ test("getZaruInit('live') returns a full response for a browser client with the 
     "zaru.mode",
     "zaru.schedule",
     "zaru.docs",
+    "zaru.connection.needed", // connection-needs-server-C1 (Zaru ADR-0070 D3 (a))
     "zaru.memory.get",
     "zaru.memory.set",
     "zaru.conversations.list",
@@ -1777,11 +1779,12 @@ test("F11: the workflow mode's tool list is its list at 3affd36 with only aegis.
         t !== "aegis.schedule.run_now" &&
         t !== "aegis.git.list" &&
         t !== "aegis.workflow.create" &&
-        t !== "aegis.workflow.update",
+        t !== "aegis.workflow.update" &&
+        t !== "zaru.connection.needed", // connection-needs-server-C1
     ),
     WORKFLOW_TOOLS_AT_3AFFD36,
   );
-  assert.equal(tools.length, WORKFLOW_TOOLS_AT_3AFFD36.length + 5);
+  assert.equal(tools.length, WORKFLOW_TOOLS_AT_3AFFD36.length + 6);
 });
 
 test("F11: the agentic tool list is unchanged (its aegis.schedule.run_now, aegis.git.list and aegis.image.generate aside, added by N26 of 2026-10-10 and after it) and still holds aegis.workflow.run; the operator tool list is unchanged but for aegis.workflow.signal, which it no longer holds", () => {
@@ -1789,11 +1792,18 @@ test("F11: the agentic tool list is unchanged (its aegis.schedule.run_now, aegis
   const operator = getZaruInit("operator", new Set(), undefined, { isOperator: true, tier: "operator" })!.available_tools;
   assert.deepEqual(
     agentic.filter(
-      (t) => t !== "aegis.schedule.run_now" && t !== "aegis.git.list" && t !== "aegis.image.generate",
+      (t) =>
+        t !== "aegis.schedule.run_now" &&
+        t !== "aegis.git.list" &&
+        t !== "aegis.image.generate" &&
+        t !== "zaru.connection.needed", // connection-needs-server-C1
     ),
     AGENTIC_TOOLS_AT_3AFFD36,
   );
-  assert.deepEqual(operator, OPERATOR_TOOLS_AT_3AFFD36.filter((t) => t !== "aegis.workflow.signal"));
+  assert.deepEqual(
+    operator.filter((t) => t !== "zaru.connection.needed"), // connection-needs-server-C1
+    OPERATOR_TOOLS_AT_3AFFD36.filter((t) => t !== "aegis.workflow.signal"),
+  );
   assert.ok(agentic.includes("aegis.workflow.run"));
   assert.ok(!operator.includes("aegis.workflow.signal"));
 });

@@ -376,6 +376,14 @@ test("Trigger 2 (c): with a context or a profile chosen, the sentences stand bef
   }
 });
 
+test("Trigger 2 (b), C1: every mode's tool list holds zaru.connection.needed once, right after zaru.docs, so the server's lists and Zaru Web's agree", () => {
+  for (const [name, init] of MODES) {
+    const tools = init()!.available_tools;
+    assert.equal(tools.filter((t) => t === "zaru.connection.needed").length, 1, `${name} lists it once`);
+    assert.equal(tools[tools.indexOf("zaru.docs") + 1], "zaru.connection.needed", `${name} lists it right after zaru.docs`);
+  }
+});
+
 // ---------------------------------------------------------------------------
 // (d) The facing text holds them, and none of it names a decision record.
 // ---------------------------------------------------------------------------
