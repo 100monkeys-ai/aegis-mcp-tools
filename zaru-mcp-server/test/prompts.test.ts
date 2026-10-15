@@ -638,16 +638,25 @@ test("W41: after calling zaru.mode the model waits for the person", () => {
 // (Step 3) and the workflow test-execution line (Step 5) carry the run line's
 // sentence that promises nothing for after the turn (270 characters more in
 // each);
+// the agentic, workflow and operator pins (and the agentic and workflow
+// chat-uploads forms) were re-measured for failed-run-told-once (FR1 to FR4
+// at the end of this file): each mode whose tools read a run tells a failed
+// run once, with the run's own failure sentence, and ends the turn there (a
+// paragraph in the agentic and workflow prompts, a bullet of the operator's
+// failures list); the agentic Step 1 workflow branch and run line end with
+// the no-promise sentence, and the transcription line sends the model to no
+// wait and teaches `input.audio_path` (954 characters more in each agentic
+// prompt, 436 in each workflow prompt, 437 in the operator prompt);
 // every other pin stands as it was.
 const UNCHANGED_PROMPTS: Array<[string, () => ReturnType<typeof getZaruInit>, number, string]> = [
-  ["agentic", () => getZaruInit("agentic"), 19686, "667060b321689384e5b81526ad39fe68c6703a618d5916cc4638e4ad6830ea39"],
-  ["agentic+chat-uploads", () => getZaruInit("agentic", new Set(["chat-uploads"])), 23496, "f9064301e87980dff271060ba2ef96234b5f9bac25f846948609ba5aed31f547"],
-  ["workflow", () => getZaruInit("workflow"), 16608, "75a7a17507fe459a8168a0f895c55d9f7842ee625ee40febd1712253e18e084b"],
-  ["workflow+chat-uploads", () => getZaruInit("workflow", new Set(["chat-uploads"])), 20418, "bfdef5ff734210ed47047c97b3a98978d9f093d5dc037228dc0e814e94ccde02"],
+  ["agentic", () => getZaruInit("agentic"), 20640, "052942772c32b7b3353946c3d5297f37fe2aac7fc76f7fd04b5a33c32847ec53"],
+  ["agentic+chat-uploads", () => getZaruInit("agentic", new Set(["chat-uploads"])), 24450, "316985e6c7c6ad64816351484909cf561209f1f4f5cfd66a3698e3134ff38538"],
+  ["workflow", () => getZaruInit("workflow"), 17044, "32a7f684674e30f73223889bfadd0c394193ebfc1a19402cc655a0d4bf706a4f"],
+  ["workflow+chat-uploads", () => getZaruInit("workflow", new Set(["chat-uploads"])), 20854, "6bab64bba4a9819d8bd66b4baca5eb369d5f970b2eec4da240bd2840934088f9"],
   ["execute", () => getZaruInit("execute"), 12713, "05e09176db7c4c0050b7a5a6510528b36e86715557eaef36905e486562878487"],
   ["live", () => getZaruInit("live", new Set(["live"]), "browser"), 8558, "f5affbdef392ee3aa57500ba914bb95b5e6a18a584e7d8c784e861c5234a2633"],
   ["vibecode", () => getZaruInit("vibecode", new Set(["vibecode"]), "browser"), 11988, "07c06d98d3ed02aa2092e81317541b2692a545c1960d90fc4fe2ddc2f0f547d7"],
-  ["operator", () => getZaruInit("operator", new Set(), undefined, { isOperator: true, tier: "operator" }), 10812, "bf0e596ee323459b39033f16780bf27b62563c231ba2113ab62d86f2c2fdb234"],
+  ["operator", () => getZaruInit("operator", new Set(), undefined, { isOperator: true, tier: "operator" }), 11249, "9a1cfcb3ea0d3fed0deb86a3198fbc1d2ad66db583ed333f2dc5f3fa49c4a0b0"],
 ];
 
 test("W41: every other mode's prompt is unchanged byte for byte", () => {
@@ -2034,9 +2043,9 @@ test("W55: the agentic and execute prompts are their prompts at 13a3cb5d with on
       failures.push(`the '${name}' prompt lacks the shortened image line or the image exception`);
       continue;
     }
-    const before = stripWorkflowTeachings(prompt)
+    // failed-run-told-once: the transcription line is removed before the strip, which would otherwise restore its earlier form.
+    const before = stripWorkflowTeachings(prompt.replace(`\n${TRANSCRIBE_TEACHING}`, ""))
       .replace(`${IMAGE_REQUEST_EXCEPTION}\n\n`, "")
-      .replace(`\n${TRANSCRIBE_TEACHING}`, "")
       .replace(`\n${IMAGE_TEACHING}\n`, `\n${IMAGE_TEACHING_AT_13A3CB5D}\n`);
     if (before.length !== length || digest(before) !== sha256) failures.push(`the '${name}' prompt, the exception removed and the line restored, is not its prompt at 13a3cb5d`);
   }
@@ -2055,12 +2064,18 @@ test("W55: the agentic and execute prompts are their prompts at 13a3cb5d with on
 // aegis.workflow.wait beside the chat's attachments; execute offers neither.
 // ---------------------------------------------------------------------------
 
-/** ADR-143 S5's sentence, as the record gives it. */
-const TRANSCRIBE_SENTENCE =
-  "To turn an attached recording into text, run the workflow transcribe-audio with it; the transcript is its answer.";
+/** The transcription line's first sentence: S5's, as Zaru ADR-0026's Update of 2026-10-15 (D3c) gives it since failed-run-told-once. */
+const TRANSCRIBE_SENTENCE = "To turn an attached recording into text, run the workflow transcribe-audio with it.";
 
-/** The agentic TOOL KNOWLEDGE line: S5's sentence, then the run it names. */
-const TRANSCRIBE_TEACHING = `- ${TRANSCRIBE_SENTENCE} The run is aegis.workflow.run with \`name\` \`transcribe-audio\` and \`input.audio_path\` set to the attached file's name; the chat carries the attachment to the run, and the transcript is the step's stdout in aegis.workflow.wait's answer.`;
+/**
+ * The agentic TOOL KNOWLEDGE line since failed-run-told-once: D3c's three
+ * sentences (no aegis.workflow.wait within the turn; the no-promise sentence
+ * at its end), with the run it names and AEGIS ADR-143 S7c's teaching between
+ * its first and its second. Until then the line was S5's sentence, the run,
+ * `input.audio_path` the attached file's name and the transcript read from
+ * aegis.workflow.wait's answer (the step's stdout).
+ */
+const TRANSCRIBE_TEACHING = `- ${TRANSCRIBE_SENTENCE} The run is aegis.workflow.run with \`name\` \`transcribe-audio\`, and the chat carries the attachment to the run. \`input.audio_path\` may be left out when one file is attached; otherwise it is the file's name exactly as the chat's attachment marker gives it. The transcript is the run's answer, which reaches the person on the card above. Tell the person the run has started and end your turn; your turn ends there and nothing of yours watches the run after it: promise nothing for after your turn.`;
 
 /** The prompts S5's teaching changed, as they stood at aegis-mcp-tools 68df01fc. */
 const TRANSCRIBE_PROMPTS_AT_68DF01FC: Array<[string, () => ReturnType<typeof getZaruInit>, number, string]> = [
@@ -2445,9 +2460,8 @@ const EXECUTION_NO_PROMISE_SENTENCE = NO_PROMISE_SENTENCES[0];
 const GENERATE_RUNNING_SENTENCE =
   "Call it once in this turn and never in a loop: when it answers that the execution is still running, say so in one sentence with its `execution_id` and end your turn.";
 
-/** Agentic Step 1, a matching workflow: started, the turn ended, the result when asked. */
-const AGENTIC_STEP1_WORKFLOW =
-  "If a matching workflow exists, run it with aegis.workflow.run, tell the person it has started and end your turn without calling aegis.workflow.wait, as its TOOL KNOWLEDGE line says; Step 4 reports its result when the person asks for it.";
+/** Agentic Step 1, a matching workflow: started, the turn ended, the result when asked; since failed-run-told-once, the no-promise sentence at its end (Zaru ADR-0026 D3c). */
+const AGENTIC_STEP1_WORKFLOW = `If a matching workflow exists, run it with aegis.workflow.run, tell the person it has started and end your turn without calling aegis.workflow.wait, as its TOOL KNOWLEDGE line says; Step 4 reports its result when the person asks for it. ${NO_PROMISE_SENTENCES[0]}`;
 
 /** The agentic and workflow Steps' text before the run-then-yield sentences (the history tests compare against it). */
 const STEPS_BEFORE_RUN_THEN_YIELD: Array<[string, string]> = [
@@ -2471,8 +2485,27 @@ const STEPS_BEFORE_RUN_THEN_YIELD: Array<[string, string]> = [
 ];
 
 /** A prompt with the run-then-yield sentences of its Steps taken out, as it stood at 2d29b3b1 outside its TOOL KNOWLEDGE. */
+/** failed-run-told-once (Zaru ADR-0026 D3b): the rule, as each mode holds it: a paragraph after the agentic Goal check paragraph and after the workflow Step 6, the last bullet of the operator's failures list. */
+const FAILED_RUN_TOLD_ONCE_TEXT =
+  "shows that a run you started failed, tell the person in one sentence that it failed, carrying the run's own failure sentence: the `feedback` of the transition it failed on where the run gives one, otherwise the state it failed in and the first line of that state's error. End your turn at that sentence: do not search, verify, retry or start the run again unless the person asks.";
+const FAILED_RUN_TOLD_ONCE_INSERTS = [
+  `\n\nWhen aegis.workflow.wait's or aegis.task.wait's answer, or a Goal check, ${FAILED_RUN_TOLD_ONCE_TEXT}`,
+  `\n\nWhen aegis.workflow.wait's or aegis.task.wait's answer ${FAILED_RUN_TOLD_ONCE_TEXT}`,
+  `\n- When aegis.workflow.wait's or aegis.task.wait's answer ${FAILED_RUN_TOLD_ONCE_TEXT}`,
+];
+
+/** The transcription line as it stood from aegis-mcp-tools 68df01fc until failed-run-told-once (the history pins after 68df01fc hold it). */
+const TRANSCRIBE_TEACHING_BEFORE_FAILED_RUN =
+  "- To turn an attached recording into text, run the workflow transcribe-audio with it; the transcript is its answer. The run is aegis.workflow.run with `name` `transcribe-audio` and `input.audio_path` set to the attached file's name; the chat carries the attachment to the run, and the transcript is the step's stdout in aegis.workflow.wait's answer.";
+
 const stripRunThenYieldSteps = (prompt: string) =>
-  STEPS_BEFORE_RUN_THEN_YIELD.reduce((text, [now, before]) => text.replace(now, before), prompt);
+  STEPS_BEFORE_RUN_THEN_YIELD.reduce(
+    (text, [now, before]) => text.replace(now, before),
+    FAILED_RUN_TOLD_ONCE_INSERTS.reduce((text, insert) => text.replace(insert, ""), prompt).replace(
+      `\n${TRANSCRIBE_TEACHING}\n`,
+      `\n${TRANSCRIBE_TEACHING_BEFORE_FAILED_RUN}\n`,
+    ),
+  );
 
 /** run-then-yield-C1: `task` is the person's own words (the run line, both modes; RY5). */
 const TASK_WORDS_SENTENCE =
@@ -2486,7 +2519,8 @@ const RUN_TEACHING_AT_F332AA9C = `${RUN_HEAD} ${[...ONE_RUN_SENTENCES, ...DRAFT_
 /** The run line now: the inputs sentences after the arguments, naming the mode's own tool. */
 const runTeaching = (tool: string) => `${RUN_HEAD} ${inputsReadSentence(tool)} ${INPUTS_ASK_SENTENCE} ${TASK_WORDS_SENTENCE} ${[...ONE_RUN_SENTENCES, ...DRAFT_ONLY_SENTENCES, GATE_CONTROL_SENTENCE, STARTED_RUN_SENTENCE, ...NO_PROMISE_SENTENCES].join(" ")}`;
 const WORKFLOW_RUN_TEACHING = runTeaching(INPUTS_TOOL.workflow);
-const AGENTIC_RUN_TEACHING = runTeaching(INPUTS_TOOL.agentic);
+/** The agentic run line since failed-run-told-once (Zaru ADR-0026 D3c): the later-read sentence before the started-run sentence, so the line ends with the no-promise sentence. */
+const AGENTIC_RUN_TEACHING = `${RUN_HEAD} ${inputsReadSentence(INPUTS_TOOL.agentic)} ${INPUTS_ASK_SENTENCE} ${TASK_WORDS_SENTENCE} ${[...ONE_RUN_SENTENCES, ...DRAFT_ONLY_SENTENCES, GATE_CONTROL_SENTENCE, NO_PROMISE_SENTENCES[1], STARTED_RUN_SENTENCE, NO_PROMISE_SENTENCES[0]].join(" ")}`;
 
 /** The workflow mode's wait line. */
 const WORKFLOW_WAIT_TEACHING = `- \`aegis.workflow.wait\`: Wait for a run you started. Takes its \`execution_id\`. ${WAIT_ONCE_SENTENCES.join(" ")} ${GATE_SHOWN_SENTENCES.join(" ")} ${FIDELITY_SENTENCES.join(" ")}`;
@@ -2552,7 +2586,8 @@ test("GC3: the workflow and agentic modes' aegis.workflow.run line holds rule 2 
       failures.push(`the ${mode} prompt has ${lines.length} aegis.workflow.run lines, not 1`);
       continue;
     }
-    seen.add(lines[0].replace(` ${inputsReadSentence(INPUTS_TOOL[mode.split("+")[0]])}`, ""));
+    // failed-run-told-once: the agentic line carries the later-read sentence before the started-run sentence (Zaru ADR-0026 D3c); it is compared without it.
+    seen.add(lines[0].replace(` ${inputsReadSentence(INPUTS_TOOL[mode.split("+")[0]])}`, "").replace(` ${NO_PROMISE_SENTENCES[1]}`, ""));
     for (const sentence of [...ONE_RUN_SENTENCES, ...DRAFT_ONLY_SENTENCES])
       if (!lines[0].includes(sentence)) failures.push(`the ${mode} run line lacks: ${sentence}`);
   }
@@ -3016,8 +3051,12 @@ test("GP1: the workflow and agentic run lines say each Human gate appears on the
     const run = toolLine(init()!.system_prompt, "aegis.workflow.run")[0] ?? "";
     if (!run.includes("each Human gate appears on that card and in Approvals, the badge in the header, for them to answer there"))
       failures.push(`the ${mode} run line does not say the gates appear on the card and in Approvals`);
-    if (!run.includes(`${STARTED_RUN_SENTENCE} ${NO_PROMISE_SENTENCES.join(" ")}`))
-      failures.push(`the ${mode} run line lacks, after the started-run sentence: ${NO_PROMISE_SENTENCES.join(" ")}`);
+    // failed-run-told-once: the agentic line ends with the no-promise sentence, its later-read sentence before the started-run sentence (Zaru ADR-0026 D3c).
+    const after = mode.startsWith("agentic") ? NO_PROMISE_SENTENCES[0] : NO_PROMISE_SENTENCES.join(" ");
+    if (!run.includes(`${STARTED_RUN_SENTENCE} ${after}`))
+      failures.push(`the ${mode} run line lacks, after the started-run sentence: ${after}`);
+    if (mode.startsWith("agentic") && !run.includes(`${NO_PROMISE_SENTENCES[1]} ${STARTED_RUN_SENTENCE}`))
+      failures.push(`the ${mode} run line lacks, before the started-run sentence: ${NO_PROMISE_SENTENCES[1]}`);
   }
   for (const [mode, init] of SIGNAL_MODES) {
     if (mode.startsWith("workflow") || mode.startsWith("agentic")) continue;
@@ -3086,6 +3125,101 @@ test("CA3: the workflow test-execution line (Step 5, aegis.task.execute) promise
     const step = stepText(init()!.system_prompt, "**Step 5", "**Step 6");
     if (!step.includes(`${EXECUTION_RUNNING_SENTENCE} ${EXECUTION_NO_PROMISE_SENTENCE}`))
       failures.push(`the ${mode} Step 5 lacks, after the running sentence: ${EXECUTION_NO_PROMISE_SENTENCE}`);
+  }
+  assert.deepEqual(failures, [], failures.join("; "));
+});
+
+// failed-run-told-once: in agentic mode the companion started transcribe-audio
+// and ended its turn "I'll have the transcript for you once it completes.";
+// the run failed with its feedback sentence, and eight lines of verifying and
+// searching followed, none telling the person the run had failed (Jeshua,
+// 2026-10-15, conversation e6d17940; Zaru known-defects-9 row
+// companion-loops-after-failed-run-2026-10-15, known-defects-8 row
+// zaru-promises-to-report-after-run; Zaru ADR-0026's Update of 2026-10-15,
+// D3b to D3d; AEGIS ADR-143 S7c's teaching). Every agentic line that starts a
+// workflow run ends with the no-promise sentence; the transcription line sends
+// the model to no wait; every mode that reads a run tells a failed run once,
+// with the run's own failure sentence, and ends the turn there.
+
+/** The no-promise sentence, in the form the run line carries it. */
+const FR_NO_PROMISE = NO_PROMISE_SENTENCES[0];
+
+/** D3c's transcription line, its three sentences, with S7c's teaching and the call it names between its first and its second. */
+const FR_TRANSCRIBE_LINE =
+  "- To turn an attached recording into text, run the workflow transcribe-audio with it. The run is aegis.workflow.run with `name` `transcribe-audio`, and the chat carries the attachment to the run. `input.audio_path` may be left out when one file is attached; otherwise it is the file's name exactly as the chat's attachment marker gives it. The transcript is the run's answer, which reaches the person on the card above. Tell the person the run has started and end your turn; your turn ends there and nothing of yours watches the run after it: promise nothing for after your turn.";
+
+/** D3b in the model's words, after the readers of the mode. */
+const FR_FAILED_RUN_RULE =
+  "shows that a run you started failed, tell the person in one sentence that it failed, carrying the run's own failure sentence: the `feedback` of the transition it failed on where the run gives one, otherwise the state it failed in and the first line of that state's error. End your turn at that sentence: do not search, verify, retry or start the run again unless the person asks.";
+
+/** The readers of a run each mode holds: the two waits, and in agentic mode the Goal check. */
+const FR_READERS: Record<string, string> = {
+  agentic: "When aegis.workflow.wait's or aegis.task.wait's answer, or a Goal check,",
+  workflow: "When aegis.workflow.wait's or aegis.task.wait's answer",
+  operator: "When aegis.workflow.wait's or aegis.task.wait's answer",
+};
+
+const FR_ALL_MODES: Array<[string, ReturnType<typeof getZaruInit>]> = [
+  ...ALL_MODES,
+  ["agentic+chat-uploads", getZaruInit("agentic", new Set(["chat-uploads"]))],
+  ["workflow+chat-uploads", getZaruInit("workflow", new Set(["chat-uploads"]))],
+];
+
+test("FR1: the agentic Step 1's workflow branch ends with the no-promise sentence", () => {
+  const failures: string[] = [];
+  for (const [mode, init] of GATE_MODES) {
+    if (!mode.startsWith("agentic")) continue;
+    const s1 = stepText(init()!.system_prompt, "**Step 1", "**Step 2");
+    const branch = s1.slice(s1.indexOf("If a matching workflow exists"), s1.indexOf(" Do NOT create a duplicate."));
+    if (!branch.startsWith("If a matching workflow exists") || !branch.endsWith(` ${FR_NO_PROMISE}`))
+      failures.push(`the ${mode} Step 1 workflow branch does not end with: ${FR_NO_PROMISE}`);
+  }
+  assert.deepEqual(failures, [], failures.join("; "));
+});
+
+test("FR2: the agentic aegis.workflow.run line ends with the no-promise sentence", () => {
+  const failures: string[] = [];
+  for (const [mode, init] of GATE_MODES) {
+    if (!mode.startsWith("agentic")) continue;
+    const run = toolLine(init()!.system_prompt, "aegis.workflow.run")[0] ?? "";
+    if (!run.endsWith(` ${FR_NO_PROMISE}`)) failures.push(`the ${mode} run line does not end with: ${FR_NO_PROMISE}`);
+  }
+  assert.deepEqual(failures, [], failures.join("; "));
+});
+
+test("FR3: the agentic transcription line is D3c's, with S7c's teaching; it ends with the no-promise sentence and names no aegis.workflow.wait", () => {
+  const failures: string[] = [];
+  for (const [mode, init] of GATE_MODES) {
+    if (!mode.startsWith("agentic")) continue;
+    const lines = init()!.system_prompt.split("\n").filter((l) => l.startsWith("- To turn an attached recording into text"));
+    if (lines.length !== 1) {
+      failures.push(`the ${mode} prompt holds ${lines.length} transcription lines, not one`);
+      continue;
+    }
+    const [line] = lines;
+    if (line !== FR_TRANSCRIBE_LINE) failures.push(`the ${mode} transcription line is not D3c's with S7c's teaching: ${line}`);
+    if (line.includes("aegis.workflow.wait")) failures.push(`the ${mode} transcription line names aegis.workflow.wait`);
+    if (!line.endsWith("your turn ends there and nothing of yours watches the run after it: promise nothing for after your turn."))
+      failures.push(`the ${mode} transcription line does not end with the no-promise sentence`);
+    if (!line.includes("`input.audio_path` may be left out when one file is attached; otherwise it is the file's name exactly as the chat's attachment marker gives it."))
+      failures.push(`the ${mode} transcription line lacks S7c's teaching`);
+  }
+  assert.deepEqual(failures, [], failures.join("; "));
+});
+
+test("FR4: every mode whose tools read a run (aegis.workflow.wait or aegis.task.wait) tells a failed run once, with its own failure sentence, and ends the turn; agentic names the Goal check; no other mode holds the rule", () => {
+  const failures: string[] = [];
+  for (const [mode, init] of FR_ALL_MODES) {
+    const base = mode.split("+")[0];
+    const reads = init!.available_tools.some((t) => t === "aegis.workflow.wait" || t === "aegis.task.wait");
+    const prompt = init!.system_prompt;
+    const count = prompt.split(FR_FAILED_RUN_RULE).length - 1;
+    if (reads) {
+      const readers = FR_READERS[base];
+      if (!readers) failures.push(`the ${mode} mode reads a run and has no readers named`);
+      else if (count !== 1 || !prompt.includes(`${readers} ${FR_FAILED_RUN_RULE}`))
+        failures.push(`the ${mode} prompt does not hold, once: ${readers} ${FR_FAILED_RUN_RULE}`);
+    } else if (count !== 0) failures.push(`the ${mode} prompt, whose tools read no run, holds the failed-run rule`);
   }
   assert.deepEqual(failures, [], failures.join("; "));
 });
