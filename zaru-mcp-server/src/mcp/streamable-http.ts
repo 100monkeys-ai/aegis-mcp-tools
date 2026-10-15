@@ -12,6 +12,7 @@ import {
 } from "../middleware/auth.js";
 import {
   CONNECTION_FAMILY,
+  requestProfile,
   OrchestratorClient,
   type ChosenProfileAnswer,
   type ConnectionNeeds,
@@ -1093,6 +1094,27 @@ export function contextChosen(contexts: ContextChoices | undefined): boolean {
   );
 }
 
+// Deny by default for a key (Zaru ADR-0071 D1, D3): a call on an API key
+// reaches a connection only when a profile names it, the key's own or one
+// the request names, or the request chooses its bindings. With neither, the
+// key is listed no tool of any connection family: only the tools that need
+// no connection (ADR-0069 D1: `web.*`, `aegis.*`) and this server's own.
+// Whether the request is a key's is read from the credential it presented,
+// never from `x-zaru-turn`, which changes nothing here.
+
+/** The tool name prefixes that need no connection. */
+const NO_CONNECTION_PREFIXES = ["aegis.", "web."] as const;
+
+/** Whether a request on `user` is a key's that reaches none of the person's connections. */
+export function keyReachesNoConnection(user: ZaruUser, context: McpRequestContext): boolean {
+  return isApiKey(user.token) && context.profile === undefined && !contextChosen(context.contexts);
+}
+
+/** `tools` less every tool of a connection family. */
+function withoutConnectionTools<T extends { name: string }>(tools: T[]): T[] {
+  return tools.filter((tool) => NO_CONNECTION_PREFIXES.some((prefix) => tool.name.startsWith(prefix)));
+}
+
 /**
  * The header naming the conversation a request was made in: one conversation
  * id (a UUID). It is forwarded unchanged in the signed payload's
@@ -1223,7 +1245,7 @@ export async function connectionNeeded(
   const ofFamily = (tools: Array<{ name: string }>) =>
     tools.some((tool) => tool.name.startsWith(named.toolPrefix));
   const connections = { family, page: "/vault/connections" };
-  if (!ofFamily(await client.listTools(user))) {
+  if (!ofFamily(await client.listTools(user, { profile: context.profile }))) {
     return {
       needs: connections,
       sentence: `${named.absent} is not connected to Zaru. Connect it on the Connections page in Zaru Web.`,
@@ -1606,8 +1628,18 @@ export function createMcpServerForUser(
   capabilities: ReadonlySet<string>,
   requestId?: string,
   client: OrchestratorClient = orchestratorClient,
-  context: McpRequestContext = {},
+  requestContext: McpRequestContext = {},
 ): McpServer {
+  // The key's own profile stands for the request's when the request names
+  // none and chose no binding (Zaru ADR-0071 D3): the calls, the listing and
+  // the mode text all carry it, as they carry a profile the request names.
+  const keyProfile =
+    requestContext.profile === undefined ? requestProfile(user, requestContext) : undefined;
+  const context: McpRequestContext =
+    keyProfile !== undefined
+      ? { ...requestContext, profile: keyProfile, contexts: undefined }
+      : requestContext;
+  const reachesNoConnection = keyReachesNoConnection(user, context);
   const mcpServer = new McpServer(
     {
       name: "zaru-mcp-server",
@@ -1633,7 +1665,11 @@ export function createMcpServerForUser(
   };
 
   mcpServer.server.setRequestHandler(ListToolsRequestSchema, async () => {
-    const listed = await client.listTools(user);
+    // The profile rides beside the credential, so the orchestrator computes
+    // the set from it; a key with none and no choice keeps no connection
+    // family's tool, whatever the orchestrator answers (ADR-0071 D3).
+    const answered = await client.listTools(user, { profile: context.profile });
+    const listed = reachesNoConnection ? withoutConnectionTools(answered) : answered;
     // The chosen contexts' tools, listed by the orchestrator with the chosen
     // binding; best effort: a failure lists none of them and is logged.
     // A chosen profile is listed by its id alone (AEGIS ADR-140 D12).
@@ -1863,6 +1899,7 @@ Available modes:
         user,
         context.contexts ?? {},
         await chosenProfile(),
+        reachesNoConnection,
       );
       if (!result) {
         return {
@@ -1952,6 +1989,7 @@ Available modes:
         user,
         context.contexts ?? {},
         await chosenProfile(),
+        reachesNoConnection,
       );
       if (!result) {
         return {

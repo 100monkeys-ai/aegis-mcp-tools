@@ -566,6 +566,38 @@ export class InvalidExecutionIdError extends Error {
   }
 }
 
+/**
+ * The header naming the profile on `GET /v1/seal/tools`, beside the
+ * credential, so the orchestrator computes a key's set from its profile
+ * (Zaru ADR-0071 D3). Built against this name before the orchestrator's half
+ * names it.
+ */
+export const PROFILE_HEADER = "X-Zaru-Profile";
+
+/** Whether `contexts` names at least one binding for some server. */
+function bindingChosen(contexts: Record<string, string | string[] | null> | undefined): boolean {
+  return (
+    contexts !== undefined &&
+    Object.values(contexts).some(
+      (choice) => typeof choice === "string" || (Array.isArray(choice) && choice.length > 0),
+    )
+  );
+}
+
+/**
+ * The profile a request carries (Zaru ADR-0071 D3): the one it names
+ * (`x-zaru-contexts`'s `@profile`), else, when it chose no binding, the
+ * profile chosen for the presenting key, else none. A profile and bindings
+ * are never sent together (AEGIS ADR-140 D10).
+ */
+export function requestProfile(
+  user: Pick<ZaruUser, "keyProfile">,
+  choice: { profile?: string; contexts?: Record<string, string | string[] | null> },
+): string | undefined {
+  if (choice.profile !== undefined) return choice.profile;
+  return bindingChosen(choice.contexts) ? undefined : user.keyProfile;
+}
+
 export class OrchestratorClient {
   private readonly baseUrl: string;
   private readonly toolDiscoveryUrl: string;
@@ -591,8 +623,16 @@ export class OrchestratorClient {
       options.cacheTtlMs ?? Number(process.env.AEGIS_TOOL_CACHE_TTL_MS ?? 5000);
   }
 
-  async listTools(user: ZaruUser): Promise<AegisToolDefinition[]> {
-    const tools = await this.discoverTools(user);
+  /**
+   * The presenting person's callable set. `choice.profile` is the profile the
+   * request carries (`requestProfile`); with no `choice` it is the key's own,
+   * so a caller with no request context still lists under the key's profile.
+   */
+  async listTools(
+    user: ZaruUser,
+    choice: { profile?: string } = { profile: user.keyProfile },
+  ): Promise<AegisToolDefinition[]> {
+    const tools = await this.discoverTools(user, choice.profile);
     const ceiling = this.waitCeilingSeconds;
     if (ceiling === null) return tools;
     return tools.map((tool) =>
@@ -600,16 +640,22 @@ export class OrchestratorClient {
     );
   }
 
-  private async discoverTools(user: ZaruUser): Promise<AegisToolDefinition[]> {
+  private async discoverTools(
+    user: ZaruUser,
+    profile: string | undefined,
+  ): Promise<AegisToolDefinition[]> {
     // The listing is the presenting person's callable set (Zaru ADR-0069 D2):
     // the orchestrator computes it from the credential the server attests
     // with, so the cache is keyed by the person (tenant and user) with the
     // context, never by the context alone, and one person's set is never
     // served to another. A new connection shows within the time to live.
+    // The profile is part of the key: a key's set is computed from it (Zaru
+    // ADR-0071 D3), so a listing under one profile never answers another.
     const cacheKey = JSON.stringify([
       user.tenantId ?? null,
       user.userId,
       user.securityContext,
+      profile ?? null,
     ]);
     const cached = this.toolCache.get(cacheKey);
     const now = Date.now();
@@ -630,6 +676,7 @@ export class OrchestratorClient {
         Accept: "application/json",
         "X-Zaru-Security-Context": user.securityContext,
         ...(user.token ? { Authorization: `Bearer ${user.token}` } : {}),
+        ...(profile !== undefined ? { [PROFILE_HEADER]: profile } : {}),
       },
     });
 
@@ -826,12 +873,17 @@ export class OrchestratorClient {
         ? boundWaitArguments(args, ceiling)
         : null;
 
+    // A key's own profile fills `profile` when the request names none and
+    // chose no binding (Zaru ADR-0071 D3), on every call whatever path made
+    // it; an empty choice is then not sent beside it (AEGIS ADR-140 D10).
+    const profile = requestProfile(user, context);
+    const contexts = profile !== undefined && context.profile === undefined ? undefined : context.contexts;
     const meta: Record<string, unknown> = {
-      ...(context.contexts ? { contexts: context.contexts } : {}),
+      ...(contexts ? { contexts } : {}),
       ...(context.conversationId !== undefined
         ? { conversation_id: context.conversationId }
         : {}),
-      ...(context.profile !== undefined ? { profile: context.profile } : {}),
+      ...(profile !== undefined ? { profile } : {}),
     };
 
     try {

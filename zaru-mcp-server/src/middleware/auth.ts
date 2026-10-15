@@ -19,6 +19,13 @@ export interface ZaruUser {
    * it. `zaru.operator.release` is listed only while it is set (D4).
    */
   operatorEscalation?: { expiresAt: string };
+  /**
+   * The profile chosen for the presented API key on the API keys page, as
+   * the orchestrator's validate answer gives it (Zaru ADR-0071 D3). Set only
+   * for a key that has one. A key with none reaches no connection: the server
+   * lists it no connection family's tool and forwards no profile (D1, D3).
+   */
+  keyProfile?: string;
 }
 
 export interface ZaruRequest extends Request {
@@ -74,6 +81,18 @@ export interface ApiKeyIdentity {
   zaru_tier: string | null;
   scopes: string[];
   operator_escalation?: { expires_at?: unknown } | null;
+  /**
+   * The profile chosen for the key on the API keys page, or null for none
+   * (Zaru ADR-0071 D3). Built against the field name `profile` before the
+   * orchestrator's half names it; absent reads as none.
+   */
+  profile?: string | null;
+}
+
+/** The key's own profile from its validate answer: a non-empty string, else none. */
+export function keyProfileOf(identity: ApiKeyIdentity): string | undefined {
+  const profile = identity.profile;
+  return typeof profile === "string" && profile.length > 0 ? profile : undefined;
 }
 
 /**
@@ -367,6 +386,7 @@ export async function authenticateZaruRequest(
     try {
       const identity = await apiKeyValidator(rawToken);
       const escalation = activeOperatorEscalation(identity);
+      const keyProfile = keyProfileOf(identity);
       if (escalation) {
         user = {
           userId: identity.user_id,
@@ -376,6 +396,7 @@ export async function authenticateZaruRequest(
           isOperator: true,
           tenantId: identity.tenant_id ?? undefined,
           operatorEscalation: { expiresAt: escalation.expiresAt },
+          ...(keyProfile !== undefined ? { keyProfile } : {}),
         };
         return { user };
       }
@@ -387,6 +408,7 @@ export async function authenticateZaruRequest(
         token: rawToken,
         isOperator: false,
         tenantId: identity.tenant_id ?? undefined,
+        ...(keyProfile !== undefined ? { keyProfile } : {}),
       };
       return { user };
     } catch (error) {

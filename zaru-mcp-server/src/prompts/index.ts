@@ -689,6 +689,12 @@ const CONNECTION_NEEDS_TEACHING = [
   .map((sentence) => `\n\n${sentence}`)
   .join("");
 
+// What a key with no profile is taught (Zaru ADR-0071 D3): it reaches none of
+// the person's connections, and the person widens it on the API keys page.
+// One sentence, after the missing-connection teaching, naming no record.
+const KEY_WITHOUT_PROFILE_TEACHING =
+  "\n\nThe API key this conversation comes through reaches none of the person's connections until a profile is chosen for it on the API keys page in Zaru Web; when a message needs one, tell the person that in one sentence and end your turn.";
+
 /** Modes that accept and forward `attachments` when the chat-uploads capability is active. */
 const CHAT_UPLOADS_MODES = new Set(["agentic", "workflow"]);
 
@@ -960,6 +966,7 @@ export function getZaruInit(
   user?: { isOperator: boolean; tier: string },
   contexts: ChosenContexts = {},
   profile?: ChosenProfile,
+  keyWithoutProfile = false,
 ): ZaruInitResponse | null {
   const effectiveMode = mode ?? "chat";
 
@@ -1003,6 +1010,7 @@ export function getZaruInit(
   const augmentedPrompt =
     withUploads +
     CONNECTION_NEEDS_TEACHING +
+    (keyWithoutProfile ? KEY_WITHOUT_PROFILE_TEACHING : "") +
     contextTeaching(contexts) +
     profileTeaching(profile);
 

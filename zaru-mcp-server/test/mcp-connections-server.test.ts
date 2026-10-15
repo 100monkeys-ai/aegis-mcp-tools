@@ -10,6 +10,11 @@
 // bound servers' tools included; under an operator escalation the operator
 // context's tools with the person's plan set); a credential it does not know
 // is answered 401; without a credential it answers the context's static set.
+//
+// Since Zaru ADR-0071 D3 a key with no profile and no choice is listed no
+// connection family's tool (test/deny-by-default-server.test.ts), so every
+// key here carries a profile chosen for it on the API keys page: the set is
+// still the person's as the orchestrator computes it, per person.
 import test from "node:test";
 import assert from "node:assert/strict";
 import * as streamableHttp from "../src/mcp/streamable-http.js";
@@ -71,6 +76,9 @@ function fakeOrchestrator(requests: Request[]) {
   };
 }
 
+/** The profile chosen for each key here (Zaru ADR-0071 D3). */
+const KEY_PROFILE = "5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a";
+
 const person = (userId: string, token: string, over: Partial<ZaruUser> = {}): ZaruUser => ({
   userId,
   tier: "pro",
@@ -78,6 +86,7 @@ const person = (userId: string, token: string, over: Partial<ZaruUser> = {}): Za
   token,
   isOperator: false,
   tenantId: `tenant-${userId}`,
+  keyProfile: KEY_PROFILE,
   ...over,
 });
 
@@ -101,7 +110,7 @@ async function listed(
 
 const namesOf = (tools: Array<{ name: string }>) => tools.map((t) => t.name);
 
-test("Trigger 2 (a): tools/list for two people of one tier answers each their own set, the cache keyed per person", async () => {
+test("Trigger 2 (a): tools/list for two people of one tier, each key on a profile, answers each their own set, the cache keyed per person", async () => {
   const requests: Request[] = [];
   const orchestrator = new OrchestratorClient({
     baseUrl: "http://aegis.test",
@@ -137,7 +146,7 @@ test("Trigger 2 (a): tools/list for two people of one tier answers each their ow
   assert.deepEqual(complaints, []);
 });
 
-test("Trigger 2 (b): a person with a github binding is listed github. tools with no x-zaru-contexts", async () => {
+test("Trigger 2 (b): a person with a github binding, the key on a profile, is listed github. tools with no x-zaru-contexts", async () => {
   const requests: Request[] = [];
   const orchestrator = new OrchestratorClient({
     baseUrl: "http://aegis.test",
@@ -156,7 +165,7 @@ test("Trigger 2 (b): a person with a github binding is listed github. tools with
   );
 });
 
-test("Trigger 2 (c): an escalated key is listed the operator's tools and the person's set together", async () => {
+test("Trigger 2 (c): an escalated key on a profile is listed the operator's tools and the person's set together", async () => {
   const requests: Request[] = [];
   const orchestrator = new OrchestratorClient({
     baseUrl: "http://aegis.test",
