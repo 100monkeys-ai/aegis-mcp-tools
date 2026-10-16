@@ -28,7 +28,7 @@ function createMcpServerForUser(user: ZaruUser, requestId?: string): McpServer {
   const mcpServer = new McpServer(
     {
       name: "zaru-mcp-server",
-      version: "0.15.0-pre-alpha",
+      version: "1.0.0-beta",
     },
     {
       capabilities: {
