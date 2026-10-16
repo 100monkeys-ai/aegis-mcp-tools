@@ -1241,6 +1241,17 @@ export async function connectionNeeded(
   client: OrchestratorClient,
   context: McpRequestContext,
 ): Promise<ConnectionNeededAnswer> {
+  // A key with no profile and no binding chosen reaches none of the person's
+  // connections, whatever they connected (Zaru ADR-0071 D1 (e), D3): it is
+  // told to choose a profile, not that the family is connected. `x-zaru-turn`
+  // changes nothing here.
+  if (keyReachesNoConnection(user, context)) {
+    return {
+      needs: { family: "profile", page: "/vault/profiles" },
+      sentence:
+        "This key reaches none of your connections. Choose a profile for it on the API keys page in Zaru Web, or name one in the request.",
+    };
+  }
   const named = connectionFamily(family);
   const ofFamily = (tools: Array<{ name: string }>) =>
     tools.some((tool) => tool.name.startsWith(named.toolPrefix));
