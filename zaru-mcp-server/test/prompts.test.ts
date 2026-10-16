@@ -666,10 +666,14 @@ test("W41: after calling zaru.mode the model waits for the person", () => {
 // (b), test/connection-needs-server.test.ts): the three sentences on a
 // missing connection are appended to every mode's prompt, after its own text
 // and before any chosen context or profile (598 characters more in each);
+// the agentic pin and its chat-uploads form were re-measured for AEGIS
+// ADR-143 S8c (the S8c test at the end of this file): the transcription line
+// gains S8c's sentence and its two rules on speakers after the audio_path
+// teaching (592 characters more in each);
 // every other pin stands as it was.
 const UNCHANGED_PROMPTS: Array<[string, () => ReturnType<typeof getZaruInit>, number, string]> = [
-  ["agentic", () => getZaruInit("agentic"), 21238, "e1d5da21cd2833cedbe50889731b969b8e8e45f475b3fb22b441fc808ad96404"],
-  ["agentic+chat-uploads", () => getZaruInit("agentic", new Set(["chat-uploads"])), 25048, "5caa9c86f5d7cba3496f577788829af65e583e56868b448955bdcfb42e220124"],
+  ["agentic", () => getZaruInit("agentic"), 21830, "9068f3c26ce0d38196836860e4a256b6639baa32d580e5498612eee89402fb3c"],
+  ["agentic+chat-uploads", () => getZaruInit("agentic", new Set(["chat-uploads"])), 25640, "ce8fd90c03d2e906748e8bfa39e1a0e6d643dad4b4463efbacc5a2fe47aa0713"],
   ["workflow", () => getZaruInit("workflow"), 17642, "1c247bf2d6a75e385b8c2a72cfa5f5d8499546861e2484e3a1257352299505c1"],
   ["workflow+chat-uploads", () => getZaruInit("workflow", new Set(["chat-uploads"])), 21452, "8f8867ee82c1db329f7271238561ce100b22c8a857e9bdc90ee9ef06f9309a15"],
   ["execute", () => getZaruInit("execute"), 13311, "38c26aff0314050a56fed068f43bae639f791c3c02aaa8ce6fe5f36febc0bf46"],
@@ -2098,11 +2102,12 @@ const TRANSCRIBE_SENTENCE = "To turn an attached recording into text, run the wo
  * The agentic TOOL KNOWLEDGE line since failed-run-told-once: D3c's three
  * sentences (no aegis.workflow.wait within the turn; the no-promise sentence
  * at its end), with the run it names and AEGIS ADR-143 S7c's teaching between
- * its first and its second. Until then the line was S5's sentence, the run,
+ * its first and its second, and since AEGIS ADR-143 S8c its sentence and two
+ * rules after S7c's. Until then the line was S5's sentence, the run,
  * `input.audio_path` the attached file's name and the transcript read from
  * aegis.workflow.wait's answer (the step's stdout).
  */
-const TRANSCRIBE_TEACHING = `- ${TRANSCRIBE_SENTENCE} The run is aegis.workflow.run with \`name\` \`transcribe-audio\`, and the chat carries the attachment to the run. \`input.audio_path\` may be left out when one file is attached; otherwise it is the file's name exactly as the chat's attachment marker gives it. The transcript is the run's answer, which reaches the person on the card above. Tell the person the run has started and end your turn; your turn ends there and nothing of yours watches the run after it: promise nothing for after your turn.`;
+const TRANSCRIBE_TEACHING = `- ${TRANSCRIBE_SENTENCE} The run is aegis.workflow.run with \`name\` \`transcribe-audio\`, and the chat carries the attachment to the run. \`input.audio_path\` may be left out when one file is attached; otherwise it is the file's name exactly as the chat's attachment marker gives it. When a recording has more than one voice, such as an interview or a meeting, run transcribe-audio with speakers set to true; the transcript then starts a new paragraph at each change of speaker, labelled Speaker 1 and Speaker 2 in turn, which mark turns and not names, for English recordings only; do not ask another agent to split a transcript into speakers. Set \`input.speakers\` from the person's words or from what the recording is said to be. When you have already returned a flat transcript of a recording of several voices, run transcribe-audio again with \`input.speakers\` set to true. The transcript is the run's answer, which reaches the person on the card above. Tell the person the run has started and end your turn; your turn ends there and nothing of yours watches the run after it: promise nothing for after your turn.`;
 
 /** The prompts S5's teaching changed, as they stood at aegis-mcp-tools 68df01fc. */
 const TRANSCRIBE_PROMPTS_AT_68DF01FC: Array<[string, () => ReturnType<typeof getZaruInit>, number, string]> = [
@@ -3171,9 +3176,9 @@ test("CA3: the workflow test-execution line (Step 5, aegis.task.execute) promise
 /** The no-promise sentence, in the form the run line carries it. */
 const FR_NO_PROMISE = NO_PROMISE_SENTENCES[0];
 
-/** D3c's transcription line, its three sentences, with S7c's teaching and the call it names between its first and its second. */
+/** D3c's transcription line, its three sentences, with S7c's teaching, the call it names and S8c's sentence and rules between its first and its second. */
 const FR_TRANSCRIBE_LINE =
-  "- To turn an attached recording into text, run the workflow transcribe-audio with it. The run is aegis.workflow.run with `name` `transcribe-audio`, and the chat carries the attachment to the run. `input.audio_path` may be left out when one file is attached; otherwise it is the file's name exactly as the chat's attachment marker gives it. The transcript is the run's answer, which reaches the person on the card above. Tell the person the run has started and end your turn; your turn ends there and nothing of yours watches the run after it: promise nothing for after your turn.";
+  "- To turn an attached recording into text, run the workflow transcribe-audio with it. The run is aegis.workflow.run with `name` `transcribe-audio`, and the chat carries the attachment to the run. `input.audio_path` may be left out when one file is attached; otherwise it is the file's name exactly as the chat's attachment marker gives it. When a recording has more than one voice, such as an interview or a meeting, run transcribe-audio with speakers set to true; the transcript then starts a new paragraph at each change of speaker, labelled Speaker 1 and Speaker 2 in turn, which mark turns and not names, for English recordings only; do not ask another agent to split a transcript into speakers. Set `input.speakers` from the person's words or from what the recording is said to be. When you have already returned a flat transcript of a recording of several voices, run transcribe-audio again with `input.speakers` set to true. The transcript is the run's answer, which reaches the person on the card above. Tell the person the run has started and end your turn; your turn ends there and nothing of yours watches the run after it: promise nothing for after your turn.";
 
 /** D3b in the model's words, after the readers of the mode. */
 const FR_FAILED_RUN_RULE =
@@ -3247,6 +3252,44 @@ test("FR4: every mode whose tools read a run (aegis.workflow.wait or aegis.task.
       else if (count !== 1 || !prompt.includes(`${readers} ${FR_FAILED_RUN_RULE}`))
         failures.push(`the ${mode} prompt does not hold, once: ${readers} ${FR_FAILED_RUN_RULE}`);
     } else if (count !== 0) failures.push(`the ${mode} prompt, whose tools read no run, holds the failed-run rule`);
+  }
+  assert.deepEqual(failures, [], failures.join("; "));
+});
+
+// ---------------------------------------------------------------------------
+// AEGIS ADR-143 S8c (Update S8, speaker turns; Trigger (b)): the companion's
+// transcription teaching gains S8c's sentence byte for byte, and the two
+// rules the clause states: speakers is set from the person's words or what
+// the recording is said to be, and a flat transcript already returned for a
+// recording of several voices is run again with speakers true. Taught on the
+// agentic transcription line alone, once; no other mode's prompt holds it.
+// ---------------------------------------------------------------------------
+
+/** S8c's sentence, exactly as the record gives it. */
+const S8C_SENTENCE =
+  "When a recording has more than one voice, such as an interview or a meeting, run transcribe-audio with speakers set to true; the transcript then starts a new paragraph at each change of speaker, labelled Speaker 1 and Speaker 2 in turn, which mark turns and not names, for English recordings only; do not ask another agent to split a transcript into speakers.";
+
+/** S8c's two companion rules, in the model's words. */
+const S8C_RULES = [
+  "Set `input.speakers` from the person's words or from what the recording is said to be.",
+  "When you have already returned a flat transcript of a recording of several voices, run transcribe-audio again with `input.speakers` set to true.",
+];
+
+test("S8c: the agentic transcription line carries S8c's sentence and its two rules, once each, after the audio_path teaching; no other mode's prompt holds them", () => {
+  const failures: string[] = [];
+  for (const [mode, init] of FR_ALL_MODES) {
+    const prompt = init!.system_prompt;
+    for (const text of [S8C_SENTENCE, ...S8C_RULES]) {
+      const count = prompt.split(text).length - 1;
+      if (mode.startsWith("agentic")) {
+        if (count !== 1) failures.push(`the ${mode} prompt holds "${text}" ${count} times, not once`);
+      } else if (count !== 0) failures.push(`the ${mode} prompt holds "${text}"`);
+    }
+    if (!mode.startsWith("agentic")) continue;
+    const line = prompt.split("\n").find((l) => l.startsWith("- To turn an attached recording into text")) ?? "";
+    const taught = ` ${S8C_SENTENCE} ${S8C_RULES.join(" ")} `;
+    if (!line.includes(`otherwise it is the file's name exactly as the chat's attachment marker gives it.${taught}The transcript is the run's answer`))
+      failures.push(`the ${mode} transcription line does not carry S8c's sentence and rules right after the audio_path teaching`);
   }
   assert.deepEqual(failures, [], failures.join("; "));
 });
