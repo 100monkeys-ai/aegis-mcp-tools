@@ -1180,7 +1180,7 @@ export const ZARU_CONNECTION_NEEDED_TOOL = {
       family: {
         type: "string",
         description:
-          "The connection the message needs: mailbox, calendar, github, nuclear-notes, or another connection's own name.",
+          "The connection the message needs: mailbox, calendar, github, carbon-forge, or another connection's own name.",
       },
     },
     required: ["family"],
@@ -1189,7 +1189,7 @@ export const ZARU_CONNECTION_NEEDED_TOOL = {
 
 /** The refusal of a `family` that names no connection. */
 export const CONNECTION_FAMILY_REFUSAL =
-  "family must name one connection: mailbox, calendar, github, nuclear-notes, or another connection's own name.";
+  "family must name one connection: mailbox, calendar, github, carbon-forge, or another connection's own name.";
 
 /** The refusal when the person's connections could not be read. */
 export const CONNECTION_READ_FAILED =
@@ -1206,11 +1206,11 @@ const CONNECTION_FAMILIES: Readonly<
   mailbox: { contextKey: "imap", toolPrefix: "mail.", absent: "A mailbox", own: "Your mailbox" },
   calendar: { contextKey: "caldav", toolPrefix: "calendar.", absent: "A calendar", own: "Your calendar" },
   github: { contextKey: "github", toolPrefix: "github.", absent: "GitHub", own: "Your GitHub" },
-  "nuclear-notes": {
-    contextKey: "nuclear-notes",
-    toolPrefix: "nuclear-notes.",
-    absent: "Nuclear Notes",
-    own: "Your Nuclear Notes",
+  "carbon-forge": {
+    contextKey: "carbon-forge",
+    toolPrefix: "carbon-forge.",
+    absent: "Carbon Forge",
+    own: "Your Carbon Forge",
   },
 };
 
