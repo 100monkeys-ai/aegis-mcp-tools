@@ -29,7 +29,7 @@
   "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
   "workers_dev": true,
   "observability": { "enabled": true },
-  // Beside the AEGIS services it calls, as Nuclear Notes places its Workers.
+  // Beside the AEGIS services it calls, as Carbon Forge places its Workers.
   "placement": { "region": "gcp:us-central1" },
 
   "env": {
