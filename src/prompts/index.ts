@@ -32,5 +32,3 @@ export const CONNECTION_NEEDS = "A message needs a connection to continue.";
 export const CONNECTION_NEEDS_TEACHING = `A message needs a connection to continue. It will use the binding your profile names, if it holds one. For GitHub, the tools whose names begin with github. For Carbon Forge, the tools whose names begin with carbon-forge.`;
 
 export const CARBON_FORGE_TEACHING = `For Carbon Forge, the tools whose names begin with carbon-forge.`;
-
-export const NUCLEAR_NOTES_TEACHING = CARBON_FORGE_TEACHING;
