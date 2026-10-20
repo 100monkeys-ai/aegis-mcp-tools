@@ -288,7 +288,7 @@ export interface ConnectionNeeds {
   page: string;
 }
 
-/** A connection family: `mailbox`, `calendar`, `github`, `nuclear-notes`, or a server's own name. */
+/** A connection family: `mailbox`, `calendar`, `github`, `carbon-forge`, or a server's own name. */
 export const CONNECTION_FAMILY = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 
 const PROFILE_PAGE =
@@ -1028,8 +1028,8 @@ export class OrchestratorClient {
   /**
    * The conversation's chosen profile, read once as the caller: `GET
    * /v1/profiles/{id}` with the caller's own token (AEGIS ADR-140 D3, D12),
-   * answered `{"profile": {...}}` to its owner. Its name, default Nuclear
-   * Notes workspace and instructions are what the model is taught. A refusal
+   * answered `{"profile": {...}}` to its owner. Its name, default Carbon
+   * Forge workspace and instructions are what the model is taught. A refusal
    * (404 for a profile not the caller's, 403 without `profile:read`), a
    * failure or an answer of another shape is null and logged: the model is
    * taught no profile, and the calls still carry it, for the orchestrator to
