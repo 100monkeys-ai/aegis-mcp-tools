@@ -451,6 +451,62 @@ const CONNECTION_NEEDS_TEACHING = [
 /** A served prompt without D3 (b)'s appended teaching (it appears once, after the mode's own text). */
 const withoutConnectionNeeds = (prompt: string) => prompt.replace(CONNECTION_NEEDS_TEACHING, "");
 
+// ---------------------------------------------------------------------------
+// Show, don't tell (Zaru ADR-0075 S1 (a) to (c), S2 (a) and (b)): the exact
+// sentences the record adds or rewrites, and the helper that takes them out
+// so the history tables below can rebuild a prompt as it stood before them.
+// ---------------------------------------------------------------------------
+
+/** S1 (a)'s two rules, at the end of every tool-calling mode's mandatory rules. */
+const SHOW_DONT_TELL_RULE = `Show, don't tell. Never write that you are about to do something, or that you are doing it, unless this same reply makes that tool call. A reply that ends with words such as "Reading it now", "Verifying" or "Doing it now" and calls no tool is wrong: make the call, or say plainly that you have stopped and what you are waiting for.`;
+const SAY_WHAT_SHOWED_RULE = `Say only what a tool's answer showed, in this turn or an earlier one. Never say a change was made, is waiting for approval, was verified or has landed, and never give an approval id, a commit sha or a count, unless a tool's answer says so.`;
+
+/** S2 (a)'s two rules; the first ends with its mode's own sentence. */
+const SMALLEST_STEP_RULE = `Take the next smallest step. Say in one sentence the one step you are taking, and take it in the same reply: one tool call, or calls made together that answer one question. Never lay out the whole task as a plan, and never join steps with "then" in one sentence.`;
+const CHECKPOINT_RULE = `Stop at a natural checkpoint: a result the person can see, a change waiting for their approval, or a question only they can answer. End your turn there with what the tool showed, in a sentence or two, and the one next step you would take.`;
+const SEQUENCE_IS_ONE_STEP = `For one request for a result, the mandatory sequence below is one step and runs to its report in this turn.`;
+const SMALLEST_STEP_MODE_SENTENCE: Record<string, string> = {
+  agentic: SEQUENCE_IS_ONE_STEP,
+  workflow: SEQUENCE_IS_ONE_STEP,
+  operator: SEQUENCE_IS_ONE_STEP,
+  live: `One execute_typescript program is one step.`,
+  vibecode: `One execute_typescript program is one step, however many files it writes.`,
+};
+
+/** S1 (b)'s paragraph, in chat mode right after the stop-and-wait paragraph. */
+const CHAT_SHOW_DONT_TELL = `Show, don't tell: when a request needs Agentic mode, call zaru.mode in this reply. Never write that you will switch, or ask whether to, instead of calling it: the person chooses after the call.`;
+const CHAT_STOP_AND_WAIT = `After you call zaru.mode, stop and wait: the user chooses whether to switch. Do not go on to answer the request in Chat mode.`;
+
+/** S1 (c) and S2 (b): the persona lines, each as it stood and as it stands. */
+const PERSONA_REWRITES: Array<[string, string]> = [
+  [
+    `automation — and you keep going until the task is done right.`,
+    `automation — one small step at a time, until the task is done right.`,
+  ],
+  [`- "I got you." "I am on it." "I have your back."`, `- "I got you." "I have your back."`],
+  [
+    `- Never hedge: say "Yes. I am on it." not "I can try to help with that."`,
+    `- Never hedge: say "Yes." and act in the same reply, not "I can try to help with that."`,
+  ],
+  [
+    `- Show your work: "I caught that. I am fixing it right now so you can send with confidence."`,
+    `- Show your work, after the tool has answered: "I caught that and fixed it. Here is what changed."`,
+  ],
+];
+
+const SHOW_DONT_TELL_RULES = [SHOW_DONT_TELL_RULE, SAY_WHAT_SHOWED_RULE, SMALLEST_STEP_RULE, CHECKPOINT_RULE];
+
+/** A served prompt as it stood before show-dont-tell: its numbered rules, chat's paragraph and the persona rewrites taken out. */
+const withoutShowDontTell = (prompt: string) => {
+  let before = prompt
+    .split("\n")
+    .filter((line) => !SHOW_DONT_TELL_RULES.some((rule) => line.replace(/^\d+\. /, "").startsWith(rule)))
+    .join("\n")
+    .replace(`\n\n${CHAT_SHOW_DONT_TELL}`, "");
+  for (const [old, rewritten] of PERSONA_REWRITES) before = before.replace(rewritten, old);
+  return before;
+};
+
 function chatOwnText(): string {
   // connection-needs-server: D3 (b)'s teaching is appended to every mode and is not the chat mode's own text.
   const chat = withoutConnectionNeeds(getZaruInit("chat")!.system_prompt);
@@ -674,16 +730,21 @@ test("W41: after calling zaru.mode the model waits for the person", () => {
 // missing-connection sentence names the product Carbon Forge where it named
 // the product's former name (one character fewer in each; with that one
 // name put back, every prompt is its earlier pin byte for byte);
+// every pin was re-measured for zaru-prompts-show-dont-tell (Zaru ADR-0075
+// S1 (a) to (c), S2 (a) and (b), the tests at the end of this file): the
+// persona's four lines are rewritten in every mode, and each tool-calling mode
+// gains its numbered show-don't-tell rules; withoutShowDontTell takes them out
+// for the history tables, so chat's history pin stands;
 // every other pin stands as it was.
 const UNCHANGED_PROMPTS: Array<[string, () => ReturnType<typeof getZaruInit>, number, string]> = [
-  ["agentic", () => getZaruInit("agentic"), 21829, "2bb894fa9ae6f6b298ec13906db587df58c2aacdacd1a89fad59f3a7c54a162c"],
-  ["agentic+chat-uploads", () => getZaruInit("agentic", new Set(["chat-uploads"])), 25639, "fe2926cd75845136f45b5b0d3f66f4d1258d1af228e640299850b97f17b6cf84"],
-  ["workflow", () => getZaruInit("workflow"), 17641, "75b565863b66588098fa23675a2a5382265627bdbe3f648cc32d5a3957979c5a"],
-  ["workflow+chat-uploads", () => getZaruInit("workflow", new Set(["chat-uploads"])), 21451, "be5c84562a309677e580b8d9de2266db959b5592c44b9e439ab1ae12073edd2d"],
-  ["execute", () => getZaruInit("execute"), 13310, "5b21a1eee030717f48bd4c51092a4c8a4bc797bcf0f98a7843523a59baa082ee"],
-  ["live", () => getZaruInit("live", new Set(["live"]), "browser"), 9155, "9c0240e1c081d7133ff630f9f649d521737767c72244f391b9dc328b62c1f554"],
-  ["vibecode", () => getZaruInit("vibecode", new Set(["vibecode"]), "browser"), 12585, "710ead2d1823f3f504127bda366d44237c122cbfb09d72151eebbd3ece2e2c2a"],
-  ["operator", () => getZaruInit("operator", new Set(), undefined, { isOperator: true, tier: "operator" }), 11846, "933ac4d08c7ad47f7cac87c9b879eaba941d66b93c2fc8ba3e20640671b7822a"],
+  ["agentic", () => getZaruInit("agentic"), 23038, "6dc3ed5b94b7168b9659ef84341d72bf623d054a988285f52287c5787f59d8c1"],
+  ["agentic+chat-uploads", () => getZaruInit("agentic", new Set(["chat-uploads"])), 26848, "6371ca52fe819dbee6e251a9cdec3369698b9ef47713c3156d3c48e41f0c1724"],
+  ["workflow", () => getZaruInit("workflow"), 18850, "dc4df54676dd640d8f53f567a2bff12f9b0514cd6ea42e4342a914aeba61594d"],
+  ["workflow+chat-uploads", () => getZaruInit("workflow", new Set(["chat-uploads"])), 22660, "36382eb490438b059c7b3fdf826dbe1308c2a92d6d09a6aed4399d70d9b7f8c4"],
+  ["execute", () => getZaruInit("execute"), 13902, "b2d25cf7a960cdda6a9ea0b5432682fac937160ec7dbfb460f1d4a1950acf899"],
+  ["live", () => getZaruInit("live", new Set(["live"]), "browser"), 10302, "b828c6f88462e29c2b57a09edb6ce663ec5c8c260586c17a049b835b2d8538f9"],
+  ["vibecode", () => getZaruInit("vibecode", new Set(["vibecode"]), "browser"), 13762, "36b1043bc049a45f8a0e311b0fbb815b15b19bc963bb5a8a2f4c5c00dbeeb801"],
+  ["operator", () => getZaruInit("operator", new Set(), undefined, { isOperator: true, tier: "operator" }), 13054, "d033c27612e9a0c3fecca0693b1483ef393fd936cc530f45a7a0bfa1d017a078"],
 ];
 
 test("W41: every other mode's prompt is unchanged byte for byte", () => {
@@ -2044,7 +2105,7 @@ test("W52: the agentic and execute tool lists hold aegis.image.generate once, ri
 test("W52: every other mode's prompt is unchanged byte for byte, and the agentic and execute prompts are their prompts at 684cac52 with only the image teaching's line and the image exception added", () => {
   const failures: string[] = [];
   const digest = (text: string) => createHash("sha256").update(text).digest("hex");
-  const chat = withoutConnectionNeeds(getZaruInit("chat")!.system_prompt); // connection-needs-server: D3 (b)'s teaching taken out for the history pins
+  const chat = withoutShowDontTell(withoutConnectionNeeds(getZaruInit("chat")!.system_prompt)); // connection-needs-server: D3 (b)'s teaching taken out for the history pins; show-dont-tell: its sentences too
   if (chat.length !== CHAT_PROMPT_AT_684CAC52[0] || digest(chat) !== CHAT_PROMPT_AT_684CAC52[1])
     failures.push("the 'chat' prompt changed");
   const changed = new Set(IMAGE_TEACHING_PROMPTS_AT_684CAC52.map(([name]) => name));
@@ -2054,7 +2115,7 @@ test("W52: every other mode's prompt is unchanged byte for byte, and the agentic
     if (prompt.length !== length || digest(prompt) !== sha256) failures.push(`the '${name}' prompt changed`);
   }
   for (const [name, init, length, sha256] of IMAGE_TEACHING_PROMPTS_AT_684CAC52) {
-    const prompt = withoutConnectionNeeds(init()!.system_prompt);
+    const prompt = withoutShowDontTell(withoutConnectionNeeds(init()!.system_prompt));
     const line = `\n${IMAGE_TEACHING}`;
     if (!prompt.includes(line)) {
       failures.push(`the '${name}' prompt lacks the image teaching's line`);
@@ -2129,7 +2190,7 @@ test("W54: the image exception makes aegis.image.generate its one act and names 
 test("W55: the agentic and execute prompts are their prompts at 13a3cb5d with only the image exception added and the image TOOL KNOWLEDGE line shortened; every other mode's prompt is unchanged byte for byte", () => {
   const failures: string[] = [];
   const digest = (text: string) => createHash("sha256").update(text).digest("hex");
-  const chat = withoutConnectionNeeds(getZaruInit("chat")!.system_prompt); // connection-needs-server: D3 (b)'s teaching taken out for the history pins
+  const chat = withoutShowDontTell(withoutConnectionNeeds(getZaruInit("chat")!.system_prompt)); // connection-needs-server: D3 (b)'s teaching taken out for the history pins; show-dont-tell: its sentences too
   if (chat.length !== CHAT_PROMPT_AT_684CAC52[0] || digest(chat) !== CHAT_PROMPT_AT_684CAC52[1]) failures.push("the 'chat' prompt changed");
   const changed = new Set(IMAGE_EXCEPTION_PROMPTS_AT_13A3CB5D.map(([name]) => name));
   for (const [name, init, length, sha256] of UNCHANGED_PROMPTS) {
@@ -2138,7 +2199,7 @@ test("W55: the agentic and execute prompts are their prompts at 13a3cb5d with on
     if (prompt.length !== length || digest(prompt) !== sha256) failures.push(`the '${name}' prompt changed`);
   }
   for (const [name, init, length, sha256] of IMAGE_EXCEPTION_PROMPTS_AT_13A3CB5D) {
-    const prompt = withoutConnectionNeeds(init()!.system_prompt);
+    const prompt = withoutShowDontTell(withoutConnectionNeeds(init()!.system_prompt));
     if (prompt.includes(IMAGE_TEACHING_AT_13A3CB5D)) failures.push(`the '${name}' prompt still holds the image line of 13a3cb5d`);
     if (!prompt.includes(`\n${IMAGE_TEACHING}\n`) || !prompt.includes(`${IMAGE_REQUEST_EXCEPTION}\n\n`)) {
       failures.push(`the '${name}' prompt lacks the shortened image line or the image exception`);
@@ -2216,7 +2277,7 @@ test("W56: the agentic prompt teaches transcribe-audio once, as its own TOOL KNO
 test("W57: the agentic prompts are their prompts at 68df01fc with only the transcribe-audio line added; every other mode's prompt is unchanged byte for byte, and the tool lists still offer aegis.workflow.run and aegis.workflow.wait in agentic and not in execute", () => {
   const failures: string[] = [];
   const digest = (text: string) => createHash("sha256").update(text).digest("hex");
-  const chat = withoutConnectionNeeds(getZaruInit("chat")!.system_prompt); // connection-needs-server: D3 (b)'s teaching taken out for the history pins
+  const chat = withoutShowDontTell(withoutConnectionNeeds(getZaruInit("chat")!.system_prompt)); // connection-needs-server: D3 (b)'s teaching taken out for the history pins; show-dont-tell: its sentences too
   if (chat.length !== CHAT_PROMPT_AT_684CAC52[0] || digest(chat) !== CHAT_PROMPT_AT_684CAC52[1]) failures.push("the 'chat' prompt changed");
   const changed = new Set(TRANSCRIBE_PROMPTS_AT_68DF01FC.map(([name]) => name));
   for (const [name, init, length, sha256] of UNCHANGED_PROMPTS) {
@@ -2225,7 +2286,7 @@ test("W57: the agentic prompts are their prompts at 68df01fc with only the trans
     if (prompt.length !== length || digest(prompt) !== sha256) failures.push(`the '${name}' prompt changed`);
   }
   for (const [name, init, length, sha256] of TRANSCRIBE_PROMPTS_AT_68DF01FC) {
-    const prompt = withoutConnectionNeeds(init()!.system_prompt);
+    const prompt = withoutShowDontTell(withoutConnectionNeeds(init()!.system_prompt));
     const line = `\n${TRANSCRIBE_TEACHING}`;
     if (!prompt.includes(line)) {
       failures.push(`the '${name}' prompt lacks the transcribe-audio line`);
@@ -2401,7 +2462,7 @@ test("WT5: each teaching line names the tool's arguments as the orchestrator's h
 test("WT6: with the gate-conduct lines removed, the agentic prompts are their prompts at 3e3ff265, the workflow prompts their prompts at c3706b92 with only the TOOL KNOWLEDGE block of the three lines added; every other mode's prompt is unchanged byte for byte", () => {
   const failures: string[] = [];
   const digest = (text: string) => createHash("sha256").update(text).digest("hex");
-  const chat = withoutConnectionNeeds(getZaruInit("chat")!.system_prompt); // connection-needs-server: D3 (b)'s teaching taken out for the history pins
+  const chat = withoutShowDontTell(withoutConnectionNeeds(getZaruInit("chat")!.system_prompt)); // connection-needs-server: D3 (b)'s teaching taken out for the history pins; show-dont-tell: its sentences too
   if (chat.length !== CHAT_PROMPT_AT_684CAC52[0] || digest(chat) !== CHAT_PROMPT_AT_684CAC52[1]) failures.push("the 'chat' prompt changed");
   const changed = new Set(WORKFLOW_PROMPTS_AT_C3706B92.map(([name]) => name));
   for (const [name, init, length, sha256] of UNCHANGED_PROMPTS) {
@@ -2410,11 +2471,11 @@ test("WT6: with the gate-conduct lines removed, the agentic prompts are their pr
     if (prompt.length !== length || digest(prompt) !== sha256) failures.push(`the '${name}' prompt changed`);
   }
   for (const [name, init, length, sha256] of WORKFLOW_TEACHING_PROMPTS_AT_3E3FF265) {
-    const prompt = stripGateConduct(withoutConnectionNeeds(init()!.system_prompt));
+    const prompt = stripGateConduct(withoutShowDontTell(withoutConnectionNeeds(init()!.system_prompt)));
     if (prompt.length !== length || digest(prompt) !== sha256) failures.push(`the '${name}' prompt is not its prompt at 3e3ff265`);
   }
   for (const [name, init, length, sha256] of WORKFLOW_PROMPTS_AT_C3706B92) {
-    const prompt = stripGateConduct(withoutConnectionNeeds(init()!.system_prompt));
+    const prompt = stripGateConduct(withoutShowDontTell(withoutConnectionNeeds(init()!.system_prompt)));
     if (prompt.split(WORKFLOW_KNOWLEDGE_BLOCK).length !== 2) {
       failures.push(`the '${name}' prompt does not hold the TOOL KNOWLEDGE block of the three lines once`);
       continue;
@@ -3362,4 +3423,104 @@ test("S8c: the agentic transcription line carries S8c's sentence and its two rul
       failures.push(`the ${mode} transcription line does not carry S8c's sentence and rules right after the audio_path teaching`);
   }
   assert.deepEqual(failures, [], failures.join("; "));
+});
+
+// ---------------------------------------------------------------------------
+// Zaru ADR-0075, Trigger 1 (a) to (d): Zaru shows, then tells, and a turn takes
+// the next smallest step and stops at a natural checkpoint. Jeshua, 2026-10-21:
+// "Zaru needs to be retrained to "show, don't tell" because he keeps talking
+// about doing stuff without doing it". The sentences are the constants beside
+// withoutShowDontTell, near the top of this file.
+// ---------------------------------------------------------------------------
+
+/** The tool-calling modes, the number of the last rule before S1 (a)'s two, and whether S2 (a) follows them. */
+const SHOW_DONT_TELL_MODES: Array<[string, () => ReturnType<typeof getZaruInit>, number, boolean]> = [
+  ["agentic", () => getZaruInit("agentic"), 6, true],
+  ["agentic+chat-uploads", () => getZaruInit("agentic", new Set(["chat-uploads"])), 6, true],
+  ["workflow", () => getZaruInit("workflow"), 6, true],
+  ["workflow+chat-uploads", () => getZaruInit("workflow", new Set(["chat-uploads"])), 6, true],
+  ["operator", () => getZaruInit("operator", new Set(), undefined, { isOperator: true, tier: "operator" }), 5, true],
+  ["execute", () => getZaruInit("execute"), 6, false],
+  ["live", () => getZaruInit("live", new Set(["live"]), "browser"), 8, true],
+  ["vibecode", () => getZaruInit("vibecode", new Set(["vibecode"]), "browser"), 8, true],
+];
+
+/** A mode's mandatory rules: from the heading to the next top-level heading. */
+function mandatoryRules(prompt: string): string {
+  const start = prompt.indexOf("# TOOL USE — MANDATORY RULES");
+  if (start < 0) return "";
+  const next = prompt.indexOf("\n# ", start + 1);
+  return prompt.slice(start, next < 0 ? undefined : next);
+}
+
+test("ADR-0075 S1 (a): every tool-calling mode carries the two show-don't-tell rules verbatim, numbered right after its last rule, at the end of its mandatory rules", () => {
+  const failures: string[] = [];
+  for (const [name, init, last, stepRules] of SHOW_DONT_TELL_MODES) {
+    const rules = mandatoryRules(init()!.system_prompt);
+    const block = `\n${last + 1}. ${SHOW_DONT_TELL_RULE}\n${last + 2}. ${SAY_WHAT_SHOWED_RULE}`;
+    if (rules.split(block).length !== 2) {
+      failures.push(`the ${name} prompt's mandatory rules do not carry "${SHOW_DONT_TELL_RULE}" and "${SAY_WHAT_SHOWED_RULE}" once as rules ${last + 1} and ${last + 2}`);
+      continue;
+    }
+    if (!rules.slice(0, rules.indexOf(block)).includes(`\n${last}. `)) failures.push(`the ${name} prompt's rule ${last} is not before its show-don't-tell rules`);
+    const after = rules.slice(rules.indexOf(block) + block.length);
+    if (!stepRules && after.trim() !== "") failures.push(`the ${name} prompt's show-don't-tell rules are not the end of its mandatory rules`);
+  }
+  for (const [mode, init] of ALL_MODES) {
+    if (mode !== "chat") continue;
+    if (init!.system_prompt.includes(SHOW_DONT_TELL_RULE) || init!.system_prompt.includes(SAY_WHAT_SHOWED_RULE))
+      failures.push("the chat prompt carries S1 (a)'s rules");
+  }
+  assert.deepEqual(failures, [], failures.join("; "));
+});
+
+test("ADR-0075 S2 (a): agentic, workflow, operator, live and vibecode carry the smallest-step rule with their mode's sentence and the checkpoint rule right after S1 (a)'s, at the end of their mandatory rules; execute and chat carry neither", () => {
+  const failures: string[] = [];
+  for (const [name, init, last, stepRules] of SHOW_DONT_TELL_MODES) {
+    const prompt = init()!.system_prompt;
+    const rules = mandatoryRules(prompt);
+    if (!stepRules) {
+      if (prompt.includes(SMALLEST_STEP_RULE) || prompt.includes(CHECKPOINT_RULE)) failures.push(`the ${name} prompt carries S2 (a)'s rules`);
+      continue;
+    }
+    const mode = name.split("+")[0];
+    const block = `\n${last + 2}. ${SAY_WHAT_SHOWED_RULE}\n${last + 3}. ${SMALLEST_STEP_RULE} ${SMALLEST_STEP_MODE_SENTENCE[mode]}\n${last + 4}. ${CHECKPOINT_RULE}`;
+    if (rules.split(block).length !== 2 || !rules.trimEnd().endsWith(`${last + 4}. ${CHECKPOINT_RULE}`))
+      failures.push(`the ${name} prompt does not end its mandatory rules with "${SMALLEST_STEP_RULE} ${SMALLEST_STEP_MODE_SENTENCE[mode]}" and "${CHECKPOINT_RULE}" as rules ${last + 3} and ${last + 4}`);
+  }
+  const chat = getZaruInit("chat")!.system_prompt;
+  if (chat.includes(SMALLEST_STEP_RULE) || chat.includes(CHECKPOINT_RULE)) failures.push("the chat prompt carries S2 (a)'s rules");
+  assert.deepEqual(failures, [], failures.join("; "));
+});
+
+test("ADR-0075 S1 (b): the chat prompt carries the show-don't-tell paragraph once, as its own paragraph right after the stop-and-wait paragraph; no other mode carries it", () => {
+  const chat = getZaruInit("chat")!.system_prompt;
+  assert.ok(
+    chat.split(`\n\n${CHAT_STOP_AND_WAIT}\n\n${CHAT_SHOW_DONT_TELL}\n\n`).length === 2,
+    `the chat prompt does not carry "${CHAT_SHOW_DONT_TELL}" once, as its own paragraph right after "${CHAT_STOP_AND_WAIT}"`,
+  );
+  for (const [name, init] of SHOW_DONT_TELL_MODES) {
+    assert.ok(!init()!.system_prompt.includes(CHAT_SHOW_DONT_TELL), `the ${name} prompt carries chat's show-don't-tell paragraph`);
+  }
+});
+
+test("ADR-0075 S1 (c) and S2 (b): every mode's persona carries the four rewritten lines, and none carries \"I am on it.\" or \"I am fixing it right now\"", () => {
+  const failures: string[] = [];
+  const modes: Array<[string, () => ReturnType<typeof getZaruInit>]> = [["chat", () => getZaruInit("chat")], ...SHOW_DONT_TELL_MODES.map(([name, init]) => [name, init] as [string, () => ReturnType<typeof getZaruInit>])];
+  for (const [name, init] of modes) {
+    const prompt = init()!.system_prompt;
+    for (const [old, rewritten] of PERSONA_REWRITES) {
+      if (prompt.split(rewritten).length !== 2) failures.push(`the ${name} prompt does not carry "${rewritten}" once`);
+      if (prompt.includes(old)) failures.push(`the ${name} prompt still carries "${old}"`);
+    }
+    for (const gone of [`"I am on it."`, "I am fixing it right now"]) {
+      if (prompt.includes(gone)) failures.push(`the ${name} prompt carries ${gone}`);
+    }
+  }
+  assert.deepEqual(failures, [], failures.join("; "));
+});
+
+test("ADR-0075 Trigger 2: no sentence the record adds names a decision record", () => {
+  const added = [...SHOW_DONT_TELL_RULES, ...Object.values(SMALLEST_STEP_MODE_SENTENCE), CHAT_SHOW_DONT_TELL, ...PERSONA_REWRITES.map(([, rewritten]) => rewritten)];
+  assert.deepEqual(added.filter((sentence) => /ADR-[0-9]|CD-[0-9]/.test(sentence)), []);
 });
