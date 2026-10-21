@@ -936,6 +936,66 @@ test("D3: both types chosen teach both sentences under one heading, Carbon Forge
   assert.deepEqual(complaints, []);
 });
 
+// The server's two names (NN ADR-0198, Update of 2026-10-21, R3 step 3): a
+// chosen `carbon-forge` context is taught Carbon Forge's sentence naming the
+// `carbon-forge.` tools, in the `nuclear-notes` position and taking
+// '_context' as it does, while the `nuclear-notes` sentence stays byte for
+// byte as it was at adfebb3.
+
+/** Carbon Forge's sentence under the server's new name. */
+const CARBON_FORGE_SENTENCE =
+  "The person has chosen a context above the chat input, and its tools are listed to you under its name (for Carbon Forge, the tools whose names begin with carbon-forge.). They reach what the person keeps there, as the person, and nothing else. When a message touches something the person may have written down, search and read it with these tools within this turn before you answer, and name what you read so the person can open it. Read and change only what the message asks for. If a call is refused, tell the person in one sentence and answer without it.";
+
+/** The `nuclear-notes` teaching as measured at adfebb3: its length and sha256, the same in every mode. */
+const NUCLEAR_NOTES_TEACHING_AT_ADFEBB3: readonly [number, string] = [
+  589,
+  "03dda6af5eca391611843890569520fa069ba1262a8045aaee9b58a1acf6400d",
+];
+
+test("carbon-forge: a chosen carbon-forge context teaches Carbon Forge's sentence once, naming the carbon-forge. tools, in every mode", () => {
+  const complaints: string[] = [];
+  for (const contexts of [{ "carbon-forge": [BINDING_A] }, { "carbon-forge": BINDING_A, "nuclear-notes": null }] as Contexts[]) {
+    for (const [mode, gained] of teachingsFor(contexts)) {
+      if (gained !== taught(CARBON_FORGE_SENTENCE)) {
+        complaints.push(`${mode} ${JSON.stringify(contexts)}: taught ${JSON.stringify(gained.slice(0, 200))}`);
+      }
+      const times = gained.split("for Carbon Forge,").length - 1;
+      if (times !== 1) complaints.push(`${mode} ${JSON.stringify(contexts)}: Carbon Forge's sentence taught ${times} times`);
+    }
+  }
+  assert.deepEqual(complaints, []);
+});
+
+test("carbon-forge: taught in the nuclear-notes position, before GitHub's sentence, and two of its bindings add the '_context' sentence last", () => {
+  const complaints: string[] = [];
+  for (const [mode, gained] of teachingsFor({ github: [BINDING_B], "carbon-forge": [BINDING_A] })) {
+    if (gained !== taught(CARBON_FORGE_SENTENCE, GITHUB_SENTENCE)) {
+      complaints.push(`${mode} with github: got ${JSON.stringify(gained.slice(0, 200))}`);
+    }
+  }
+  for (const [mode, gained] of teachingsFor({ imap: [BINDING_C], "carbon-forge": [BINDING_A, BINDING_B] })) {
+    if (gained !== taught(CARBON_FORGE_SENTENCE, MAILBOX_SENTENCE, SEVERAL_OF_ONE_KIND)) {
+      complaints.push(`${mode} with two bindings: got ${JSON.stringify(gained.slice(0, 200))}`);
+    }
+  }
+  assert.deepEqual(complaints, []);
+});
+
+test("carbon-forge: a chosen nuclear-notes context is taught byte for byte as at adfebb3, with no carbon-forge. sentence", () => {
+  const complaints: string[] = [];
+  const [length, sha256] = NUCLEAR_NOTES_TEACHING_AT_ADFEBB3;
+  for (const contexts of [{ "nuclear-notes": [BINDING_A] }, { "nuclear-notes": BINDING_A, "carbon-forge": null }] as Contexts[]) {
+    for (const [mode, gained] of teachingsFor(contexts)) {
+      const sha = createHash("sha256").update(gained).digest("hex");
+      if (gained.length !== length || sha !== sha256) {
+        complaints.push(`${mode} ${JSON.stringify(contexts)}: ${gained.length} bytes, sha256 ${sha}`);
+      }
+      if (gained.includes("carbon-forge.")) complaints.push(`${mode} ${JSON.stringify(contexts)}: carbon-forge. taught`);
+    }
+  }
+  assert.deepEqual(complaints, []);
+});
+
 test("D3a: a server with no sentence of its own takes the generic sentence, never Carbon Forge's paragraph, after the table's servers by name", () => {
   const complaints: string[] = [];
   for (const [mode, gained] of teachingsFor({ zeta: [BINDING_A] })) {

@@ -589,6 +589,13 @@ const CONTEXT_SENTENCES: ReadonlyArray<readonly [string, string, boolean]> = [
     "The person has chosen a context above the chat input, and its tools are listed to you under its name (for Carbon Forge, the tools whose names begin with nuclear-notes.). They reach what the person keeps there, as the person, and nothing else. When a message touches something the person may have written down, search and read it with these tools within this turn before you answer, and name what you read so the person can open it. Read and change only what the message asks for. If a call is refused, tell the person in one sentence and answer without it.",
     true,
   ],
+  // Carbon Forge's server under the name it will be listed by (NN ADR-0198,
+  // Update of 2026-10-21, R3 step 3), taught in the same position.
+  [
+    "carbon-forge",
+    "The person has chosen a context above the chat input, and its tools are listed to you under its name (for Carbon Forge, the tools whose names begin with carbon-forge.). They reach what the person keeps there, as the person, and nothing else. When a message touches something the person may have written down, search and read it with these tools within this turn before you answer, and name what you read so the person can open it. Read and change only what the message asks for. If a call is refused, tell the person in one sentence and answer without it.",
+    true,
+  ],
   [
     "github",
     "The tools whose names begin with github. reach the person's GitHub repositories, issues and pull requests as their token allows. Read and change only what the message asks for. A merge or a change to a file on GitHub waits for the person's approval; say so when you make one. If a call is refused, tell the person in one sentence and answer without it.",

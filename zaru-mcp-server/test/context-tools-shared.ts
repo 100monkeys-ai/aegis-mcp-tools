@@ -385,6 +385,11 @@ export function registerContextToolsTests(
     const complaints: string[] = [];
     const withCarbonForge = await prompt(JSON.stringify({ "nuclear-notes": [BINDING] }));
     if (!withCarbonForge.includes(`(${carbonForge} ${contextPrefix})`)) complaints.push("nuclear-notes: Carbon Forge's paragraph not taught");
+    // The server's new name (NN ADR-0198, Update of 2026-10-21, R3 step 3):
+    // the same paragraph, naming the carbon-forge. tools.
+    const withNewName = await prompt(JSON.stringify({ "carbon-forge": [BINDING] }));
+    if (!withNewName.includes(`(${carbonForge} the tools whose names begin with carbon-forge.)`)) complaints.push("carbon-forge: Carbon Forge's paragraph not taught");
+    if (withNewName.includes(contextPrefix)) complaints.push("carbon-forge: the nuclear-notes. paragraph taught");
     const withGithub = await prompt(JSON.stringify({ github: [BINDING], "nuclear-notes": null }));
     if (!withGithub.includes(github)) complaints.push("github: GitHub's sentence not taught");
     if (taughtCarbonForge(withGithub)) complaints.push("github: Carbon Forge's paragraph taught");

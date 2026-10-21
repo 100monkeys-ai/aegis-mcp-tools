@@ -1180,7 +1180,7 @@ export const ZARU_CONNECTION_NEEDED_TOOL = {
       family: {
         type: "string",
         description:
-          "The connection the message needs: mailbox, calendar, github, nuclear-notes, or another connection's own name.",
+          "The connection the message needs: mailbox, calendar, github, nuclear-notes, carbon-forge, or another connection's own name.",
       },
     },
     required: ["family"],
@@ -1189,7 +1189,7 @@ export const ZARU_CONNECTION_NEEDED_TOOL = {
 
 /** The refusal of a `family` that names no connection. */
 export const CONNECTION_FAMILY_REFUSAL =
-  "family must name one connection: mailbox, calendar, github, nuclear-notes, or another connection's own name.";
+  "family must name one connection: mailbox, calendar, github, nuclear-notes, carbon-forge, or another connection's own name.";
 
 /** The refusal when the person's connections could not be read. */
 export const CONNECTION_READ_FAILED =
@@ -1199,6 +1199,9 @@ export const CONNECTION_READ_FAILED =
  * Each family's chosen-context key in `x-zaru-contexts`, the prefix of its
  * tools' names, and how a sentence names it when it is missing and when it
  * is the person's. A family not listed here is a server, named by itself.
+ * Carbon Forge's server answers to two names while it is renamed (NN
+ * ADR-0198, Update of 2026-10-21, R3 step 3): `nuclear-notes`, the name the
+ * orchestrator lists today, and `carbon-forge`, the name it will list.
  */
 const CONNECTION_FAMILIES: Readonly<
   Record<string, { contextKey: string; toolPrefix: string; absent: string; own: string }>
@@ -1209,6 +1212,12 @@ const CONNECTION_FAMILIES: Readonly<
   "nuclear-notes": {
     contextKey: "nuclear-notes",
     toolPrefix: "nuclear-notes.",
+    absent: "Carbon Forge",
+    own: "Your Carbon Forge",
+  },
+  "carbon-forge": {
+    contextKey: "carbon-forge",
+    toolPrefix: "carbon-forge.",
     absent: "Carbon Forge",
     own: "Your Carbon Forge",
   },

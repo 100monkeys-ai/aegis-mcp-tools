@@ -288,7 +288,7 @@ export interface ConnectionNeeds {
   page: string;
 }
 
-/** A connection family: `mailbox`, `calendar`, `github`, `nuclear-notes`, or a server's own name. */
+/** A connection family: `mailbox`, `calendar`, `github`, `nuclear-notes`, `carbon-forge`, or a server's own name. */
 export const CONNECTION_FAMILY = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 
 const PROFILE_PAGE =

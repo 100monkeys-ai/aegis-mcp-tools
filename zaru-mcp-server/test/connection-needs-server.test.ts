@@ -294,6 +294,54 @@ test("Trigger 2 (b): each family names itself, and a remote server by its own na
   }
 });
 
+// The server's two names (NN ADR-0198, Update of 2026-10-21, R3 step 3):
+// `carbon-forge` is accepted beside `nuclear-notes`, names Carbon Forge, and
+// reads its choice under its own contexts key and its tools by its own prefix.
+test("carbon-forge: zaru.connection.needed accepts the family carbon-forge, names Carbon Forge, and reads the contexts key carbon-forge", async () => {
+  const missing = await needed({ listed: ["web.search"], calls: [] }, {}, "carbon-forge");
+  assert.equal(missing.isError, false);
+  assert.deepEqual(missing.answer, {
+    needs: { family: "carbon-forge", page: "/vault/connections" },
+    sentence: "Carbon Forge is not connected to Zaru. Connect it on the Connections page in Zaru Web.",
+  });
+  const unchosen = await needed(
+    { listed: ["carbon-forge.pages.read"], calls: [] },
+    { zaruTurn: true, contexts: { "nuclear-notes": BINDING_ID } },
+    "carbon-forge",
+  );
+  assert.deepEqual(unchosen.answer, {
+    needs: { family: "carbon-forge", page: "/vault/connections" },
+    sentence: "Your Carbon Forge is connected but not chosen for this conversation. Choose it under Context above the chat input.",
+  });
+  const chosen = await needed(
+    { listed: ["carbon-forge.pages.read"], calls: [] },
+    { zaruTurn: true, contexts: { "carbon-forge": [BINDING_ID] } },
+    "carbon-forge",
+  );
+  assert.deepEqual(chosen.answer, { needs: null, sentence: "Your Carbon Forge is connected and chosen for this conversation." });
+  const before = await needed(
+    { listed: ["nuclear-notes.pages.read"], calls: [] },
+    { zaruTurn: true, contexts: { "nuclear-notes": BINDING_ID } },
+    "nuclear-notes",
+  );
+  assert.deepEqual(before.answer, { needs: null, sentence: "Your Carbon Forge is connected and chosen for this conversation." });
+});
+
+test("carbon-forge: the family's description and its refusal name carbon-forge beside the other families", async () => {
+  const stub: Stub = { listed: ["web.search"], calls: [] };
+  const tools = await withServer(stub, {}, async (client) => (await client.listTools()).tools);
+  const entry = tools.find((t) => t.name === "zaru.connection.needed");
+  assert.equal(
+    (entry!.inputSchema as any).properties.family.description,
+    "The connection the message needs: mailbox, calendar, github, nuclear-notes, carbon-forge, or another connection's own name.",
+  );
+  const refused = await needed({ listed: ["web.search"], calls: [] }, {}, "");
+  assert.equal(refused.isError, true);
+  assert.deepEqual(refused.answer, {
+    error: "family must name one connection: mailbox, calendar, github, nuclear-notes, carbon-forge, or another connection's own name.",
+  });
+});
+
 test("Trigger 2 (b): connected and chosen, or allowed by the profile: nothing is needed", async () => {
   const chosen = await needed({ listed: ["mail.list"], calls: [] }, { zaruTurn: true, contexts: { imap: BINDING_ID } }, "mailbox");
   assert.deepEqual(chosen.answer, { needs: null, sentence: "Your mailbox is connected and chosen for this conversation." });
