@@ -567,7 +567,7 @@ PASS-THROUGH RULES:
 // server whose tools name their binding by '_context' names two or more
 // bindings. The mail tools name their mailbox by their own 'mailbox' argument
 // (Zaru ADR-0048 Update (2) 3c, AEGIS ADR-125 Update (2) clause 2), so
-// mailboxes never add that sentence. With Nuclear Notes alone chosen the
+// mailboxes never add that sentence. With Carbon Forge alone chosen the
 // teaching is byte for byte what it was with one context type; without a
 // chosen context the prompt is exactly what it was.
 
@@ -586,7 +586,7 @@ const CONTEXT_HEADING = `
 const CONTEXT_SENTENCES: ReadonlyArray<readonly [string, string, boolean]> = [
   [
     "nuclear-notes",
-    "The person has chosen a context above the chat input, and its tools are listed to you under its name (for Nuclear Notes, the tools whose names begin with nuclear-notes.). They reach what the person keeps there, as the person, and nothing else. When a message touches something the person may have written down, search and read it with these tools within this turn before you answer, and name what you read so the person can open it. Read and change only what the message asks for. If a call is refused, tell the person in one sentence and answer without it.",
+    "The person has chosen a context above the chat input, and its tools are listed to you under its name (for Carbon Forge, the tools whose names begin with nuclear-notes.). They reach what the person keeps there, as the person, and nothing else. When a message touches something the person may have written down, search and read it with these tools within this turn before you answer, and name what you read so the person can open it. Read and change only what the message asks for. If a call is refused, tell the person in one sentence and answer without it.",
     true,
   ],
   [
@@ -643,7 +643,7 @@ function contextTeaching(contexts: ChosenContexts): string {
 
 // A conversation's chosen profile (AEGIS ADR-140 D12): read by the server as
 // the person, it is taught after everything else under one heading of its
-// own, naming the profile, then its default Nuclear Notes workspace and the
+// own, naming the profile, then its default Carbon Forge workspace and the
 // person's instructions for it, each only when the profile has one. Without a
 // profile chosen, or with one the server could not read, nothing is added.
 
@@ -666,7 +666,7 @@ function profileTeaching(profile: ChosenProfile | undefined): string {
   ];
   if (profile.notes_workspace) {
     sentences.push(
-      `When a Nuclear Notes call needs a workspace and the message names none, use this profile's workspace: ${profile.notes_workspace}.`,
+      `When a Carbon Forge call needs a workspace and the message names none, use this profile's workspace: ${profile.notes_workspace}.`,
     );
   }
   if (profile.instructions) {
@@ -682,7 +682,7 @@ function profileTeaching(profile: ChosenProfile | undefined): string {
 // the three sentences as the record gives them. The chosen contexts' and the
 // profile's own refusal line stands for every other refusal (D3 (c)).
 const CONNECTION_NEEDS_TEACHING = [
-  "When a message needs the person's mail, calendar, GitHub, Nuclear Notes or another connection and no tool of it is listed to you, call zaru.connection.needed with that family, tell the person in one sentence what to connect or choose and that the card above takes them there, and end your turn. Ask nothing else.",
+  "When a message needs the person's mail, calendar, GitHub, Carbon Forge or another connection and no tool of it is listed to you, call zaru.connection.needed with that family, tell the person in one sentence what to connect or choose and that the card above takes them there, and end your turn. Ask nothing else.",
   "When a call is refused because something is not connected, not chosen or not in the chosen profile, tell the person in one sentence what is missing and that the card above takes them there, and end your turn.",
   "Never say a connection is or is not made unless a tool's answer says so.",
 ]

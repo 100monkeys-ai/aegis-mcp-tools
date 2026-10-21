@@ -377,18 +377,24 @@ export function registerContextToolsTests(
     const mailbox = "The tools whose names begin with mail. reach the person's mailbox they chose above the chat input";
     const imapGeneric = "The tools whose names begin with imap.";
     const generic = "The tools whose names begin with zeta. reach the person's zeta connection as their credential allows.";
-    const nuclearNotes = "for Nuclear Notes, the tools whose names begin with nuclear-notes.";
+    // The product's name and the tool prefix are two strings: the name a
+    // person reads is Carbon Forge, the prefix a client calls stays.
+    const carbonForge = "for Carbon Forge,";
+    const contextPrefix = "the tools whose names begin with nuclear-notes.";
+    const taughtCarbonForge = (text: string) => text.includes(carbonForge) || text.includes(contextPrefix);
     const complaints: string[] = [];
+    const withCarbonForge = await prompt(JSON.stringify({ "nuclear-notes": [BINDING] }));
+    if (!withCarbonForge.includes(`(${carbonForge} ${contextPrefix})`)) complaints.push("nuclear-notes: Carbon Forge's paragraph not taught");
     const withGithub = await prompt(JSON.stringify({ github: [BINDING], "nuclear-notes": null }));
     if (!withGithub.includes(github)) complaints.push("github: GitHub's sentence not taught");
-    if (withGithub.includes(nuclearNotes)) complaints.push("github: Nuclear Notes' paragraph taught");
+    if (taughtCarbonForge(withGithub)) complaints.push("github: Carbon Forge's paragraph taught");
     const withImap = await prompt(JSON.stringify({ imap: [BINDING] }));
     if (!withImap.includes(mailbox)) complaints.push("imap: the mailbox sentence not taught");
     if (withImap.includes(imapGeneric)) complaints.push("imap: the generic sentence taught");
-    if (withImap.includes(nuclearNotes)) complaints.push("imap: Nuclear Notes' paragraph taught");
+    if (taughtCarbonForge(withImap)) complaints.push("imap: Carbon Forge's paragraph taught");
     const withZeta = await prompt(JSON.stringify({ zeta: [BINDING] }));
     if (!withZeta.includes(generic)) complaints.push("zeta: the generic sentence not taught");
-    if (withZeta.includes(nuclearNotes)) complaints.push("zeta: Nuclear Notes' paragraph taught");
+    if (taughtCarbonForge(withZeta)) complaints.push("zeta: Carbon Forge's paragraph taught");
     assert.deepEqual(complaints, []);
   });
 

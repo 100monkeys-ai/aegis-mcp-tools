@@ -1209,8 +1209,8 @@ const CONNECTION_FAMILIES: Readonly<
   "nuclear-notes": {
     contextKey: "nuclear-notes",
     toolPrefix: "nuclear-notes.",
-    absent: "Nuclear Notes",
-    own: "Your Nuclear Notes",
+    absent: "Carbon Forge",
+    own: "Your Carbon Forge",
   },
 };
 

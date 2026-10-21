@@ -441,7 +441,7 @@ function sharedPersonality(): string {
 /** Chat mode's own text: everything after the shared personality. */
 /** Zaru ADR-0070 D3 (b)'s three sentences, appended to every mode's prompt: shared teaching, not the chat mode's own text. */
 const CONNECTION_NEEDS_TEACHING = [
-  "When a message needs the person's mail, calendar, GitHub, Nuclear Notes or another connection and no tool of it is listed to you, call zaru.connection.needed with that family, tell the person in one sentence what to connect or choose and that the card above takes them there, and end your turn. Ask nothing else.",
+  "When a message needs the person's mail, calendar, GitHub, Carbon Forge or another connection and no tool of it is listed to you, call zaru.connection.needed with that family, tell the person in one sentence what to connect or choose and that the card above takes them there, and end your turn. Ask nothing else.",
   "When a call is refused because something is not connected, not chosen or not in the chosen profile, tell the person in one sentence what is missing and that the card above takes them there, and end your turn.",
   "Never say a connection is or is not made unless a tool's answer says so.",
 ]
@@ -670,16 +670,20 @@ test("W41: after calling zaru.mode the model waits for the person", () => {
 // ADR-143 S8c (the S8c test at the end of this file): the transcription line
 // gains S8c's sentence and its two rules on speakers after the audio_path
 // teaching (592 characters more in each);
+// every pin was re-measured for mcp-carbon-forge-facing-text: the first
+// missing-connection sentence names the product Carbon Forge where it named
+// the product's former name (one character fewer in each; with that one
+// name put back, every prompt is its earlier pin byte for byte);
 // every other pin stands as it was.
 const UNCHANGED_PROMPTS: Array<[string, () => ReturnType<typeof getZaruInit>, number, string]> = [
-  ["agentic", () => getZaruInit("agentic"), 21830, "9068f3c26ce0d38196836860e4a256b6639baa32d580e5498612eee89402fb3c"],
-  ["agentic+chat-uploads", () => getZaruInit("agentic", new Set(["chat-uploads"])), 25640, "ce8fd90c03d2e906748e8bfa39e1a0e6d643dad4b4463efbacc5a2fe47aa0713"],
-  ["workflow", () => getZaruInit("workflow"), 17642, "1c247bf2d6a75e385b8c2a72cfa5f5d8499546861e2484e3a1257352299505c1"],
-  ["workflow+chat-uploads", () => getZaruInit("workflow", new Set(["chat-uploads"])), 21452, "8f8867ee82c1db329f7271238561ce100b22c8a857e9bdc90ee9ef06f9309a15"],
-  ["execute", () => getZaruInit("execute"), 13311, "38c26aff0314050a56fed068f43bae639f791c3c02aaa8ce6fe5f36febc0bf46"],
-  ["live", () => getZaruInit("live", new Set(["live"]), "browser"), 9156, "8630ff490dfdb338538993ba9d8ac202f9375207c4a143d3ba5bc71d580cc68a"],
-  ["vibecode", () => getZaruInit("vibecode", new Set(["vibecode"]), "browser"), 12586, "6760042f288e3f03cc79c0071f51fd4cd81bf74d757ccd73b731737567c29d44"],
-  ["operator", () => getZaruInit("operator", new Set(), undefined, { isOperator: true, tier: "operator" }), 11847, "910e942b7045214c7c4ded686f81ec7097216c501e9932cb753fdb43c1f38b71"],
+  ["agentic", () => getZaruInit("agentic"), 21829, "2bb894fa9ae6f6b298ec13906db587df58c2aacdacd1a89fad59f3a7c54a162c"],
+  ["agentic+chat-uploads", () => getZaruInit("agentic", new Set(["chat-uploads"])), 25639, "fe2926cd75845136f45b5b0d3f66f4d1258d1af228e640299850b97f17b6cf84"],
+  ["workflow", () => getZaruInit("workflow"), 17641, "75b565863b66588098fa23675a2a5382265627bdbe3f648cc32d5a3957979c5a"],
+  ["workflow+chat-uploads", () => getZaruInit("workflow", new Set(["chat-uploads"])), 21451, "be5c84562a309677e580b8d9de2266db959b5592c44b9e439ab1ae12073edd2d"],
+  ["execute", () => getZaruInit("execute"), 13310, "5b21a1eee030717f48bd4c51092a4c8a4bc797bcf0f98a7843523a59baa082ee"],
+  ["live", () => getZaruInit("live", new Set(["live"]), "browser"), 9155, "9c0240e1c081d7133ff630f9f649d521737767c72244f391b9dc328b62c1f554"],
+  ["vibecode", () => getZaruInit("vibecode", new Set(["vibecode"]), "browser"), 12585, "710ead2d1823f3f504127bda366d44237c122cbfb09d72151eebbd3ece2e2c2a"],
+  ["operator", () => getZaruInit("operator", new Set(), undefined, { isOperator: true, tier: "operator" }), 11846, "933ac4d08c7ad47f7cac87c9b879eaba941d66b93c2fc8ba3e20640671b7822a"],
 ];
 
 test("W41: every other mode's prompt is unchanged byte for byte", () => {
@@ -839,9 +843,15 @@ test("ADR-0020 K5, K5a, K5b: Step 5 says a listed file already reaches the user,
 
 const CONTEXT_HEADING = "# THE PERSON'S CHOSEN CONTEXT";
 
-/** The teaching as it stood with one context type, before ADR-0058 D3. */
+/** The product name the person reads in the context sentence. */
+const CONTEXT_PRODUCT = "Carbon Forge";
+
+/** The tool prefix a client calls, which the product name does not change. */
+const CONTEXT_TOOL_PREFIX = "nuclear-notes.";
+
+/** The teaching as it stood with one context type, before ADR-0058 D3, the product's name aside. */
 const NUCLEAR_NOTES_TEACHING =
-  "\n\n# THE PERSON'S CHOSEN CONTEXT\n\nThe person has chosen a context above the chat input, and its tools are listed to you under its name (for Nuclear Notes, the tools whose names begin with nuclear-notes.). They reach what the person keeps there, as the person, and nothing else. When a message touches something the person may have written down, search and read it with these tools within this turn before you answer, and name what you read so the person can open it. Read and change only what the message asks for. If a call is refused, tell the person in one sentence and answer without it.";
+  `\n\n# THE PERSON'S CHOSEN CONTEXT\n\nThe person has chosen a context above the chat input, and its tools are listed to you under its name (for ${CONTEXT_PRODUCT}, the tools whose names begin with ${CONTEXT_TOOL_PREFIX}). They reach what the person keeps there, as the person, and nothing else. When a message touches something the person may have written down, search and read it with these tools within this turn before you answer, and name what you read so the person can open it. Read and change only what the message asks for. If a call is refused, tell the person in one sentence and answer without it.`;
 
 const NUCLEAR_NOTES_SENTENCE = NUCLEAR_NOTES_TEACHING.slice(`\n\n${CONTEXT_HEADING}\n\n`.length);
 
@@ -890,7 +900,7 @@ function taught(...sentences: string[]): string {
   return `\n\n${CONTEXT_HEADING}` + sentences.map((s) => `\n\n${s}`).join("");
 }
 
-test("D3: Nuclear Notes alone is taught exactly as before, once, at the end of every mode's prompt", () => {
+test("D3: Carbon Forge alone is taught exactly as before, once, at the end of every mode's prompt", () => {
   const complaints: string[] = [];
   for (const contexts of [{ "nuclear-notes": [BINDING_A] }, { "nuclear-notes": BINDING_A, github: null }] as Contexts[]) {
     for (const [mode, gained] of teachingsFor(contexts)) {
@@ -902,7 +912,7 @@ test("D3: Nuclear Notes alone is taught exactly as before, once, at the end of e
   assert.deepEqual(complaints, []);
 });
 
-test("D3: a chosen github binding appends GitHub's sentence once in every mode; none, null or Nuclear Notes alone does not", () => {
+test("D3: a chosen github binding appends GitHub's sentence once in every mode; none, null or Carbon Forge alone does not", () => {
   const complaints: string[] = [];
   for (const [mode, gained] of teachingsFor({ github: [BINDING_A] })) {
     if (gained !== taught(GITHUB_SENTENCE)) complaints.push(`${mode}: GitHub not taught alone, got ${JSON.stringify(gained.slice(0, 160))}`);
@@ -915,7 +925,7 @@ test("D3: a chosen github binding appends GitHub's sentence once in every mode; 
   assert.deepEqual(complaints, []);
 });
 
-test("D3: both types chosen teach both sentences under one heading, Nuclear Notes first", () => {
+test("D3: both types chosen teach both sentences under one heading, Carbon Forge first", () => {
   const complaints: string[] = [];
   // The header names GitHub first; the teaching's order is the table's.
   for (const [mode, gained] of teachingsFor({ github: [BINDING_B], "nuclear-notes": [BINDING_A] })) {
@@ -926,7 +936,7 @@ test("D3: both types chosen teach both sentences under one heading, Nuclear Note
   assert.deepEqual(complaints, []);
 });
 
-test("D3a: a server with no sentence of its own takes the generic sentence, never Nuclear Notes' paragraph, after the table's servers by name", () => {
+test("D3a: a server with no sentence of its own takes the generic sentence, never Carbon Forge's paragraph, after the table's servers by name", () => {
   const complaints: string[] = [];
   for (const [mode, gained] of teachingsFor({ zeta: [BINDING_A] })) {
     if (gained !== taught(genericSentence("zeta"))) {
@@ -976,7 +986,7 @@ test("3f: two chosen mailboxes teach the mailbox sentence without the '_context'
   assert.deepEqual(complaints, []);
 });
 
-test("3f: a mailbox beside two Nuclear Notes bindings teaches the '_context' sentence last", () => {
+test("3f: a mailbox beside two Carbon Forge bindings teaches the '_context' sentence last", () => {
   const complaints: string[] = [];
   for (const [mode, gained] of teachingsFor({ imap: [BINDING_C], "nuclear-notes": [BINDING_A, BINDING_B] })) {
     if (gained !== taught(NUCLEAR_NOTES_SENTENCE, MAILBOX_SENTENCE, SEVERAL_OF_ONE_KIND)) {
@@ -1054,7 +1064,7 @@ test("K12: a chosen caldav binding appends the calendar sentence once in every m
   assert.deepEqual(complaints, []);
 });
 
-test("K12: the calendar sentence follows the mailbox's in the fixed order, with Nuclear Notes', GitHub's and the mailbox's sentences byte for byte", () => {
+test("K12: the calendar sentence follows the mailbox's in the fixed order, with Carbon Forge's, GitHub's and the mailbox's sentences byte for byte", () => {
   const complaints: string[] = [];
   for (const [mode, gained] of teachingsFor({
     zeta: BINDING_C,
@@ -1074,7 +1084,7 @@ test("K12: the calendar sentence follows the mailbox's in the fixed order, with 
   assert.deepEqual(complaints, []);
 });
 
-test("K12: two chosen calendar accounts teach the calendar sentence without the '_context' sentence; beside two Nuclear Notes bindings it comes last", () => {
+test("K12: two chosen calendar accounts teach the calendar sentence without the '_context' sentence; beside two Carbon Forge bindings it comes last", () => {
   const complaints: string[] = [];
   for (const contexts of [{ caldav: [BINDING_A, BINDING_B] }, { caldav: [BINDING_A, BINDING_B], imap: [BINDING_C] }] as Contexts[]) {
     for (const [mode, gained] of teachingsFor(contexts)) {
@@ -1582,7 +1592,7 @@ test("C9: every mode's tool list holds the three conversation tools once each, r
 
 // AEGIS ADR-140 D12: a chosen profile, read by the server as the person,
 // appends its own heading after everything else, naming the profile, its
-// default Nuclear Notes workspace and the person's instructions for it, each
+// default Carbon Forge workspace and the person's instructions for it, each
 // only when the profile has one; with no profile every prompt is unchanged.
 
 const PROFILE_HEADING = "# THE PERSON'S CHOSEN PROFILE";

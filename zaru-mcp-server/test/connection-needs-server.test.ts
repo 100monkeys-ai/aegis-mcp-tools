@@ -278,7 +278,7 @@ test("Trigger 2 (b): each family names itself, and a remote server by its own na
   const cases: Array<[string, string, string, Record<string, string>]> = [
     ["calendar", "A calendar", "Your calendar", { caldav: BINDING_ID }],
     ["github", "GitHub", "Your GitHub", { github: BINDING_ID }],
-    ["nuclear-notes", "Nuclear Notes", "Your Nuclear Notes", { "nuclear-notes": BINDING_ID }],
+    ["nuclear-notes", "Carbon Forge", "Your Carbon Forge", { "nuclear-notes": BINDING_ID }],
     ["linear", "linear", "Your linear", { linear: BINDING_ID }],
   ];
   for (const [family, absent, present] of cases) {
@@ -328,7 +328,7 @@ test("Trigger 2 (b): a family that is not a family is refused and nothing is rea
 // ---------------------------------------------------------------------------
 
 const D3_SENTENCES = [
-  "When a message needs the person's mail, calendar, GitHub, Nuclear Notes or another connection and no tool of it is listed to you, call zaru.connection.needed with that family, tell the person in one sentence what to connect or choose and that the card above takes them there, and end your turn. Ask nothing else.",
+  "When a message needs the person's mail, calendar, GitHub, Carbon Forge or another connection and no tool of it is listed to you, call zaru.connection.needed with that family, tell the person in one sentence what to connect or choose and that the card above takes them there, and end your turn. Ask nothing else.",
   "When a call is refused because something is not connected, not chosen or not in the chosen profile, tell the person in one sentence what is missing and that the card above takes them there, and end your turn.",
   "Never say a connection is or is not made unless a tool's answer says so.",
 ];

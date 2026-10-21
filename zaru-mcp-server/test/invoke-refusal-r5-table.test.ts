@@ -6,7 +6,7 @@
 // `Retry-After: 5` because Cloudflare's proxy replaces an origin 502's body),
 // and the production report that found a row missing.
 //
-// The report (2026-10-08, about 17:14Z): Zaru Web called the Nuclear Notes
+// The report (2026-10-08, about 17:14Z): Zaru Web called the Carbon Forge
 // tool `nuclear-notes.pages.read` with `section` "K11"; the remote server
 // refused it, the orchestrator answered 422 REMOTE_TOOL_ERROR with the
 // server's own sentence (`aegis-orchestrator` 9907ce69,

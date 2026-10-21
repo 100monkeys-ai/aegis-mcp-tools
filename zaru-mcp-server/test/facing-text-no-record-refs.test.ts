@@ -161,7 +161,7 @@ test("facing text: every mode's system prompt names no decision record", () => {
     ["vibecode", getZaruInit("vibecode", new Set(["vibecode"]), "browser")],
     ["operator", getZaruInit("operator", new Set(), undefined, operator)],
   ];
-  // With every context sentence taught: Nuclear Notes', GitHub's, the
+  // With every context sentence taught: Carbon Forge's, GitHub's, the
   // mailbox's, the generic one, and the several-of-one-kind sentence.
   const contexts = {
     "nuclear-notes": ["3f2a9c1e-7b4d-4e8a-9c21-5d6e7f8a9b0c", "7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f"],
