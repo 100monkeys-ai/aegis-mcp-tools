@@ -1,6 +1,6 @@
 {
   "name": "@100monkeys-ai/zaru-mcp-server",
-  "version": "1.0.1-beta",
+  "version": "1.1.0-beta",
   "description": "Zaru MCP Server - Signed Envelope Attestation Layer gateway for Zaru",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
