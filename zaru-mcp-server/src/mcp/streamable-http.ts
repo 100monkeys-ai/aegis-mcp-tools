@@ -1663,7 +1663,7 @@ export function createMcpServerForUser(
   const mcpServer = new McpServer(
     {
       name: "zaru-mcp-server",
-      version: "1.1.0-beta",
+      version: "1.2.0-beta",
     },
     {
       capabilities: {
